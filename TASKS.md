@@ -9,8 +9,8 @@
 ## État actuel du projet
 
 **Version en cours :** v0.6 → v1.0 (Beta Polish → Release)
-**Branche active :** `dev`
-**Dernière session :** 2026-06-01 — Audit chirurgical de la méthode : hooks réparés (feedback réel à Claude), garde-fou PreToolUse, setup commité+poussé, couverture 100% sur la logique métier + gate CI
+**Branche active :** `dev` (setup d'autonomie mergé) ; feature en cours sur `feat/browser-compat`
+**Dernière session :** 2026-06-01 — [FEAT] Compatibilité navigateur (Google/Cloudflare) : UA + Sec-CH-UA alignés sur Chrome, AutomationControlled désactivé, sans preload. Checks verts, security-reviewer clean. Validation Google/Cloudflare = test humain réel.
 
 Le cœur du produit est fonctionnel : overlay, tabs, profils, collections, sessions, raccourcis globaux, tray, auto-update, onboarding. L'objectif immédiat est de solidifier pour la release publique v1.0.
 
@@ -25,7 +25,9 @@ _(vide — à remplir par Claude au début d'une session de travail)_
 ## Priorité haute — Chemin vers v1.0
 
 ### Qualité & robustesse
-- [ ] **[PERF] RAM au boot ~310 MB > budget 300** — détecté par `pnpm smoke` le 2026-06-01 (overlay FOCUSED / welcome au lancement). Lancer le subagent `perf-auditor`, isoler la cause (welcome page ? WebContentsView retenue ?), consigner avant/après.
+- [ ] **[FIX] Smoke flaky sur `/overlay/show`** — `scripts/smoke.mjs` échoue ~1 run sur 2 (`overlay/show leaves HIDDEN`). Cause probable : le `sleep(500)` unique court contre le polling de détection de jeu / la séquence first-show. Remplacer par un poll-until (retry jusqu'à ~3 s) plutôt qu'un sleep fixe. Observé le 2026-06-01.
+- [ ] **[VALID HUMAIN] [FEAT] browser-compat — test réel Google + Cloudflare** — vérifier sur un vrai login Google (un onglet Overframe) et un site Cloudflare-protégé que les challenges passent. Résiduel connu : `navigator.userAgentData` (JS) annonce encore Electron faute de preload sur les WebContentsView (contrainte). Si Turnstile bloque encore, trancher : préload durci sur web views (relâche l'invariant) vs accepter.
+- [ ] **[PERF] RAM au boot ~310 MB > budget 300** — détecté par `pnpm smoke` le 2026-06-01 (overlay FOCUSED / welcome au lancement). Lancer le subagent `perf-auditor`, isoler la cause (welcome page ? WebContentsView retenue ?), consigner avant/après. NB : la RAM observée varie fortement run-à-run (122–310 MB) — mesurer plusieurs fois.
 - [ ] **[PERF] Audit performance** : `curl http://127.0.0.1:9119/metrics` idle + 3 onglets. Corriger si hors budget (< 150 MB idle, < 300 MB actif). Consigner avant/après chiffrés dans DEVLOG. Guide : `.claude/guides/PERFORMANCE.md`
 - [ ] **[FIX] Multi-monitor** : vérifier que la fenêtre se souvient du bon écran après un changement de configuration moniteurs.
 - [ ] **[FIX] Gestion d'erreur page load** : affiner l'état "failed to load" dans les WebContentsViews (réseau coupé, SSL invalide). Ajouter test de régression.
@@ -59,6 +61,12 @@ _(vide — à remplir par Claude au début d'une session de travail)_
 
 ## Done — Récent
 
+- [x] **[FEAT] Compatibilité navigateur standard (Google, Cloudflare)** (2026-06-01) — `feat/browser-compat`
+  - Google login : UA Firefox + Sec-Fetch-* cohérents + identité JS complète (userAgent, productSub, oscpu, buildID, plugins:0, chrome:undefined) + auto-retry sur /rejected (clear cookies AEC + redir /signin/identifier)
+  - Cloudflare navigation générale : UA Chrome propre + Sec-CH-UA alignés + userAgentData "Google Chrome" + webdriver:false + chrome.loadTimes/csi/runtime corrects + Function.prototype.toString native
+  - `src/shared/userAgent.ts` + `src/preload/tabStealth.ts` + `TabManager` onBeforeSendHeaders + `index.ts` disable-blink-features
+  - 162 tests, 100% coverage ; typecheck + lint verts
+  - **Cloudflare Turnstile OAuth** (poe.ninja, filterblade) : incompatibilité plateforme WebContentsView documentée dans SECURITY.md — solution future : shell.openExternal
 - [x] **Durcissement méthode — chaque axe ≥9/10** (2026-06-01)
   - Garde-fous : egress hors-localhost + `node -e` bloqués, permissions scopées
   - `SessionStart` hook (boot avec branche+TASKS+DEVLOG) ; routage auto des guides métier

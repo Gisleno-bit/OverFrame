@@ -1,8 +1,16 @@
 import { WebContentsView, app, session, Menu, MenuItem, clipboard } from 'electron'
+import path from 'node:path'
 import { logConsole } from '../utils/devLogger'
 import { randomUUID } from 'node:crypto'
 import type { TabState, MemoryEntry, MemorySnapshot, DownloadEventState, SearchEngineId } from '@shared/types'
 import { DEFAULT_HOMEPAGE, SEARCH_ENGINES } from '@shared/types'
+import {
+  buildUserAgent,
+  buildClientHints,
+  mergeClientHintHeaders,
+  isGoogleSignInHost,
+  FIREFOX_UA,
+} from '@shared/userAgent'
 import { store } from '../store'
 import type { OverlayWindow } from '../windows/OverlayWindow'
 import { SCROLLBAR_CSS, SCROLLBAR_JS } from './tabs/scrollbar'
@@ -25,6 +33,8 @@ export class TabManager {
   private stoppedDuringHide = new Set<string>()
   private unloadedUrls = new Map<string, string>()
   private tabSession: Electron.Session
+  /** Dev capture: last raw request headers for specific hosts (debug only). */
+  lastDebugHeaders = new Map<string, Record<string, string>>()
   /** True while in CLICK_THROUGH state — used to suppress hover in tab webpages. */
   private isClickThrough = false
 
@@ -35,12 +45,70 @@ export class TabManager {
     // "persist:" prefix means cookies / localStorage / cache survive restarts.
     this.tabSession = session.fromPartition('persist:browser')
 
-    // Strip "Electron/x.x.x" from the UA — sites detect it and behave differently
-    // (Discord shows a compatibility banner, some CDNs return different assets).
+    // Present as stock desktop Chrome, not Electron. Two signals must agree or
+    // Google sign-in / Cloudflare flag the browser as tampered/automated:
+    //   1. the UA string (strip "Electron/x.x.x"), and
+    //   2. the Sec-CH-UA client-hint header (Electron sets it to "Electron";v="33").
+    // Both are derived from the same Chromium version so they never drift apart.
+    // navigator.webdriver and the AutomationControlled tell are handled at the
+    // app level in main/index.ts. See src/shared/userAgent.ts.
     const chromeVer = process.versions.chrome
-    this.tabSession.setUserAgent(
-      `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`
-    )
+    this.tabSession.setUserAgent(buildUserAgent(chromeVer))
+
+    const clientHints = buildClientHints(chromeVer)
+    this.tabSession.webRequest.onBeforeSendHeaders((details, callback) => {
+      let host = ''
+      try {
+        host = new URL(details.url).hostname
+      } catch {
+        /* keep host empty */
+      }
+
+      // Detect navigation requests via Sec-Fetch-Mode header rather than
+      // resourceType — resourceType:'mainFrame' is unreliable in WebContentsView
+      // (sometimes returns 'other'). Sec-Fetch-Mode:'navigate' is set by Chromium
+      // for all page navigations regardless of how the webRequest API classifies them.
+      const existingHeaders = details.requestHeaders as Record<string, string>
+      const fetchMode = Object.entries(existingHeaders)
+        .find(([k]) => k.toLowerCase() === 'sec-fetch-mode')?.[1] ?? ''
+      const isNav = fetchMode === 'navigate'
+
+      if (isGoogleSignInHost(host)) {
+        const headers: Record<string, string> = {}
+        for (const [k, v] of Object.entries(existingHeaders)) {
+          if (!/^sec-ch-ua/i.test(k)) headers[k] = v
+        }
+        // Firefox UA on all requests to Google sign-in hosts
+        headers['User-Agent'] = FIREFOX_UA
+        // Firefox never sends zstd — strip it from ALL requests (not just nav)
+        const ae = headers['Accept-Encoding'] ?? ''
+        if (ae.includes('zstd')) headers['Accept-Encoding'] = ae.replace(/,?\s*zstd/gi, '').replace(/^,\s*/, '')
+        if (headers['Accept-Language'] === 'fr') headers['Accept-Language'] = 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7'
+
+        if (isNav) {
+          // Full Firefox navigation fingerprint
+          headers['Sec-Fetch-User'] = '?1'
+          headers['Sec-Fetch-Mode'] = 'navigate'
+          headers['Sec-Fetch-Dest'] = 'document'
+          headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+          headers['Accept-Encoding'] = 'gzip, deflate, br'
+          delete headers['Upgrade-Insecure-Requests']
+        }
+        if (!app.isPackaged) this.lastDebugHeaders.set(host + (isNav ? ':nav' : ':sub'), headers)
+        callback({ requestHeaders: headers })
+        return
+      }
+
+      const merged = mergeClientHintHeaders(existingHeaders, clientHints)
+      // Inject Sec-Fetch-User: ?1 for page navigations — programmatic loadURL()
+      // never carries user activation, Chromium omits it, servers see it as a bot.
+      if (isNav) {
+        merged['Sec-Fetch-User'] = '?1'
+        if (merged['Accept-Language'] === 'fr') merged['Accept-Language'] = 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7'
+      }
+      if (!app.isPackaged && isNav) this.lastDebugHeaders.set(host + ':nav', merged)
+      callback({ requestHeaders: merged })
+    })
 
     // Permission prompts cannot appear in a frameless overlay — without handlers
     // the requests hang forever and block page initialisation (Discord, Ko-fi…).
@@ -167,11 +235,16 @@ export class TabManager {
     const view = new WebContentsView({
       webPreferences: {
         sandbox: true,
-        contextIsolation: true,
+        // contextIsolation is OFF *only* so the tabStealth preload can patch the
+        // page's main-world navigator (Google/Cloudflare read identity in JS, not
+        // just headers). sandbox:true still blocks all Node access, and the
+        // preload exposes nothing. See src/preload/tabStealth.ts + SECURITY.md.
+        contextIsolation: false,
         nodeIntegration: false,
         webSecurity: true,
         backgroundThrottling: false,
         session: this.tabSession,
+        preload: path.join(__dirname, '../preload/tabStealth.js'),
       },
     })
     // Prevent flash of white before the page paints its first frame.
@@ -202,6 +275,50 @@ export class TabManager {
     this.setActive(id)
 
     return initialState
+  }
+
+  /**
+   * Auto-recover from Google's "rejected" sign-in page. When Google detects a
+   * stale AEC cookie fingerprint from a previous Chrome-identity session, it
+   * redirects to /signin/rejected. We remove only the AEC (Anti-Abuse Context)
+   * cookie — not the session cookies — then reload to a clean sign-in URL.
+   * Max 2 auto-retries per tab to avoid infinite loops.
+   */
+  private readonly googleRetryCount = new Map<Electron.WebContents, number>()
+
+  private handleGoogleRejected(wc: Electron.WebContents, url: string): void {
+    let parsedPath = ''
+    try { parsedPath = new URL(url).pathname } catch { /* ignore */ }
+
+    // Only match the specific /signin/rejected path (not accountchooser or identifier)
+    if (!parsedPath.endsWith('/signin/rejected')) {
+      this.googleRetryCount.delete(wc)
+      return
+    }
+
+    const attempts = this.googleRetryCount.get(wc) ?? 0
+    if (attempts >= 2) return
+    this.googleRetryCount.set(wc, attempts + 1)
+
+    // Clear ALL Google sign-in cookies. When /rejected fires, the user is NOT
+    // in a valid logged-in state, so no session data is lost. Partial cookie
+    // removal (AEC only) still leaves fingerprint-bearing cookies (ACCOUNT_CHOOSER,
+    // GAPS, HSID…) AND breaks the accountchooser page that relies on AEC itself.
+    // Full clear + direct navigation to /signin/identifier (bypasses accountchooser
+    // which needs the full session context) is the only reliable reset.
+    void Promise.all([
+      this.tabSession.clearStorageData({ storages: ['cookies'], origin: 'https://accounts.google.com' }),
+      this.tabSession.clearStorageData({ storages: ['cookies'], origin: 'https://accounts.youtube.com' }),
+    ]).then(() =>
+      wc.loadURL('https://accounts.google.com/signin/identifier?hl=fr').catch(() => { /* did-fail-load */ })
+    )
+  }
+
+  /** Dev-only: evaluate JS in the active tab's main world and return the result. */
+  async devEval(js: string): Promise<unknown> {
+    const tab = this.activeTabId ? this.tabs.get(this.activeTabId) : null
+    if (!tab || tab.view.webContents.isDestroyed()) throw new Error('no active tab')
+    return tab.view.webContents.executeJavaScript(js, true)
   }
 
   close(id: string): void {
@@ -468,7 +585,10 @@ export class TabManager {
         canGoForward: wc.navigationHistory.canGoForward(),
       }),
     )
-    wc.on('did-navigate', (_e, url) => update({ url }))
+    wc.on('did-navigate', (_e, url) => {
+      update({ url })
+      this.handleGoogleRejected(wc, url)
+    })
     wc.on('did-navigate-in-page', (_e, url) => update({ url }))
     wc.on('page-title-updated', (_e, title) => {
       const currentUrl = tab.state.url

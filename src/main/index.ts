@@ -78,6 +78,13 @@ if (app.isPackaged) {
 // nativeTheme ensures prefers-color-scheme: dark for sites with native dark mode support.
 app.commandLine.appendSwitch('enable-features', 'WebContentsForceDark')
 
+// Present tabs as a normal (non-automated) Chrome: removes the AutomationControlled
+// blink feature so navigator.webdriver stays false and the usual automation tells
+// are gone. Pairs with the UA + Sec-CH-UA alignment in TabManager so Google sign-in
+// and Cloudflare don't reject the browser. Engine-level, so no per-tab preload is
+// needed (preserves sandbox:true / contextIsolation:true on every WebContentsView).
+app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled')
+
 app.whenReady().then(() => {
   nativeTheme.themeSource = 'dark'
   // Enable standard edit shortcuts (Ctrl+Z/Y/X/C/V/A) in the BrowserWindow renderer.

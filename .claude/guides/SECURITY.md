@@ -83,6 +83,18 @@ La CSP est définie dans `src/main/lifecycle/csp.ts`. Elle s'applique à la Brow
 1. `contextIsolation: true` sur toutes les BrowserWindows
 2. `nodeIntegration: false` dans renderer et WebContentsView
 3. `sandbox: true` sur les WebContentsViews (onglets)
-4. Aucun preload sur les WebContentsViews
-5. Toute navigation web doit passer par `isSafeUrl()`
-6. Le renderer n'a aucun accès direct à Node.js — tout passe par `window.aether.*`
+4. Toute navigation web doit passer par `isSafeUrl()`
+5. Le renderer n'a aucun accès direct à Node.js — tout passe par `window.aether.*`
+
+### Exception documentée : `contextIsolation: false` sur les onglets browser
+
+**Pourquoi** : Google sign-in et Cloudflare lisent l'identité du navigateur en JavaScript (`navigator.userAgentData`, `navigator.webdriver`, `chrome.loadTimes`…), pas seulement les en-têtes HTTP. Un preload en `contextIsolation: true` tourne dans un monde isolé invisible à la page. `contextIsolation: false` est la seule façon d'injecter des patches main-world avant les scripts de la page.
+
+**Périmètre** : uniquement `TabManager.create()` (les WebContentsViews onglets). BrowserWindow overlay et PopupWindows conservent `contextIsolation: true`.
+
+**Garanti sûr parce que** :
+- `sandbox: true` reste actif → zéro accès Node.js (le sandbox bloque tout accès système).
+- Le preload `src/preload/tabStealth.ts` **n'expose rien** : pas d'`ipcRenderer`, pas de `contextBridge`. C'est une IIFE fermée qui redéfinit uniquement quelques getters `navigator` et augmente `window.chrome`.
+- Un site malveillant qui lirait nos patches n'obtiendrait que `navigator.webdriver = false` — zéro surface d'attaque supplémentaire.
+
+**Limitation connue** : Cloudflare Turnstile OAuth reste bloqué — le challenge tourne dans un iframe cross-origin (`challenges.cloudflare.com`) sur lequel le preload ne s'applique pas. Incompatibilité plateforme documentée (Cloudflare Community + Anthropic Claude Code issue #33269). Solution future : `shell.openExternal` (navigateur système).

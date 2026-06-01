@@ -117,6 +117,74 @@ export function startDevServer({ overlay, tabs, profiles }: Deps): void {
       return
     }
 
+    // ── /session/clear-cookies?origin= — flush cookies for a domain (dev only) ────
+    if (url.startsWith('/session/clear-cookies')) {
+      const origin = new URL(url, 'http://x').searchParams.get('origin') ?? ''
+      try {
+        const tabSession = tabs['tabSession'] as Electron.Session | undefined
+        if (tabSession) {
+          if (origin) {
+            await tabSession.clearStorageData({ storages: ['cookies'], origin })
+          } else {
+            await tabSession.clearStorageData({ storages: ['cookies'] })
+          }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, origin: origin || 'all' }))
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: String(err) }))
+      }
+      return
+    }
+
+    // ── /debug/headers — captured outgoing request headers per host ──────────────
+    if (url === '/debug/headers') {
+      const out: Record<string, unknown> = {}
+      for (const [k, v] of tabs.lastDebugHeaders.entries()) out[k] = v
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify(out, null, 2))
+      return
+    }
+
+    // ── /tab/new?url= + /tab/navigate?url= + /tab/eval?js= ─────────────────────
+    // Dev-only tab driving for fingerprint debugging (Google login / Cloudflare).
+    if (url.startsWith('/tab/new?') || url.startsWith('/tab/navigate?')) {
+      const target = new URL(url, 'http://x').searchParams.get('url')
+      if (!target) {
+        res.writeHead(400, { 'Content-Type': 'text/plain' })
+        res.end('missing ?url=')
+        return
+      }
+      if (url.startsWith('/tab/new?')) {
+        tabs.create(target)
+      } else {
+        const id = tabs.getActiveId()
+        if (id) tabs.navigate(id, target)
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ ok: true, url: target, activeId: tabs.getActiveId() }))
+      return
+    }
+
+    if (url.startsWith('/tab/eval?')) {
+      const js = new URL(url, 'http://x').searchParams.get('js')
+      if (!js) {
+        res.writeHead(400, { 'Content-Type': 'text/plain' })
+        res.end('missing ?js=')
+        return
+      }
+      try {
+        const result = await tabs.devEval(js)
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' })
+        res.end(JSON.stringify({ ok: true, result }, null, 2))
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: false, error: String(err) }))
+      }
+      return
+    }
+
     // ── /log/:source ──────────────────────────────────────────────────────────
     const logMatch = url.match(/^\/log\/(renderer|webview|crash)(\?lines=(\d+))?$/)
     if (logMatch) {
