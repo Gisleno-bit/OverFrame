@@ -1,4 +1,4 @@
-import { ipcMain, shell, app, dialog, autoUpdater, webContents } from 'electron'
+import { ipcMain, shell, app, dialog, autoUpdater, webContents, nativeTheme } from 'electron'
 import { spawn } from 'child_process'
 import fs from 'fs'
 import path from 'path'
@@ -10,8 +10,8 @@ import type { ProfileManager } from '../managers/ProfileManager'
 import type { CollectionsManager } from '../managers/CollectionsManager'
 import type { ShortcutManager } from '../managers/ShortcutManager'
 import type { OverlayWindow } from '../windows/OverlayWindow'
-import { DEFAULT_HOMEPAGE, DEFAULT_SHORTCUTS } from '@shared/types'
-import type { BookmarkPopupPayload, AchievementPayload, CollectionsPopupPayload, LinkOverflowPayload, MemoryPopupPayload, Settings, Shortcuts } from '@shared/types'
+import { DEFAULT_HOMEPAGE, DEFAULT_SHORTCUTS, BROWSER_IDENTITIES, UI_SCALE_ZOOM } from '@shared/types'
+import type { BookmarkPopupPayload, AchievementPayload, CollectionsPopupPayload, LinkOverflowPayload, MemoryPopupPayload, Settings, Shortcuts, BrowserIdentity, UIScale } from '@shared/types'
 import { getVisibleGames } from '../utils/getVisibleGames'
 import { crashLogPath, ensureLogsDir, logCrash } from '../utils/crashLogger'
 import { logConsole, readLog } from '../utils/devLogger'
@@ -119,6 +119,9 @@ const SETTINGS_ALLOWLIST: ReadonlySet<keyof Settings> = new Set([
   'searchEngine',
   'autoCreateProfiles',
   'autoSwitchProfile',
+  'browserIdentity',
+  'applyDarkMode',
+  'uiScale',
 ])
 
 /** User-configurable string list caps — prevents storing pathological lists. */
@@ -426,6 +429,17 @@ export function registerIpcHandlers(deps: Deps): void {
     }
     if (key === 'startWithWindows' && typeof value === 'boolean') {
       setStartupWithWindows(value)
+    }
+    if (key === 'browserIdentity') {
+      const def = BROWSER_IDENTITIES[(value as BrowserIdentity) ?? 'edge']
+      tabs.setUserAgent(def?.ua ?? '')
+    }
+    if (key === 'applyDarkMode') {
+      nativeTheme.themeSource = (value !== false) ? 'dark' : 'system'
+    }
+    if (key === 'uiScale') {
+      const factor = UI_SCALE_ZOOM[(value as UIScale) ?? 'normal'] ?? 1.0
+      if (!overlay.win.isDestroyed()) overlay.win.webContents.setZoomFactor(factor)
     }
     return next
   })

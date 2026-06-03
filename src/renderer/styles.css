@@ -8,7 +8,7 @@
     --background:           0 0%  8%;   /* #141414  base carbone        */
     --foreground:           0 0% 92%;   /* #EBEBEB                       */
     --muted:                0 0% 13%;   /* #212121  surface elevée       */
-    --muted-foreground:     0 0% 46%;   /* #757575                       */
+    --muted-foreground:     0 0% 55%;   /* #8C8C8C  5.3:1 on #141414 — WCAG AA ✓ */
 
     /* ── Bordures / inputs ───────────────────────────── */
     --border:               0 0% 19%;   /* #303030                       */

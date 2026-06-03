@@ -8,6 +8,8 @@ import {
   Heart,
   MemoryStick,
   Settings as SettingsIcon,
+  Loader2,
+  Globe,
 } from 'lucide-react'
 import { DiscordIcon } from './icons/DiscordIcon'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -151,18 +153,25 @@ export function AddressBar(): JSX.Element {
 
       {/* Address input */}
       <form onSubmit={handleSubmit} className="flex-1 min-w-0 relative mx-1" role="search">
-        {activeTab?.favicon && (
-          <img
-            src={activeTab.favicon}
-            alt=""
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 shrink-0 pointer-events-none"
-          />
-        )}
+        {/* Favicon / loading indicator */}
+        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 flex items-center justify-center pointer-events-none">
+          {activeTab?.isLoading ? (
+            <Loader2 size={13} className="animate-spin text-muted-foreground/60" aria-hidden="true" />
+          ) : activeTab?.favicon ? (
+            <img src={activeTab.favicon} alt="" className="h-4 w-4 favicon-pop" />
+          ) : activeTab ? (
+            <Globe size={12} className="text-muted-foreground/40" aria-hidden="true" />
+          ) : null}
+        </span>
         <Input
           aria-label="Address bar"
           data-address-input
           value={value}
           onChange={(e) => setValue(e.target.value)}
+          onFocus={(e) => {
+            e.currentTarget.select()
+            urlSelectedRef.current = true
+          }}
           onMouseDown={(e) => {
             if (!urlSelectedRef.current) {
               e.preventDefault()
@@ -179,7 +188,7 @@ export function AddressBar(): JSX.Element {
             el.setSelectionRange(el.value.length, el.value.length)
           }}
           placeholder="Search or enter URL"
-          className={cn('h-8 w-full text-[12px] pr-8 bg-background border-border/60', activeTab?.favicon ? 'pl-8' : 'pl-3')}
+          className={cn('h-8 w-full text-[12px] pr-8 bg-background border-border/60', activeTab ? 'pl-8' : 'pl-3')}
         />
         <button
           type="button"

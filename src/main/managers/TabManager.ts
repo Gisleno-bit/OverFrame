@@ -14,6 +14,17 @@ import {
 
 export type { TabEvent } from './tabs/types'
 
+/** Google's favicon service — returns a 32×32 PNG for any public hostname. */
+function faviconUrl(url: string): string | null {
+  try {
+    const { hostname, protocol } = new URL(url)
+    if (!hostname || protocol === 'about:') return null
+    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=32`
+  } catch {
+    return null
+  }
+}
+
 export class TabManager {
   private tabs = new Map<string, ManagedTab>()
   private displayOrder: string[] = []
@@ -22,8 +33,10 @@ export class TabManager {
   private recentPopups = new Map<string, number>()
   private stoppedDuringHide = new Set<string>()
   private unloadedUrls = new Map<string, string>()
+  private _userAgent = ''
 
-  constructor(private overlay: OverlayWindow) {
+  constructor(private overlay: OverlayWindow, userAgent = '') {
+    this._userAgent = userAgent
     // Relayout the active WebView2 tab whenever the overlay is resized
     // or chrome/panel dimensions change.
     this.overlay.win.on('resize', () => this.relayoutActive())
@@ -80,7 +93,7 @@ export class TabManager {
     // WebView2View embeds a real Edge WebView2 control as a child HWND of the
     // overlay window. No tabStealth or UA spoofing needed — Edge passes CF natively.
     const bounds = this.overlay.getTabContentBounds()
-    const view = new WebView2View(this.overlay.win, '')
+    const view = new WebView2View(this.overlay.win, this._userAgent)
     view.init(bounds.x, bounds.y, bounds.width, bounds.height)
     view.setVisible(false) // hidden until setActive()
 
@@ -130,7 +143,8 @@ export class TabManager {
     )
 
     view.on('did-navigate', (url: unknown) => {
-      if (typeof url === 'string') update({ url })
+      if (typeof url !== 'string') return
+      update({ url, favicon: faviconUrl(url) })
     })
 
     view.on('page-title-updated', (title: unknown) => {
@@ -168,6 +182,14 @@ export class TabManager {
     view.on('download', (event: unknown) => {
       this.emit({ type: 'download', event: event as DownloadEvent })
     })
+  }
+
+  /** Update the User-Agent for all existing tabs and future tabs. */
+  setUserAgent(ua: string): void {
+    this._userAgent = ua
+    for (const tab of this.tabs.values()) {
+      tab.view.setUserAgent(ua)
+    }
   }
 
   // ── Close ────────────────────────────────────────────────────────────────────

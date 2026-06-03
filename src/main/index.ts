@@ -23,7 +23,7 @@ import { registerIpcHandlers } from './ipc/handlers'
 import { installChromeCsp } from './lifecycle/csp'
 import { buildShortcutActions } from './lifecycle/shortcutActions'
 import { IPC } from '@shared/ipc'
-import { DEFAULT_SHORTCUTS, DEFAULT_PROFILE_ID, type Shortcuts } from '@shared/types'
+import { DEFAULT_SHORTCUTS, DEFAULT_PROFILE_ID, BROWSER_IDENTITIES, UI_SCALE_ZOOM, type Shortcuts } from '@shared/types'
 import { logCrash } from './utils/crashLogger'
 import { startDevServer } from './utils/devServer'
 
@@ -73,13 +73,11 @@ if (app.isPackaged) {
   updateElectronApp({ updateInterval: '1 hour', notifyUser: false })
 }
 
-// Force dark mode for all browser tab content.
-// WebContentsForceDark uses Chromium's auto-dark algorithm (already-dark pages are skipped).
-// nativeTheme ensures prefers-color-scheme: dark for sites with native dark mode support.
-app.commandLine.appendSwitch('enable-features', 'WebContentsForceDark')
-
 app.whenReady().then(() => {
-  nativeTheme.themeSource = 'dark'
+  // Apply dark mode for web content based on stored setting (default: on).
+  // This makes Edge WebView2 tabs serve dark-mode content to sites that support it.
+  const initialSettings = store.get('settings')
+  nativeTheme.themeSource = (initialSettings.applyDarkMode ?? true) ? 'dark' : 'system'
   // Enable standard edit shortcuts (Ctrl+Z/Y/X/C/V/A) in the BrowserWindow renderer.
   Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'editMenu' }]))
 
@@ -98,7 +96,14 @@ app.whenReady().then(() => {
   overlay = new OverlayWindow(active.windowBounds)
   overlay.setOpacity(active.opacity)
   popup = new PopupWindow(overlay.win)
-  tabs = new TabManager(overlay)
+  const startSettings = store.get('settings')
+  const initialUA = BROWSER_IDENTITIES[startSettings.browserIdentity ?? 'edge']?.ua ?? ''
+  tabs = new TabManager(overlay, initialUA)
+  // Apply UI scale to the overlay chrome.
+  const initialZoom = UI_SCALE_ZOOM[startSettings.uiScale ?? 'normal'] ?? 1.0
+  overlay.win.webContents.on('did-finish-load', () => {
+    if (!overlay!.win.isDestroyed()) overlay!.win.webContents.setZoomFactor(initialZoom)
+  })
   sessionManager = new SessionManager(tabs)
 
   store.set('sessionDirty', true)

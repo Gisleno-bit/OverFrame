@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 import { Heart, Palette, Keyboard, Gamepad2, Globe, Cpu, Info, ExternalLink, Mail, Trash2, FolderOpen } from 'lucide-react'
 import { DiscordIcon } from './icons/DiscordIcon'
-import type { Settings } from '@shared/types'
-import { DEFAULT_SHORTCUTS, MIN_OPACITY } from '@shared/types'
+import type { Settings, BrowserIdentity, UIScale } from '@shared/types'
+import { DEFAULT_SHORTCUTS, MIN_OPACITY, BROWSER_IDENTITIES } from '@shared/types'
 import type { ShortcutId, Shortcuts } from '@shared/types'
 import { useAppStore } from '../store/appStore'
 import { Button } from './ui/Button'
@@ -12,7 +12,7 @@ import { ShortcutsSection } from './settings/ShortcutsSection'
 import { GameDetectionSection } from './settings/GameDetectionSection'
 import { cn } from '../lib/cn'
 
-type TabId = 'appearance' | 'shortcuts' | 'detection' | 'system' | 'about'
+type TabId = 'appearance' | 'browser' | 'shortcuts' | 'detection' | 'system' | 'about'
 
 interface TabDef {
   id: TabId
@@ -22,6 +22,7 @@ interface TabDef {
 
 const TABS: readonly TabDef[] = [
   { id: 'appearance', label: 'Appearance',     Icon: Palette },
+  { id: 'browser',    label: 'Browser',        Icon: Globe },
   { id: 'shortcuts',  label: 'Shortcuts',      Icon: Keyboard },
   { id: 'detection',  label: 'Game detection', Icon: Gamepad2 },
   { id: 'system',     label: 'System',         Icon: Cpu },
@@ -158,6 +159,102 @@ export function SettingsPanel(): JSX.Element {
                 />
               </Check>
             </Section>
+          )}
+
+          {active === 'browser' && (
+            <>
+              {/* ── Browser identity ──────────────────────────── */}
+              <Section
+                title="Browser identity"
+                description="The User-Agent string presented to websites. Edge is recommended — it passes Cloudflare and Google sign-in natively. Chrome and Firefox are cosmetic overrides only; fingerprinting still reveals the real engine."
+              >
+                <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Browser identity">
+                  {(Object.keys(BROWSER_IDENTITIES) as BrowserIdentity[]).map((id) => {
+                    const def = BROWSER_IDENTITIES[id]
+                    const checked = (settings.browserIdentity ?? 'edge') === id
+                    return (
+                      <label
+                        key={id}
+                        className={cn(
+                          'flex items-start gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-colors',
+                          checked
+                            ? 'border-primary/60 bg-primary/8'
+                            : 'border-border hover:border-border/80 hover:bg-muted/40',
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="browserIdentity"
+                          value={id}
+                          checked={checked}
+                          onChange={() => void updateSetting('browserIdentity', id as BrowserIdentity)}
+                          className="mt-0.5 shrink-0 accent-primary"
+                        />
+                        <div className="min-w-0">
+                          <p className={cn('text-[12px] font-medium', checked ? 'text-foreground' : 'text-foreground/80')}>
+                            {def.label}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                            {def.description}
+                          </p>
+                        </div>
+                      </label>
+                    )
+                  })}
+                </div>
+              </Section>
+
+              {/* ── Dark mode ────────────────────────────────── */}
+              <Section
+                title="Dark mode"
+                description="When enabled, websites with dark-mode support will render in dark mode. Sites that don't support it are unaffected."
+              >
+                <Check
+                  label="Apply dark mode to websites"
+                  hint="Sets system dark mode so Edge WebView2 tabs serve dark content for supported sites."
+                >
+                  <input
+                    type="checkbox"
+                    checked={settings.applyDarkMode ?? true}
+                    onChange={(e) => void updateSetting('applyDarkMode', e.target.checked)}
+                  />
+                </Check>
+              </Section>
+
+              {/* ── UI scale ─────────────────────────────────── */}
+              <Section
+                title="Interface scale"
+                description="Zoom level applied to the overlay UI. Use Large on high-DPI or large monitors."
+              >
+                <div className="flex gap-2" role="radiogroup" aria-label="Interface scale">
+                  {([['compact', 'Compact', '90%'], ['normal', 'Normal', '100%'], ['large', 'Large', '120%']] as const).map(([val, label, pct]) => {
+                    const checked = (settings.uiScale ?? 'normal') === val
+                    return (
+                      <label
+                        key={val}
+                        className={cn(
+                          'flex-1 flex flex-col items-center gap-1 px-2 py-2 rounded-lg border cursor-pointer transition-colors text-center',
+                          checked
+                            ? 'border-primary/60 bg-primary/8 text-foreground'
+                            : 'border-border hover:border-border/80 hover:bg-muted/40 text-muted-foreground',
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="uiScale"
+                          value={val}
+                          checked={checked}
+                          onChange={() => void updateSetting('uiScale', val as UIScale)}
+                          className="sr-only"
+                        />
+                        <span className="text-[13px] font-semibold">{pct}</span>
+                        <span className="text-[10px]">{label}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </Section>
+            </>
           )}
 
           {active === 'shortcuts' && (
