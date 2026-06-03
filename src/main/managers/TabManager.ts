@@ -1,19 +1,9 @@
-import { WebContentsView, app, session, Menu, MenuItem, clipboard } from 'electron'
-import path from 'node:path'
-import { logConsole } from '../utils/devLogger'
+import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
-import type { TabState, MemoryEntry, MemorySnapshot, DownloadEventState, SearchEngineId } from '@shared/types'
-import { DEFAULT_HOMEPAGE, SEARCH_ENGINES } from '@shared/types'
-import {
-  buildUserAgent,
-  buildClientHints,
-  mergeClientHintHeaders,
-  isGoogleSignInHost,
-  FIREFOX_UA,
-} from '@shared/userAgent'
-import { store } from '../store'
+import type { TabState, MemorySnapshot, DownloadEvent } from '@shared/types'
+import { DEFAULT_HOMEPAGE } from '@shared/types'
 import type { OverlayWindow } from '../windows/OverlayWindow'
-import { SCROLLBAR_CSS, SCROLLBAR_JS } from './tabs/scrollbar'
+import { WebView2View } from './tabs/WebView2View'
 import {
   POPUP_DEDUP_EVICT_THRESHOLD,
   POPUP_DEDUP_MAX_AGE_MS,
@@ -32,164 +22,26 @@ export class TabManager {
   private recentPopups = new Map<string, number>()
   private stoppedDuringHide = new Set<string>()
   private unloadedUrls = new Map<string, string>()
-  private tabSession: Electron.Session
-  /** Dev capture: last raw request headers for specific hosts (debug only). */
-  lastDebugHeaders = new Map<string, Record<string, string>>()
-  /** True while in CLICK_THROUGH state — used to suppress hover in tab webpages. */
-  private isClickThrough = false
 
   constructor(private overlay: OverlayWindow) {
-    // Dedicated persistent session for browser tabs.
-    // Isolated from defaultSession (used by the overlay BrowserWindow + CSP hook)
-    // so tab traffic never touches our chrome-layer webRequest interceptors.
-    // "persist:" prefix means cookies / localStorage / cache survive restarts.
-    this.tabSession = session.fromPartition('persist:browser')
-
-    // Present as stock desktop Chrome, not Electron. Two signals must agree or
-    // Google sign-in / Cloudflare flag the browser as tampered/automated:
-    //   1. the UA string (strip "Electron/x.x.x"), and
-    //   2. the Sec-CH-UA client-hint header (Electron sets it to "Electron";v="33").
-    // Both are derived from the same Chromium version so they never drift apart.
-    // navigator.webdriver and the AutomationControlled tell are handled at the
-    // app level in main/index.ts. See src/shared/userAgent.ts.
-    const chromeVer = process.versions.chrome
-    this.tabSession.setUserAgent(buildUserAgent(chromeVer))
-
-    const clientHints = buildClientHints(chromeVer)
-    this.tabSession.webRequest.onBeforeSendHeaders((details, callback) => {
-      let host = ''
-      try {
-        host = new URL(details.url).hostname
-      } catch {
-        /* keep host empty */
-      }
-
-      // Detect navigation requests via Sec-Fetch-Mode header rather than
-      // resourceType — resourceType:'mainFrame' is unreliable in WebContentsView
-      // (sometimes returns 'other'). Sec-Fetch-Mode:'navigate' is set by Chromium
-      // for all page navigations regardless of how the webRequest API classifies them.
-      const existingHeaders = details.requestHeaders as Record<string, string>
-      const fetchMode = Object.entries(existingHeaders)
-        .find(([k]) => k.toLowerCase() === 'sec-fetch-mode')?.[1] ?? ''
-      const isNav = fetchMode === 'navigate'
-
-      if (isGoogleSignInHost(host)) {
-        const headers: Record<string, string> = {}
-        for (const [k, v] of Object.entries(existingHeaders)) {
-          if (!/^sec-ch-ua/i.test(k)) headers[k] = v
-        }
-        // Firefox UA on all requests to Google sign-in hosts
-        headers['User-Agent'] = FIREFOX_UA
-        // Firefox never sends zstd — strip it from ALL requests (not just nav)
-        const ae = headers['Accept-Encoding'] ?? ''
-        if (ae.includes('zstd')) headers['Accept-Encoding'] = ae.replace(/,?\s*zstd/gi, '').replace(/^,\s*/, '')
-        if (headers['Accept-Language'] === 'fr') headers['Accept-Language'] = 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7'
-
-        if (isNav) {
-          // Full Firefox navigation fingerprint
-          headers['Sec-Fetch-User'] = '?1'
-          headers['Sec-Fetch-Mode'] = 'navigate'
-          headers['Sec-Fetch-Dest'] = 'document'
-          headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
-          headers['Accept-Encoding'] = 'gzip, deflate, br'
-          delete headers['Upgrade-Insecure-Requests']
-        }
-        if (!app.isPackaged) this.lastDebugHeaders.set(host + (isNav ? ':nav' : ':sub'), headers)
-        callback({ requestHeaders: headers })
-        return
-      }
-
-      const merged = mergeClientHintHeaders(existingHeaders, clientHints)
-      // Inject Sec-Fetch-User: ?1 for page navigations — programmatic loadURL()
-      // never carries user activation, Chromium omits it, servers see it as a bot.
-      if (isNav) {
-        merged['Sec-Fetch-User'] = '?1'
-        if (merged['Accept-Language'] === 'fr') merged['Accept-Language'] = 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7'
-      }
-      if (!app.isPackaged && isNav) this.lastDebugHeaders.set(host + ':nav', merged)
-      callback({ requestHeaders: merged })
-    })
-
-    // Permission prompts cannot appear in a frameless overlay — without handlers
-    // the requests hang forever and block page initialisation (Discord, Ko-fi…).
-    // setPermissionRequestHandler  → async prompt (e.g. Notification.requestPermission())
-    // setPermissionCheckHandler    → sync query (navigator.permissions.query()) — equally critical.
-    const GRANTED_PERMISSIONS = new Set([
-      'notifications', 'fullscreen', 'pointerLock',
-      'clipboard-read', 'clipboard-write', 'clipboard-sanitized-write',
-      'mediaKeySystem', 'background-sync', 'persistent-storage',
-    ])
-    this.tabSession.setPermissionRequestHandler((_wc, permission, callback) => {
-      callback(GRANTED_PERMISSIONS.has(permission))
-    })
-    this.tabSession.setPermissionCheckHandler((_wc, permission) => {
-      return GRANTED_PERMISSIONS.has(permission)
-    })
-
-    // Suppress :hover / pointer effects in tab pages while in CT mode so
-    // the user doesn't see hover UI (YouTube controls, etc.) bleed through.
-    this.overlay.onStateChange((state) => {
-      const entering = state === 'CLICK_THROUGH'
-      if (entering === this.isClickThrough) return
-      this.isClickThrough = entering
-      for (const tab of this.tabs.values()) {
-        this.applyClickThroughCSS(tab.view.webContents, entering)
-      }
-    })
-
-    // Wire download tracking at session level (covers all tabs)
-    this.tabSession.on('will-download', (_event, item) => {
-      const id = randomUUID()
-      const filename = item.getFilename()
-      const url = item.getURL()
-      this.emit({
-        type: 'download',
-        event: { id, filename, url, receivedBytes: 0, totalBytes: item.getTotalBytes(), state: 'started' },
-      })
-      item.on('updated', (_e, state) => {
-        this.emit({
-          type: 'download',
-          event: {
-            id, filename, url,
-            receivedBytes: item.getReceivedBytes(),
-            totalBytes: item.getTotalBytes(),
-            state: state as DownloadEventState,
-          },
-        })
-      })
-      item.on('done', (_e, state) => {
-        this.emit({
-          type: 'download',
-          event: {
-            id, filename, url,
-            receivedBytes: item.getReceivedBytes(),
-            totalBytes: item.getTotalBytes(),
-            state: state as DownloadEventState,
-          },
-        })
-      })
-    })
+    // Relayout the active WebView2 tab whenever the overlay is resized
+    // or chrome/panel dimensions change.
+    this.overlay.win.on('resize', () => this.relayoutActive())
+    this.overlay.onLayoutChange = () => this.relayoutActive()
   }
+
+  // ── Listeners ────────────────────────────────────────────────────────────────
 
   on(cb: (e: TabEvent) => void): () => void {
     this.listeners.add(cb)
-    return () => {
-      this.listeners.delete(cb)
-    }
+    return () => { this.listeners.delete(cb) }
   }
 
   private emit(e: TabEvent): void {
     for (const cb of this.listeners) cb(e)
   }
 
-  /** Inject or remove a <style> that blocks pointer events in a tab page during CT mode. */
-  private applyClickThroughCSS(wc: Electron.WebContents, enable: boolean): void {
-    if (wc.isDestroyed()) return
-    const js = enable
-      ? `if(!document.getElementById('__of_ct')){const s=document.createElement('style');s.id='__of_ct';s.textContent='html,html *{pointer-events:none!important}';(document.head??document.documentElement).appendChild(s)}`
-      : `document.getElementById('__of_ct')?.remove()`
-    void wc.executeJavaScript(js).catch(() => {})
-  }
+  // ── Accessors ─────────────────────────────────────────────────────────────────
 
   getAll(): TabState[] {
     return this.getOrderedIds().map((id) => this.tabs.get(id)!.state)
@@ -202,53 +54,35 @@ export class TabManager {
     return Array.from(this.tabs.keys())
   }
 
+  getActiveId(): string | null { return this.activeTabId }
+
   reorder(ids: string[]): void {
     this.displayOrder = ids.filter((id) => this.tabs.has(id))
   }
 
-  getMemoryUsage(): MemoryEntry[] {
-    return this.getMemorySnapshot().tabs
-  }
-
   getMemorySnapshot(): MemorySnapshot {
+    // WebView2 tabs run in Edge's own process — not visible via app.getAppMetrics().
+    // Still report Electron-process memory (main + overlay renderer) so the smoke
+    // test and memory widget show a meaningful non-zero value.
     const metrics = app.getAppMetrics()
-    const tabPids = new Set<number>()
-    const tabs = Array.from(this.tabs.entries()).map(([id, tab]) => {
-      const pid = tab.view.webContents.getOSProcessId()
-      tabPids.add(pid)
-      const metric = metrics.find((m) => m.pid === pid)
-      const privateKb = metric?.memory.privateBytes ?? metric?.memory.workingSetSize ?? 0
-      return { tabId: id, privateKb }
-    })
-    const appKb = metrics
-      .filter((m) => !tabPids.has(m.pid))
-      .reduce((sum, m) => sum + (m.memory.privateBytes ?? m.memory.workingSetSize ?? 0), 0)
+    const appKb = metrics.reduce(
+      (sum, m) => sum + (m.memory.privateBytes ?? m.memory.workingSetSize ?? 0), 0
+    )
+    const tabs = Array.from(this.tabs.keys()).map((id) => ({ tabId: id, privateKb: 0 }))
     return { tabs, appKb }
   }
 
-  getActiveId(): string | null {
-    return this.activeTabId
-  }
+  // ── Create ───────────────────────────────────────────────────────────────────
 
   create(url: string): TabState {
     const id = randomUUID()
-    const view = new WebContentsView({
-      webPreferences: {
-        sandbox: true,
-        // contextIsolation is OFF *only* so the tabStealth preload can patch the
-        // page's main-world navigator (Google/Cloudflare read identity in JS, not
-        // just headers). sandbox:true still blocks all Node access, and the
-        // preload exposes nothing. See src/preload/tabStealth.ts + SECURITY.md.
-        contextIsolation: false,
-        nodeIntegration: false,
-        webSecurity: true,
-        backgroundThrottling: false,
-        session: this.tabSession,
-        preload: path.join(__dirname, '../preload/tabStealth.js'),
-      },
-    })
-    // Prevent flash of white before the page paints its first frame.
-    view.setBackgroundColor('#141414')
+
+    // WebView2View embeds a real Edge WebView2 control as a child HWND of the
+    // overlay window. No tabStealth or UA spoofing needed — Edge passes CF natively.
+    const bounds = this.overlay.getTabContentBounds()
+    const view = new WebView2View(this.overlay.win, '')
+    view.init(bounds.x, bounds.y, bounds.width, bounds.height)
+    view.setVisible(false) // hidden until setActive()
 
     const isHomepage = url === DEFAULT_HOMEPAGE || url === DEFAULT_HOMEPAGE + '/'
     const initialState: TabState = {
@@ -267,69 +101,83 @@ export class TabManager {
     this.tabs.set(id, tab)
     this.displayOrder.push(id)
 
-    this.wireWebContents(tab)
-
-    void view.webContents.loadURL(url).catch(() => {
-      /* surfaced via did-fail-load */
-    })
+    this.wireWebView2(tab)
+    view.loadURL(url)
     this.setActive(id)
 
     return initialState
   }
 
-  /**
-   * Auto-recover from Google's "rejected" sign-in page. When Google detects a
-   * stale AEC cookie fingerprint from a previous Chrome-identity session, it
-   * redirects to /signin/rejected. We remove only the AEC (Anti-Abuse Context)
-   * cookie — not the session cookies — then reload to a clean sign-in URL.
-   * Max 2 auto-retries per tab to avoid infinite loops.
-   */
-  private readonly googleRetryCount = new Map<Electron.WebContents, number>()
+  // ── Event wiring ──────────────────────────────────────────────────────────────
 
-  private handleGoogleRejected(wc: Electron.WebContents, url: string): void {
-    let parsedPath = ''
-    try { parsedPath = new URL(url).pathname } catch { /* ignore */ }
+  private wireWebView2(tab: ManagedTab): void {
+    const view = tab.view
 
-    // Only match the specific /signin/rejected path (not accountchooser or identifier)
-    if (!parsedPath.endsWith('/signin/rejected')) {
-      this.googleRetryCount.delete(wc)
-      return
+    const update = (patch: Partial<TabState>): void => {
+      if (!this.tabs.has(tab.id)) return
+      tab.state = { ...tab.state, ...patch }
+      this.emit({ type: 'updated', tab: tab.state })
     }
 
-    const attempts = this.googleRetryCount.get(wc) ?? 0
-    if (attempts >= 2) return
-    this.googleRetryCount.set(wc, attempts + 1)
+    view.on('did-start-loading', () => update({ isLoading: true }))
 
-    // Clear ALL Google sign-in cookies. When /rejected fires, the user is NOT
-    // in a valid logged-in state, so no session data is lost. Partial cookie
-    // removal (AEC only) still leaves fingerprint-bearing cookies (ACCOUNT_CHOOSER,
-    // GAPS, HSID…) AND breaks the accountchooser page that relies on AEC itself.
-    // Full clear + direct navigation to /signin/identifier (bypasses accountchooser
-    // which needs the full session context) is the only reliable reset.
-    void Promise.all([
-      this.tabSession.clearStorageData({ storages: ['cookies'], origin: 'https://accounts.google.com' }),
-      this.tabSession.clearStorageData({ storages: ['cookies'], origin: 'https://accounts.youtube.com' }),
-    ]).then(() =>
-      wc.loadURL('https://accounts.google.com/signin/identifier?hl=fr').catch(() => { /* did-fail-load */ })
+    view.on('did-finish-load', () =>
+      update({
+        isLoading: false,
+        canGoBack: view.canGoBack(),
+        canGoForward: view.canGoForward(),
+      })
     )
+
+    view.on('did-navigate', (url: unknown) => {
+      if (typeof url === 'string') update({ url })
+    })
+
+    view.on('page-title-updated', (title: unknown) => {
+      if (typeof title !== 'string') return
+      const currentUrl = tab.state.url
+      const isHomepage = currentUrl === DEFAULT_HOMEPAGE || currentUrl === DEFAULT_HOMEPAGE + '/'
+      update({ title: isHomepage ? 'New tab' : title })
+    })
+
+    view.on('page-favicon-updated', (favicons: unknown) => {
+      const list = favicons as string[]
+      update({ favicon: list?.[0] ?? null })
+    })
+
+    view.on('history-updated', () => {
+      update({ canGoBack: view.canGoBack(), canGoForward: view.canGoForward() })
+    })
+
+    view.on('new-window', (url: unknown) => {
+      if (typeof url === 'string') this.handlePopup(url)
+    })
+
+    view.on('zoom-updated', (factor: unknown) => {
+      if (typeof factor === 'number' && Number.isFinite(factor)) update({ zoomFactor: factor })
+    })
+
+    view.on('audio-state', (playing: unknown) => {
+      update({ isAudioPlaying: playing === true })
+    })
+
+    view.on('muted-state', (muted: unknown) => {
+      update({ isMuted: muted === true })
+    })
+
+    view.on('download', (event: unknown) => {
+      this.emit({ type: 'download', event: event as DownloadEvent })
+    })
   }
 
-  /** Dev-only: evaluate JS in the active tab's main world and return the result. */
-  async devEval(js: string): Promise<unknown> {
-    const tab = this.activeTabId ? this.tabs.get(this.activeTabId) : null
-    if (!tab || tab.view.webContents.isDestroyed()) throw new Error('no active tab')
-    return tab.view.webContents.executeJavaScript(js, true)
-  }
+  // ── Close ────────────────────────────────────────────────────────────────────
 
   close(id: string): void {
     const tab = this.tabs.get(id)
     if (!tab) return
-    this.overlay.detachView(tab.view)
-    try {
-      tab.view.webContents.close()
-    } catch {
-      /* may already be destroyed */
-    }
+
+    tab.view.setVisible(false)
+    tab.view.destroy()
 
     let successor: string | null = null
     if (this.activeTabId === id) {
@@ -353,351 +201,150 @@ export class TabManager {
   }
 
   closeAll(): void {
-    const ids = Array.from(this.tabs.keys())
-    for (const id of ids) {
-      const tab = this.tabs.get(id)
-      if (!tab) continue
-      this.overlay.detachView(tab.view)
-      try {
-        tab.view.webContents.close()
-      } catch {
-        /* already destroyed */
-      }
-      this.tabs.delete(id)
-      this.emit({ type: 'removed', id })
+    for (const tab of this.tabs.values()) {
+      tab.view.setVisible(false)
+      tab.view.destroy()
+      this.emit({ type: 'removed', id: tab.id })
     }
+    this.tabs.clear()
     this.displayOrder = []
     this.activeTabId = null
-    this.emit({ type: 'activeChanged', id: null })
     this.stoppedDuringHide.clear()
     this.unloadedUrls.clear()
+    this.emit({ type: 'activeChanged', id: null })
   }
+
+  // ── Active tab ────────────────────────────────────────────────────────────────
 
   setActive(id: string): void {
     const tab = this.tabs.get(id)
     if (!tab) return
 
+    // Hide every other tab
     for (const other of this.tabs.values()) {
-      if (other.id !== id) this.overlay.detachView(other.view)
+      if (other.id !== id) other.view.setVisible(false)
     }
-    this.overlay.attachView(tab.view)
-    this.overlay.layoutView(tab.view)
+
+    // Position + show the active tab
+    const { x, y, width, height } = this.overlay.getTabContentBounds()
+    tab.view.setBounds(x, y, width, height)
+    tab.view.setVisible(true)
 
     this.activeTabId = id
     this.emit({ type: 'activeChanged', id })
-    setImmediate(() => {
-      if (this.activeTabId === id && !tab.view.webContents.isDestroyed()) {
-        tab.view.webContents.focus()
-      }
-    })
   }
 
   deactivate(): void {
     if (this.activeTabId === null) return
     const tab = this.tabs.get(this.activeTabId)
-    if (tab) this.overlay.detachView(tab.view)
+    if (tab) tab.view.setVisible(false)
     this.activeTabId = null
     this.emit({ type: 'activeChanged', id: null })
   }
 
+  relayoutActive(): void {
+    const tab = this.activeTabId ? this.tabs.get(this.activeTabId) : null
+    if (!tab || tab.view.isDestroyed()) return
+    const { x, y, width, height } = this.overlay.getTabContentBounds()
+    tab.view.setBounds(x, y, width, height)
+  }
+
+  // ── Navigation ────────────────────────────────────────────────────────────────
+
   navigate(id: string, url: string): void {
-    const tab = this.tabs.get(id)
-    if (!tab) return
-    void tab.view.webContents.loadURL(url).catch(() => {
-      /* surfaced via did-fail-load */
-    })
+    this.tabs.get(id)?.view.loadURL(url)
   }
 
   goBack(id: string): void {
     const tab = this.tabs.get(id)
-    if (!tab) return
-    if (tab.view.webContents.navigationHistory.canGoBack()) {
-      tab.view.webContents.navigationHistory.goBack()
-    }
+    if (tab?.state.canGoBack) tab.view.goBack()
   }
 
   goForward(id: string): void {
     const tab = this.tabs.get(id)
-    if (!tab) return
-    if (tab.view.webContents.navigationHistory.canGoForward()) {
-      tab.view.webContents.navigationHistory.goForward()
-    }
+    if (tab?.state.canGoForward) tab.view.goForward()
   }
 
   reload(id: string): void {
-    const tab = this.tabs.get(id)
-    if (!tab) return
-    tab.view.webContents.reload()
+    this.tabs.get(id)?.view.reload()
   }
 
-  relayoutActive(): void {
-    const tab = this.activeTabId ? this.tabs.get(this.activeTabId) : null
-    if (tab) this.overlay.layoutView(tab.view)
-  }
+  // ── Suspend / unload / resume (performance mode) ──────────────────────────────
 
-  /**
-   * Mute audio + stop any in-flight loads when the overlay is hidden so the
-   * underlying game is not disturbed.
-   */
   suspendAll(): void {
     this.stoppedDuringHide.clear()
     for (const tab of this.tabs.values()) {
       try {
-        const wc = tab.view.webContents
-        if (wc.isDestroyed()) continue
-        wc.setAudioMuted(true)
-        if (wc.isLoading()) {
-          wc.stop()
+        if (tab.view.isLoading()) {
+          tab.view.stop()
           this.stoppedDuringHide.add(tab.id)
         }
-      } catch {
-        /* destroyed mid-iteration */
-      }
+      } catch { /* destroyed */ }
     }
   }
 
-  /**
-   * Performance mode: navigate every tab to about:blank so the renderer
-   * processes can be reaped. resumeAll() reloads from saved URLs.
-   */
   unloadAll(): void {
     this.stoppedDuringHide.clear()
     this.unloadedUrls.clear()
     for (const tab of this.tabs.values()) {
       try {
-        const wc = tab.view.webContents
-        if (wc.isDestroyed()) continue
-        wc.setAudioMuted(true)
         const url = tab.state.url
         if (url && url !== 'about:blank') {
           this.unloadedUrls.set(tab.id, url)
-          void wc.loadURL('about:blank').catch(() => {
-            /* unload best-effort */
-          })
+          tab.view.loadURL('about:blank')
         }
-      } catch {
-        /* destroyed mid-iteration */
-      }
+      } catch { /* destroyed */ }
     }
   }
 
   resumeAll(): void {
     for (const tab of this.tabs.values()) {
       try {
-        const wc = tab.view.webContents
-        if (wc.isDestroyed()) continue
-        wc.setAudioMuted(tab.state.isMuted ?? false)
         const unloadedUrl = this.unloadedUrls.get(tab.id)
         if (unloadedUrl) {
           tab.state = { ...tab.state, url: unloadedUrl }
           this.emit({ type: 'updated', tab: tab.state })
-          void wc.loadURL(unloadedUrl).catch(() => {
-            /* surfaced via did-fail-load */
-          })
+          tab.view.loadURL(unloadedUrl)
           this.unloadedUrls.delete(tab.id)
         } else if (this.stoppedDuringHide.has(tab.id)) {
-          wc.reload()
+          tab.view.reload()
         }
-      } catch {
-        /* destroyed mid-iteration */
-      }
+      } catch { /* destroyed */ }
     }
     this.stoppedDuringHide.clear()
   }
 
-  private wireWebContents(tab: ManagedTab): void {
-    const wc = tab.view.webContents
+  // ── Zoom / audio ──────────────────────────────────────────────────────────────
 
-    if (!app.isPackaged) {
-      wc.on('console-message', (_e, level, message, line, sourceId) => {
-        logConsole('webview', level, message, line, sourceId)
-      })
-    }
-
-    const update = (patch: Partial<TabState>): void => {
-      if (!this.tabs.has(tab.id)) return
-      tab.state = { ...tab.state, ...patch }
-      this.emit({ type: 'updated', tab: tab.state })
-    }
-
-    /**
-     * Use Electron's before-input-event for Ctrl+W (layout-aware logical key)
-     * and to swallow Alt+Left/Right so uiohook stays the sole nav handler.
-     */
-    wc.on('before-input-event', (event, input) => {
-      if (input.type !== 'keyDown') return
-      // Ctrl+W — close tab
-      if (input.control && !input.shift && !input.alt && input.key.toLowerCase() === 'w') {
-        event.preventDefault()
-        if (this.tabs.has(tab.id)) this.close(tab.id)
-        return
-      }
-      // Ctrl+= / Ctrl++ — zoom in
-      if (input.control && !input.shift && !input.alt && (input.key === '=' || input.key === '+')) {
-        event.preventDefault()
-        const next = Math.min(5, Math.round((wc.getZoomFactor() + 0.1) * 10) / 10)
-        wc.setZoomFactor(next)
-        update({ zoomFactor: next })
-        return
-      }
-      // Ctrl+- — zoom out
-      if (input.control && !input.shift && !input.alt && input.key === '-') {
-        event.preventDefault()
-        const next = Math.max(0.25, Math.round((wc.getZoomFactor() - 0.1) * 10) / 10)
-        wc.setZoomFactor(next)
-        update({ zoomFactor: next })
-        return
-      }
-      // Ctrl+0 — reset zoom
-      if (input.control && !input.shift && !input.alt && input.key === '0') {
-        event.preventDefault()
-        wc.setZoomFactor(1)
-        update({ zoomFactor: 1 })
-        return
-      }
-      if (input.alt && !input.control && !input.shift) {
-        if (input.code === 'ArrowLeft' || input.code === 'ArrowRight') {
-          event.preventDefault()
-        }
-      }
-    })
-
-    wc.on('did-start-loading', () => update({ isLoading: true }))
-    wc.on('did-fail-load', (_e, errorCode, _desc, validatedURL, isMainFrame) => {
-      // ERR_ABORTED (-3) = intentional stop (e.g. suspendAll); not a real failure.
-      if (!isMainFrame || errorCode === -3) return
-      update({ isLoading: false, url: validatedURL || tab.state.url })
-    })
-    wc.on('dom-ready', () => {
-      void wc.insertCSS(SCROLLBAR_CSS).catch(() => {
-        /* page may be navigating away */
-      })
-      void wc.executeJavaScript(SCROLLBAR_JS).catch(() => {
-        /* page may be navigating away */
-      })
-      // Re-apply CT suppression after navigation (the injected <style> is lost on nav).
-      if (this.isClickThrough) this.applyClickThroughCSS(wc, true)
-    })
-    wc.on('did-stop-loading', () =>
-      update({
-        isLoading: false,
-        canGoBack: wc.navigationHistory.canGoBack(),
-        canGoForward: wc.navigationHistory.canGoForward(),
-      }),
-    )
-    wc.on('did-navigate', (_e, url) => {
-      update({ url })
-      this.handleGoogleRejected(wc, url)
-    })
-    wc.on('did-navigate-in-page', (_e, url) => update({ url }))
-    wc.on('page-title-updated', (_e, title) => {
-      const currentUrl = tab.state.url
-      const isHomepage = currentUrl === DEFAULT_HOMEPAGE || currentUrl === DEFAULT_HOMEPAGE + '/'
-      update({ title: isHomepage ? 'New tab' : title })
-    })
-    wc.on('page-favicon-updated', (_e, favicons) => {
-      update({ favicon: favicons[0] ?? null })
-    })
-
-    // Audio state tracking
-    wc.on('media-started-playing', () => update({ isAudioPlaying: true }))
-    wc.on('media-paused', () => update({ isAudioPlaying: false }))
-
-    // Zoom via pinch / Ctrl+scroll gesture
-    wc.on('zoom-changed', (_e, direction) => {
-      const step = 0.1
-      const next = direction === 'in'
-        ? Math.min(5, Math.round((wc.getZoomFactor() + step) * 10) / 10)
-        : Math.max(0.25, Math.round((wc.getZoomFactor() - step) * 10) / 10)
-      wc.setZoomFactor(next)
-      update({ zoomFactor: next })
-    })
-
-    wc.on('will-navigate', (event, url) => {
-      try {
-        const proto = new URL(url).protocol
-        if (proto !== 'http:' && proto !== 'https:') event.preventDefault()
-      } catch {
-        event.preventDefault()
-      }
-    })
-
-    wc.setWindowOpenHandler(({ url }) => {
-      if (wc.isDestroyed() || !this.tabs.has(tab.id)) return { action: 'deny' }
-      try {
-        const proto = new URL(url).protocol
-        if (proto === 'http:' || proto === 'https:') {
-          this.handlePopup(url)
-        }
-      } catch {
-        /* malformed URL */
-      }
-      return { action: 'deny' }
-    })
-
-    wc.on('context-menu', (_e, params) => {
-      const menu = new Menu()
-      const addSep = (): void => {
-        const items = menu.items
-        if (items.length > 0 && items[items.length - 1].type !== 'separator') {
-          menu.append(new MenuItem({ type: 'separator' }))
-        }
-      }
-
-      // Edit operations for editable fields
-      if (params.isEditable) {
-        if (params.editFlags.canUndo) menu.append(new MenuItem({ role: 'undo' }))
-        if (params.editFlags.canRedo) menu.append(new MenuItem({ role: 'redo' }))
-        if (params.editFlags.canCut || params.editFlags.canCopy || params.editFlags.canPaste) {
-          addSep()
-          if (params.editFlags.canCut) menu.append(new MenuItem({ role: 'cut' }))
-          if (params.editFlags.canCopy) menu.append(new MenuItem({ role: 'copy' }))
-          if (params.editFlags.canPaste) menu.append(new MenuItem({ role: 'paste' }))
-        }
-        if (params.editFlags.canSelectAll) {
-          addSep()
-          menu.append(new MenuItem({ role: 'selectAll' }))
-        }
-      } else if (params.selectionText) {
-        menu.append(new MenuItem({ role: 'copy' }))
-      }
-
-      // Search selected text
-      if (params.selectionText.trim()) {
-        addSep()
-        const text = params.selectionText
-        const preview = text.length > 20 ? text.slice(0, 20) + '\u2026' : text
-        const engineId = (store.get('settings')?.searchEngine ?? 'google') as SearchEngineId
-        const baseUrl = SEARCH_ENGINES[engineId]?.url ?? SEARCH_ENGINES.google.url
-        menu.append(new MenuItem({
-          label: `Search "${preview}"`,
-          click: () => { this.create(baseUrl + encodeURIComponent(text)) },
-        }))
-      }
-
-      // Link actions
-      if (params.linkURL) {
-        try {
-          const proto = new URL(params.linkURL).protocol
-          if (proto === 'http:' || proto === 'https:') {
-            addSep()
-            menu.append(new MenuItem({ label: 'Open in new tab', click: () => { this.create(params.linkURL) } }))
-            menu.append(new MenuItem({ label: 'Copy link address', click: () => { clipboard.writeText(params.linkURL) } }))
-          }
-        } catch { /* malformed URL */ }
-      }
-
-      // Navigation (always visible)
-      addSep()
-      if (wc.navigationHistory.canGoBack()) menu.append(new MenuItem({ label: 'Back', click: () => wc.navigationHistory.goBack() }))
-      if (wc.navigationHistory.canGoForward()) menu.append(new MenuItem({ label: 'Forward', click: () => wc.navigationHistory.goForward() }))
-      menu.append(new MenuItem({ label: 'Reload', click: () => wc.reload() }))
-
-      menu.popup({ window: this.overlay.win })
-    })
+  setZoom(id: string, factor: number): void {
+    const tab = this.tabs.get(id)
+    if (!tab) return
+    const clamped = Math.max(0.25, Math.min(5, factor))
+    // The native ZoomFactorChanged event confirms the value (zoom-updated → state),
+    // but we update optimistically so the UI reflects the change immediately.
+    tab.view.setZoom(clamped)
+    tab.state = { ...tab.state, zoomFactor: clamped }
+    this.emit({ type: 'updated', tab: tab.state })
   }
 
+  setMuted(id: string, muted: boolean): void {
+    const tab = this.tabs.get(id)
+    if (!tab) return
+    tab.view.setMuted(muted)
+    tab.state = { ...tab.state, isMuted: muted }
+    this.emit({ type: 'updated', tab: tab.state })
+  }
+
+  // ── Popup deduplication ───────────────────────────────────────────────────────
+
   private handlePopup(url: string): void {
+    // Security: only open http(s) popups as tabs — drop javascript:/data:/custom schemes.
+    try {
+      const proto = new URL(url).protocol
+      if (proto !== 'http:' && proto !== 'https:') return
+    } catch {
+      return
+    }
     const now = Date.now()
     const last = this.recentPopups.get(url) ?? 0
     if (now - last <= POPUP_DEDUP_WINDOW_MS) return
@@ -711,21 +358,18 @@ export class TabManager {
     this.create(url)
   }
 
-  setZoom(id: string, factor: number): void {
-    const tab = this.tabs.get(id)
-    if (!tab || tab.view.webContents.isDestroyed()) return
-    const clamped = Math.max(0.25, Math.min(5, factor))
-    tab.view.webContents.setZoomFactor(clamped)
-    tab.state = { ...tab.state, zoomFactor: clamped }
-    this.emit({ type: 'updated', tab: tab.state })
+  // ── Dev eval ──────────────────────────────────────────────────────────────────
+
+  async devEval(js: string): Promise<unknown> {
+    const tab = this.activeTabId ? this.tabs.get(this.activeTabId) : null
+    if (!tab || tab.view.isDestroyed()) throw new Error('no active tab')
+    return tab.view.executeJavaScript(js)
   }
 
-  setMuted(id: string, muted: boolean): void {
-    const tab = this.tabs.get(id)
-    if (!tab || tab.view.webContents.isDestroyed()) return
-    tab.view.webContents.setAudioMuted(muted)
-    tab.state = { ...tab.state, isMuted: muted }
-    this.emit({ type: 'updated', tab: tab.state })
-  }
+  // ── Dispose ───────────────────────────────────────────────────────────────────
 
+  dispose(): void {
+    this.overlay.onLayoutChange = null
+    this.closeAll()
+  }
 }

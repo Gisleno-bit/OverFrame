@@ -1,0 +1,844 @@
+/**
+ * webview2_addon.cpp
+ *
+ * Node.js N-API addon that embeds Microsoft Edge WebView2 controls as child
+ * windows of an Electron BrowserWindow HWND. One WebView2 environment is
+ * shared across all tabs (one Edge process); each tab gets its own controller.
+ *
+ * Exposed JS API (see WebView2View.ts for the typed wrapper):
+ *   wv2.createTab(parentHwndBuffer, x, y, w, h)  -> tabId (number)
+ *   wv2.navigate(tabId, url)
+ *   wv2.goBack(tabId) / goForward(tabId) / reload(tabId) / stop(tabId)
+ *   wv2.setBounds(tabId, x, y, w, h)
+ *   wv2.show(tabId) / hide(tabId)
+ *   wv2.destroyTab(tabId)
+ *   wv2.executeScript(tabId, js)                 -> Promise<string>
+ *   wv2.setUserAgent(tabId, ua)
+ *   wv2.setZoom(tabId, factor)
+ *   wv2.setMuted(tabId, muted)
+ *   wv2.getURL(tabId)                            -> string
+ *   wv2.canGoBack(tabId) / canGoForward(tabId)   -> bool
+ *   wv2.setEventCallback(cb)  -- cb(tabId, type, dataJson) for all tabs
+ *
+ * Events emitted via the callback (dataJson is a JSON string):
+ *   { type: 'navigation_starting',  url, isRedirect }
+ *   { type: 'navigation_completed', url, success, canGoBack, canGoForward }
+ *   { type: 'history_changed',      canGoBack, canGoForward }
+ *   { type: 'title_changed',        title }
+ *   { type: 'new_window',           url }
+ *   { type: 'zoom_changed',         factor }
+ *   { type: 'audio_changed',        playing }
+ *   { type: 'muted_changed',        muted }
+ *   { type: 'download',             id, filename, url, receivedBytes, totalBytes, state }
+ *
+ * Security: navigations to non-http(s)/about schemes are cancelled in
+ * NavigationStarting (mirrors the old will-navigate protocol guard).
+ */
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <wrl/client.h>
+#include <wrl/event.h>
+#include "WebView2.h"
+#include <napi.h>
+#include <atomic>
+#include <map>
+#include <mutex>
+#include <string>
+#include <vector>
+#include <functional>
+#include <shlwapi.h>
+#include <shlobj.h>
+#include <sstream>
+
+#pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "oleaut32.lib")
+
+using Microsoft::WRL::Callback;
+using Microsoft::WRL::ComPtr;
+
+// ── Utilities ──────────────────────────────────────────────────────────────────
+
+static std::wstring Utf8ToWide(const std::string& s) {
+  if (s.empty()) return {};
+  int sz = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+  std::wstring out(sz, 0);
+  MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, out.data(), sz);
+  if (!out.empty() && out.back() == L'\0') out.pop_back();
+  return out;
+}
+
+static std::string WideToUtf8(const std::wstring& s) {
+  if (s.empty()) return {};
+  int sz = WideCharToMultiByte(CP_UTF8, 0, s.c_str(), -1, nullptr, 0, nullptr, nullptr);
+  std::string out(sz, 0);
+  WideCharToMultiByte(CP_UTF8, 0, s.c_str(), -1, out.data(), sz, nullptr, nullptr);
+  if (!out.empty() && out.back() == '\0') out.pop_back();
+  return out;
+}
+
+// Escape a UTF-8 string for safe embedding inside a JSON string literal.
+// Handles quotes, backslashes, and control characters (URLs/titles/paths can
+// contain any of these — naive concatenation would produce invalid JSON).
+static std::string JsonEscape(const std::string& s) {
+  std::string out;
+  out.reserve(s.size() + 8);
+  for (unsigned char c : s) {
+    switch (c) {
+      case '"':  out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\n': out += "\\n";  break;
+      case '\r': out += "\\r";  break;
+      case '\t': out += "\\t";  break;
+      default:
+        if (c < 0x20) {
+          char buf[8];
+          snprintf(buf, sizeof buf, "\\u%04x", c);
+          out += buf;
+        } else {
+          out += static_cast<char>(c);
+        }
+    }
+  }
+  return out;
+}
+
+// Last path component of a Windows or POSIX-style path.
+static std::string BaseName(const std::string& p) {
+  auto pos = p.find_last_of("\\/");
+  return pos == std::string::npos ? p : p.substr(pos + 1);
+}
+
+// Security: only http(s) and about: navigations are permitted in a tab.
+// Everything else (javascript:, data:, file:, mailto:, custom protocol
+// handlers…) is cancelled in NavigationStarting — mirrors the will-navigate
+// protocol guard the previous WebContentsView implementation enforced.
+static bool IsAllowedNavScheme(const std::string& url) {
+  auto pos = url.find(':');
+  if (pos == std::string::npos) return true; // scheme-relative / fragment — allow
+  std::string scheme = url.substr(0, pos);
+  for (auto& c : scheme) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+  return scheme == "http" || scheme == "https" || scheme == "about";
+}
+
+// ── Global state ───────────────────────────────────────────────────────────────
+
+struct TabEntry {
+  ComPtr<ICoreWebView2Controller>  controller;
+  ComPtr<ICoreWebView2>            webview;
+  ComPtr<ICoreWebView2_4>          webview4; // downloads
+  ComPtr<ICoreWebView2_8>          webview8; // mute / audio-playing
+  HWND                             hwnd = nullptr;
+  bool                             visible = true;
+  std::string                      currentUrl;
+  bool                             canGoBack    = false;
+  bool                             canGoForward = false;
+  double                           zoomFactor   = 1.0;
+
+  // Event registration tokens
+  EventRegistrationToken tokNavStarting{};
+  EventRegistrationToken tokNavCompleted{};
+  EventRegistrationToken tokTitleChanged{};
+  EventRegistrationToken tokNewWindow{};
+  EventRegistrationToken tokHistoryChanged{};
+  EventRegistrationToken tokZoomChanged{};
+  EventRegistrationToken tokAudioPlaying{};
+  EventRegistrationToken tokMutedChanged{};
+  EventRegistrationToken tokDownloadStarting{};
+};
+
+static ComPtr<ICoreWebView2Environment> g_env;
+static std::mutex                       g_tabsMutex;
+static std::map<int, TabEntry>          g_tabs;
+static std::atomic<int>                 g_nextTabId{1};
+static std::atomic<int>                 g_nextDownloadId{1};
+
+// ── Thread-safe JS callback ───────────────────────────────────────────────────
+
+static Napi::ThreadSafeFunction g_tsfn;
+
+struct EventPayload {
+  int         tabId;
+  std::string type;
+  std::string data; // JSON string
+};
+
+static void CallJS(int tabId, const std::string& type, const std::string& data) {
+  if (!g_tsfn) return;
+  auto* ev = new EventPayload{tabId, type, data};
+  g_tsfn.NonBlockingCall(ev, [](Napi::Env env, Napi::Function jsCallback, EventPayload* ev) {
+    Napi::Object obj = Napi::Object::New(env);
+    obj.Set("type", Napi::String::New(env, ev->type));
+    // Parse the JSON data back into JS object
+    Napi::Object dataObj = Napi::Object::New(env);
+    // We use a simple key=value approach via the JSON string
+    // evaluated in a Napi::Env context: just pass as string and parse in JS
+    jsCallback.Call({
+      Napi::Number::New(env, ev->tabId),
+      Napi::String::New(env, ev->type),
+      Napi::String::New(env, ev->data),
+    });
+    delete ev;
+  });
+}
+
+// Emit a 'download' event mirroring the shared DownloadEvent shape
+// ({ id, filename, url, receivedBytes, totalBytes, state }).
+static void EmitDownload(int tabId, int downloadId, const std::string& filename,
+                         const std::string& url, INT64 received, INT64 total,
+                         const char* state) {
+  std::string data =
+    "{\"id\":\"" + std::to_string(downloadId) +
+    "\",\"filename\":\"" + JsonEscape(filename) +
+    "\",\"url\":\"" + JsonEscape(url) +
+    "\",\"receivedBytes\":" + std::to_string(received < 0 ? 0 : received) +
+    ",\"totalBytes\":" + std::to_string(total < 0 ? 0 : total) +
+    ",\"state\":\"" + state + "\"}";
+  CallJS(tabId, "download", data);
+}
+
+// ── Async helper: run on UI thread via PostMessage ─────────────────────────────
+
+// WebView2 callbacks must run on the thread that created the webview (UI thread).
+// For Promise-based methods (executeScript, getCookies, etc.) we use a
+// simple Event + result-by-pointer pattern, blocking the thread-pool thread
+// that Node uses for async work. This is safe because it's brief COM I/O.
+
+// ── Environment creation ──────────────────────────────────────────────────────
+
+static bool EnsureEnvironment(Napi::Env env) {
+  if (g_env) return true;
+
+  // Use the system-installed WebView2 runtime (Edge Stable/Beta/Dev)
+  // userData in %APPDATA%\Overframe\WebView2
+  std::wstring dataDir;
+  {
+    wchar_t buf[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, buf))) {
+      dataDir = std::wstring(buf) + L"\\Overframe\\WebView2";
+    }
+  }
+
+  HRESULT hr = E_FAIL;
+  HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+
+  hr = CreateCoreWebView2EnvironmentWithOptions(
+    nullptr,
+    dataDir.empty() ? nullptr : dataDir.c_str(),
+    nullptr,
+    Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+      [&hr, ready](HRESULT res, ICoreWebView2Environment* envPtr) -> HRESULT {
+        hr = res;
+        if (SUCCEEDED(res) && envPtr) g_env = envPtr;
+        SetEvent(ready);
+        return S_OK;
+      }).Get());
+
+  if (FAILED(hr)) {
+    CloseHandle(ready);
+    Napi::TypeError::New(env, "CreateCoreWebView2EnvironmentWithOptions failed: " +
+      std::to_string(hr)).ThrowAsJavaScriptException();
+    return false;
+  }
+
+  // Pump messages until the environment is ready
+  MSG msg;
+  while (WaitForSingleObject(ready, 0) == WAIT_TIMEOUT) {
+    if (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+      TranslateMessage(&msg);
+      DispatchMessageW(&msg);
+    }
+  }
+  CloseHandle(ready);
+
+  if (!g_env) {
+    Napi::TypeError::New(env, "WebView2 environment creation failed (hr=" +
+      std::to_string(hr) + "). Is the WebView2 runtime installed?")
+      .ThrowAsJavaScriptException();
+    return false;
+  }
+  return true;
+}
+
+// ── CreateTab ─────────────────────────────────────────────────────────────────
+
+Napi::Value CreateTab(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 5) {
+    Napi::TypeError::New(env, "createTab(hwndBuf, x, y, w, h)").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  if (!EnsureEnvironment(env)) return env.Undefined();
+
+  // Extract parent HWND from Buffer
+  Napi::Buffer<uint8_t> hwndBuf = info[0].As<Napi::Buffer<uint8_t>>();
+  HWND parentHwnd = *reinterpret_cast<HWND*>(hwndBuf.Data());
+  int x = info[1].As<Napi::Number>().Int32Value();
+  int y = info[2].As<Napi::Number>().Int32Value();
+  int w = info[3].As<Napi::Number>().Int32Value();
+  int h = info[4].As<Napi::Number>().Int32Value();
+
+  int tabId = g_nextTabId.fetch_add(1);
+
+  // Snapshot direct children of parentHwnd before creating the controller.
+  // After creation we compare to find the new WebView2 host HWND.
+  std::vector<HWND> childrenBefore;
+  {
+    HWND c = GetWindow(parentHwnd, GW_CHILD);
+    while (c) { childrenBefore.push_back(c); c = GetWindow(c, GW_HWNDNEXT); }
+  }
+
+  HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  HRESULT hr = E_FAIL;
+
+  HRESULT createHr = g_env->CreateCoreWebView2Controller(
+    parentHwnd,
+    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+      [&hr, &tabId, x, y, w, h, ready](
+        HRESULT res, ICoreWebView2Controller* ctrl) -> HRESULT {
+        hr = res;
+        if (SUCCEEDED(res) && ctrl) {
+          std::lock_guard<std::mutex> lk(g_tabsMutex);
+          TabEntry& tab = g_tabs[tabId];
+          tab.controller = ctrl;
+          ctrl->get_CoreWebView2(&tab.webview);
+
+          // Size
+          RECT bounds = {x, y, x + w, y + h};
+          ctrl->put_Bounds(bounds);
+          ctrl->put_IsVisible(TRUE);
+
+          // Hook NavigationStarting
+          tab.webview->add_NavigationStarting(
+            Callback<ICoreWebView2NavigationStartingEventHandler>(
+              [tabId](ICoreWebView2* wv, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
+                LPWSTR uriRaw = nullptr;
+                args->get_Uri(&uriRaw);
+                std::string url = uriRaw ? WideToUtf8(uriRaw) : "";
+                CoTaskMemFree(uriRaw);
+                // Security guard: cancel navigations to non-http(s)/about schemes.
+                if (!IsAllowedNavScheme(url)) {
+                  args->put_Cancel(TRUE);
+                  return S_OK;
+                }
+                BOOL isRedir = FALSE;
+                args->get_IsRedirected(&isRedir);
+                std::string data = "{\"url\":\"" + JsonEscape(url) + "\",\"isRedirect\":" +
+                  (isRedir ? "true" : "false") + "}";
+                CallJS(tabId, "navigation_starting", data);
+                return S_OK;
+              }).Get(), &tab.tokNavStarting);
+
+          // Hook NavigationCompleted
+          tab.webview->add_NavigationCompleted(
+            Callback<ICoreWebView2NavigationCompletedEventHandler>(
+              [tabId](ICoreWebView2* wv, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
+                BOOL ok = FALSE;
+                args->get_IsSuccess(&ok);
+                LPWSTR uriRaw = nullptr;
+                wv->get_Source(&uriRaw);
+                std::string url = uriRaw ? WideToUtf8(uriRaw) : "";
+                CoTaskMemFree(uriRaw);
+                BOOL back = FALSE, fwd = FALSE;
+                {
+                  std::lock_guard<std::mutex> lk(g_tabsMutex);
+                  auto it = g_tabs.find(tabId);
+                  if (it != g_tabs.end()) {
+                    it->second.currentUrl = url;
+                    it->second.webview->get_CanGoBack(&back);
+                    it->second.webview->get_CanGoForward(&fwd);
+                    it->second.canGoBack    = !!back;
+                    it->second.canGoForward = !!fwd;
+                  }
+                }
+                std::string data = "{\"url\":\"" + JsonEscape(url) + "\",\"success\":" +
+                  (ok ? "true" : "false") +
+                  ",\"canGoBack\":" + (back ? "true" : "false") +
+                  ",\"canGoForward\":" + (fwd ? "true" : "false") + "}";
+                CallJS(tabId, "navigation_completed", data);
+                return S_OK;
+              }).Get(), &tab.tokNavCompleted);
+
+          // Hook TitleChanged
+          tab.webview->add_DocumentTitleChanged(
+            Callback<ICoreWebView2DocumentTitleChangedEventHandler>(
+              [tabId](ICoreWebView2* wv, IUnknown*) -> HRESULT {
+                LPWSTR titleRaw = nullptr;
+                wv->get_DocumentTitle(&titleRaw);
+                std::string title = titleRaw ? WideToUtf8(titleRaw) : "";
+                CoTaskMemFree(titleRaw);
+                CallJS(tabId, "title_changed", "{\"title\":\"" + JsonEscape(title) + "\"}");
+                return S_OK;
+              }).Get(), &tab.tokTitleChanged);
+
+          // Hook HistoryChanged — fires AFTER NavigationCompleted with updated back/fwd state.
+          // get_CanGoBack() called inside NavigationCompleted returns a stale value because
+          // WebView2 updates the history after the handler returns.
+          tab.webview->add_HistoryChanged(
+            Callback<ICoreWebView2HistoryChangedEventHandler>(
+              [tabId](ICoreWebView2* wv, IUnknown*) -> HRESULT {
+                BOOL back = FALSE, fwd = FALSE;
+                wv->get_CanGoBack(&back);
+                wv->get_CanGoForward(&fwd);
+                {
+                  std::lock_guard<std::mutex> lk(g_tabsMutex);
+                  auto it = g_tabs.find(tabId);
+                  if (it != g_tabs.end()) {
+                    it->second.canGoBack    = !!back;
+                    it->second.canGoForward = !!fwd;
+                  }
+                }
+                std::string data = "{\"canGoBack\":" + std::string(back ? "true" : "false") +
+                                   ",\"canGoForward\":" + std::string(fwd ? "true" : "false") + "}";
+                CallJS(tabId, "history_changed", data);
+                return S_OK;
+              }).Get(), &tab.tokHistoryChanged);
+
+          // Hook NewWindowRequested
+          tab.webview->add_NewWindowRequested(
+            Callback<ICoreWebView2NewWindowRequestedEventHandler>(
+              [tabId](ICoreWebView2* wv, ICoreWebView2NewWindowRequestedEventArgs* args) -> HRESULT {
+                args->put_Handled(TRUE); // we handle popups ourselves
+                LPWSTR uriRaw = nullptr;
+                args->get_Uri(&uriRaw);
+                std::string url = uriRaw ? WideToUtf8(uriRaw) : "";
+                CoTaskMemFree(uriRaw);
+                CallJS(tabId, "new_window", "{\"url\":\"" + JsonEscape(url) + "\"}");
+                return S_OK;
+              }).Get(), &tab.tokNewWindow);
+
+          // ── Query the versioned interfaces used by zoom/mute/download ───────
+          tab.webview.As(&tab.webview4); // ICoreWebView2_4 — downloads
+          tab.webview.As(&tab.webview8); // ICoreWebView2_8 — mute / audio state
+
+          // Hook ZoomFactorChanged (on the controller, not the webview).
+          // Fires for native Ctrl+± / Ctrl+scroll zoom and for our put_ZoomFactor.
+          ctrl->add_ZoomFactorChanged(
+            Callback<ICoreWebView2ZoomFactorChangedEventHandler>(
+              [tabId](ICoreWebView2Controller* c, IUnknown*) -> HRESULT {
+                double z = 1.0;
+                c->get_ZoomFactor(&z);
+                {
+                  std::lock_guard<std::mutex> lk(g_tabsMutex);
+                  auto it = g_tabs.find(tabId);
+                  if (it != g_tabs.end()) it->second.zoomFactor = z;
+                }
+                CallJS(tabId, "zoom_changed", "{\"factor\":" + std::to_string(z) + "}");
+                return S_OK;
+              }).Get(), &tab.tokZoomChanged);
+
+          // Hook audio-playing + mute state (ICoreWebView2_8).
+          if (tab.webview8) {
+            tab.webview8->add_IsDocumentPlayingAudioChanged(
+              Callback<ICoreWebView2IsDocumentPlayingAudioChangedEventHandler>(
+                [tabId](ICoreWebView2* sender, IUnknown*) -> HRESULT {
+                  ComPtr<ICoreWebView2> base(sender);
+                  ComPtr<ICoreWebView2_8> wv8;
+                  if (SUCCEEDED(base.As(&wv8)) && wv8) {
+                    BOOL playing = FALSE;
+                    wv8->get_IsDocumentPlayingAudio(&playing);
+                    CallJS(tabId, "audio_changed",
+                      std::string("{\"playing\":") + (playing ? "true" : "false") + "}");
+                  }
+                  return S_OK;
+                }).Get(), &tab.tokAudioPlaying);
+
+            tab.webview8->add_IsMutedChanged(
+              Callback<ICoreWebView2IsMutedChangedEventHandler>(
+                [tabId](ICoreWebView2* sender, IUnknown*) -> HRESULT {
+                  ComPtr<ICoreWebView2> base(sender);
+                  ComPtr<ICoreWebView2_8> wv8;
+                  if (SUCCEEDED(base.As(&wv8)) && wv8) {
+                    BOOL muted = FALSE;
+                    wv8->get_IsMuted(&muted);
+                    CallJS(tabId, "muted_changed",
+                      std::string("{\"muted\":") + (muted ? "true" : "false") + "}");
+                  }
+                  return S_OK;
+                }).Get(), &tab.tokMutedChanged);
+          }
+
+          // Hook DownloadStarting (ICoreWebView2_4). We keep WebView2's default
+          // download UI; we only surface progress to the renderer for toasts.
+          if (tab.webview4) {
+            tab.webview4->add_DownloadStarting(
+              Callback<ICoreWebView2DownloadStartingEventHandler>(
+                [tabId](ICoreWebView2*, ICoreWebView2DownloadStartingEventArgs* args) -> HRESULT {
+                  ComPtr<ICoreWebView2DownloadOperation> op;
+                  args->get_DownloadOperation(&op);
+                  if (!op) return S_OK;
+
+                  int downloadId = g_nextDownloadId.fetch_add(1);
+
+                  LPWSTR uriRaw = nullptr;
+                  op->get_Uri(&uriRaw);
+                  std::string url = uriRaw ? WideToUtf8(uriRaw) : "";
+                  CoTaskMemFree(uriRaw);
+
+                  LPWSTR pathRaw = nullptr;
+                  op->get_ResultFilePath(&pathRaw);
+                  std::string filename = pathRaw ? BaseName(WideToUtf8(pathRaw)) : "";
+                  CoTaskMemFree(pathRaw);
+
+                  INT64 total = 0;
+                  op->get_TotalBytesToReceive(&total);
+
+                  EmitDownload(tabId, downloadId, filename, url, 0, total, "started");
+
+                  EventRegistrationToken tok{};
+                  op->add_BytesReceivedChanged(
+                    Callback<ICoreWebView2BytesReceivedChangedEventHandler>(
+                      [tabId, downloadId, filename, url](
+                        ICoreWebView2DownloadOperation* o, IUnknown*) -> HRESULT {
+                        INT64 recv = 0, tot = 0;
+                        o->get_BytesReceived(&recv);
+                        o->get_TotalBytesToReceive(&tot);
+                        EmitDownload(tabId, downloadId, filename, url, recv, tot, "progressing");
+                        return S_OK;
+                      }).Get(), &tok);
+
+                  op->add_StateChanged(
+                    Callback<ICoreWebView2StateChangedEventHandler>(
+                      [tabId, downloadId, filename, url](
+                        ICoreWebView2DownloadOperation* o, IUnknown*) -> HRESULT {
+                        COREWEBVIEW2_DOWNLOAD_STATE st = COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS;
+                        o->get_State(&st);
+                        INT64 recv = 0, tot = 0;
+                        o->get_BytesReceived(&recv);
+                        o->get_TotalBytesToReceive(&tot);
+                        const char* state =
+                          st == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED   ? "completed" :
+                          st == COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED ? "interrupted" :
+                                                                          "progressing";
+                        EmitDownload(tabId, downloadId, filename, url, recv, tot, state);
+                        return S_OK;
+                      }).Get(), &tok);
+
+                  return S_OK;
+                }).Get(), &tab.tokDownloadStarting);
+          }
+        }
+        SetEvent(ready);
+        return S_OK;
+      }).Get());
+
+  if (FAILED(createHr)) {
+    CloseHandle(ready);
+    Napi::TypeError::New(env, "CreateCoreWebView2Controller failed").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  MSG msg;
+  while (WaitForSingleObject(ready, 0) == WAIT_TIMEOUT) {
+    if (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+      TranslateMessage(&msg);
+      DispatchMessageW(&msg);
+    }
+  }
+  CloseHandle(ready);
+
+  if (FAILED(hr)) {
+    Napi::TypeError::New(env, "WebView2 controller creation failed: hr=" +
+      std::to_string(hr)).ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+
+  // Find the WebView2 host HWND: the first new direct child of parentHwnd
+  // added since we took the snapshot. New windows are placed at the top of
+  // the Z-order by default, so we scan from the top.
+  {
+    std::lock_guard<std::mutex> lk(g_tabsMutex);
+    auto& tab = g_tabs[tabId];
+    HWND c = GetWindow(parentHwnd, GW_CHILD);
+    while (c) {
+      bool wasExisting = false;
+      for (auto e : childrenBefore) { if (e == c) { wasExisting = true; break; } }
+      if (!wasExisting) { tab.hwnd = c; break; }
+      c = GetWindow(c, GW_HWNDNEXT);
+    }
+  }
+
+  return Napi::Number::New(env, tabId);
+}
+
+// ── Navigate ──────────────────────────────────────────────────────────────────
+
+Napi::Value Navigate(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  std::string url = info[1].As<Napi::String>().Utf8Value();
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  auto it = g_tabs.find(tabId);
+  if (it != g_tabs.end() && it->second.webview) {
+    it->second.webview->Navigate(Utf8ToWide(url).c_str());
+  }
+  return env.Undefined();
+}
+
+Napi::Value GoBack(const Napi::CallbackInfo& info) {
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  auto it = g_tabs.find(tabId);
+  if (it != g_tabs.end() && it->second.webview) it->second.webview->GoBack();
+  return info.Env().Undefined();
+}
+
+Napi::Value GoForward(const Napi::CallbackInfo& info) {
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  auto it = g_tabs.find(tabId);
+  if (it != g_tabs.end() && it->second.webview) it->second.webview->GoForward();
+  return info.Env().Undefined();
+}
+
+Napi::Value Reload(const Napi::CallbackInfo& info) {
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  auto it = g_tabs.find(tabId);
+  if (it != g_tabs.end() && it->second.webview) it->second.webview->Reload();
+  return info.Env().Undefined();
+}
+
+Napi::Value Stop(const Napi::CallbackInfo& info) {
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  auto it = g_tabs.find(tabId);
+  if (it != g_tabs.end() && it->second.webview) it->second.webview->Stop();
+  return info.Env().Undefined();
+}
+
+// ── SetBounds / Show / Hide ───────────────────────────────────────────────────
+
+Napi::Value SetBounds(const Napi::CallbackInfo& info) {
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  int x = info[1].As<Napi::Number>().Int32Value();
+  int y = info[2].As<Napi::Number>().Int32Value();
+  int w = info[3].As<Napi::Number>().Int32Value();
+  int h = info[4].As<Napi::Number>().Int32Value();
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  auto it = g_tabs.find(tabId);
+  if (it != g_tabs.end() && it->second.controller) {
+    RECT bounds = {x, y, x + w, y + h};
+    it->second.controller->put_Bounds(bounds);
+  }
+  return info.Env().Undefined();
+}
+
+Napi::Value Show(const Napi::CallbackInfo& info) {
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  auto it = g_tabs.find(tabId);
+  if (it != g_tabs.end() && it->second.controller) {
+    it->second.controller->put_IsVisible(TRUE);
+    it->second.visible = true;
+    // Bring the WebView2 host HWND above Electron's Chromium renderer HWND
+    // so Win32 delivers mouse events (clicks, scroll) to it rather than the
+    // transparent Electron renderer that sits in front otherwise.
+    if (it->second.hwnd) {
+      SetWindowPos(it->second.hwnd, HWND_TOP, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+  }
+  return info.Env().Undefined();
+}
+
+Napi::Value Hide(const Napi::CallbackInfo& info) {
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  auto it = g_tabs.find(tabId);
+  if (it != g_tabs.end() && it->second.controller) {
+    it->second.controller->put_IsVisible(FALSE);
+    it->second.visible = false;
+  }
+  return info.Env().Undefined();
+}
+
+// ── DestroyTab ────────────────────────────────────────────────────────────────
+
+Napi::Value DestroyTab(const Napi::CallbackInfo& info) {
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  auto it = g_tabs.find(tabId);
+  if (it != g_tabs.end()) {
+    if (it->second.webview) {
+      it->second.webview->remove_NavigationStarting(it->second.tokNavStarting);
+      it->second.webview->remove_NavigationCompleted(it->second.tokNavCompleted);
+      it->second.webview->remove_DocumentTitleChanged(it->second.tokTitleChanged);
+      it->second.webview->remove_NewWindowRequested(it->second.tokNewWindow);
+      it->second.webview->remove_HistoryChanged(it->second.tokHistoryChanged);
+    }
+    if (it->second.webview8) {
+      it->second.webview8->remove_IsDocumentPlayingAudioChanged(it->second.tokAudioPlaying);
+      it->second.webview8->remove_IsMutedChanged(it->second.tokMutedChanged);
+    }
+    if (it->second.webview4) {
+      it->second.webview4->remove_DownloadStarting(it->second.tokDownloadStarting);
+    }
+    if (it->second.controller) {
+      it->second.controller->remove_ZoomFactorChanged(it->second.tokZoomChanged);
+      it->second.controller->Close();
+    }
+    g_tabs.erase(it);
+  }
+  return info.Env().Undefined();
+}
+
+// ── ExecuteScript (async) ─────────────────────────────────────────────────────
+
+Napi::Value ExecuteScript(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  std::string js = info[1].As<Napi::String>().Utf8Value();
+
+  auto deferred = Napi::Promise::Deferred::New(env);
+  auto* def = new Napi::Promise::Deferred(deferred);
+
+  ComPtr<ICoreWebView2> wv;
+  {
+    std::lock_guard<std::mutex> lk(g_tabsMutex);
+    auto it = g_tabs.find(tabId);
+    if (it != g_tabs.end()) wv = it->second.webview;
+  }
+  if (!wv) {
+    deferred.Reject(Napi::String::New(env, "tab not found"));
+    return deferred.Promise();
+  }
+
+  // We need a thread-safe function to resolve the promise
+  auto tsfn = Napi::ThreadSafeFunction::New(
+    env, Napi::Function::New(env, [](const Napi::CallbackInfo&){}),
+    "execScript", 0, 1);
+
+  struct ScriptResult { bool ok; std::string value; };
+  auto* res = new ScriptResult{};
+
+  wv->ExecuteScript(Utf8ToWide(js).c_str(),
+    Callback<ICoreWebView2ExecuteScriptCompletedHandler>(
+      [tsfn, def, res](HRESULT hr, LPCWSTR resultJson) mutable -> HRESULT {
+        res->ok = SUCCEEDED(hr);
+        res->value = resultJson ? WideToUtf8(resultJson) : "null";
+        tsfn.NonBlockingCall(res, [def](Napi::Env env, Napi::Function, ScriptResult* r) {
+          if (r->ok) def->Resolve(Napi::String::New(env, r->value));
+          else       def->Reject(Napi::String::New(env, "ExecuteScript failed"));
+          delete r;
+          delete def;
+        });
+        tsfn.Release();
+        return S_OK;
+      }).Get());
+
+  return deferred.Promise();
+}
+
+// ── GetURL / CanGoBack / CanGoForward ─────────────────────────────────────────
+
+Napi::Value GetURL(const Napi::CallbackInfo& info) {
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  auto it = g_tabs.find(tabId);
+  std::string url = (it != g_tabs.end()) ? it->second.currentUrl : "";
+  return Napi::String::New(info.Env(), url);
+}
+
+Napi::Value CanGoBack(const Napi::CallbackInfo& info) {
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  auto it = g_tabs.find(tabId);
+  return Napi::Boolean::New(info.Env(), it != g_tabs.end() && it->second.canGoBack);
+}
+
+Napi::Value CanGoForward(const Napi::CallbackInfo& info) {
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  auto it = g_tabs.find(tabId);
+  return Napi::Boolean::New(info.Env(), it != g_tabs.end() && it->second.canGoForward);
+}
+
+// ── SetUserAgent ──────────────────────────────────────────────────────────────
+
+Napi::Value SetUserAgent(const Napi::CallbackInfo& info) {
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  std::string ua = info[1].As<Napi::String>().Utf8Value();
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  auto it = g_tabs.find(tabId);
+  if (it != g_tabs.end() && it->second.webview) {
+    ComPtr<ICoreWebView2Settings> settings;
+    if (SUCCEEDED(it->second.webview->get_Settings(&settings))) {
+      ComPtr<ICoreWebView2Settings2> settings2;
+      if (SUCCEEDED(settings.As(&settings2))) {
+        settings2->put_UserAgent(Utf8ToWide(ua).c_str());
+      }
+    }
+  }
+  return info.Env().Undefined();
+}
+
+// ── SetZoom ───────────────────────────────────────────────────────────────────
+
+Napi::Value SetZoom(const Napi::CallbackInfo& info) {
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  double factor = info[1].As<Napi::Number>().DoubleValue();
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  auto it = g_tabs.find(tabId);
+  if (it != g_tabs.end() && it->second.controller) {
+    it->second.controller->put_ZoomFactor(factor);
+  }
+  return info.Env().Undefined();
+}
+
+// ── SetMuted ──────────────────────────────────────────────────────────────────
+
+Napi::Value SetMuted(const Napi::CallbackInfo& info) {
+  int tabId = info[0].As<Napi::Number>().Int32Value();
+  bool muted = info[1].As<Napi::Boolean>().Value();
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  auto it = g_tabs.find(tabId);
+  if (it != g_tabs.end() && it->second.webview8) {
+    it->second.webview8->put_IsMuted(muted ? TRUE : FALSE);
+  }
+  return info.Env().Undefined();
+}
+
+// ── SetEventCallback ──────────────────────────────────────────────────────────
+
+Napi::Value SetEventCallback(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (g_tsfn) g_tsfn.Release();
+  Napi::Function cb = info[0].As<Napi::Function>();
+  g_tsfn = Napi::ThreadSafeFunction::New(env, cb, "wv2events", 0, 1);
+  return env.Undefined();
+}
+
+// ── Module init ───────────────────────────────────────────────────────────────
+
+Napi::Object Init(Napi::Env env, Napi::Object exports) {
+  // Initialize COM on the main thread
+  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
+  exports.Set("createTab",        Napi::Function::New(env, CreateTab));
+  exports.Set("navigate",         Napi::Function::New(env, Navigate));
+  exports.Set("goBack",           Napi::Function::New(env, GoBack));
+  exports.Set("goForward",        Napi::Function::New(env, GoForward));
+  exports.Set("reload",           Napi::Function::New(env, Reload));
+  exports.Set("stop",             Napi::Function::New(env, Stop));
+  exports.Set("setBounds",        Napi::Function::New(env, SetBounds));
+  exports.Set("show",             Napi::Function::New(env, Show));
+  exports.Set("hide",             Napi::Function::New(env, Hide));
+  exports.Set("destroyTab",       Napi::Function::New(env, DestroyTab));
+  exports.Set("executeScript",    Napi::Function::New(env, ExecuteScript));
+  exports.Set("getURL",           Napi::Function::New(env, GetURL));
+  exports.Set("canGoBack",        Napi::Function::New(env, CanGoBack));
+  exports.Set("canGoForward",     Napi::Function::New(env, CanGoForward));
+  exports.Set("setUserAgent",     Napi::Function::New(env, SetUserAgent));
+  exports.Set("setZoom",          Napi::Function::New(env, SetZoom));
+  exports.Set("setMuted",         Napi::Function::New(env, SetMuted));
+  exports.Set("setEventCallback", Napi::Function::New(env, SetEventCallback));
+  return exports;
+}
+
+NODE_API_MODULE(webview2_addon, Init)

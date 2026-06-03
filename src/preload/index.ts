@@ -243,7 +243,7 @@ const api = {
       ipcRenderer.on(IPC.EventUpdateStatus, listener)
       return (): void => { ipcRenderer.removeListener(IPC.EventUpdateStatus, listener) }
     },
-  }
+  },
 }
 
 export type AetherAPI = typeof api

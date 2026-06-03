@@ -51,7 +51,7 @@ function ensureUpdater(): void {
   )
 }
 
-// Only these protocols are safe to load in a WebContentsView
+// Only these protocols are safe to load in a browser tab (WebView2)
 function isSafeUrl(url: string): boolean {
   try {
     const proto = new URL(url).protocol

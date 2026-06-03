@@ -28,8 +28,7 @@ export default defineConfig({
       outDir: 'out/preload',
       rollupOptions: {
         input: {
-          index: resolve('src/preload/index.ts'),
-          tabStealth: resolve('src/preload/tabStealth.ts')
+          index: resolve('src/preload/index.ts')
         }
       }
     }

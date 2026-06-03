@@ -2,7 +2,6 @@ import {
   BrowserWindow,
   screen,
   app,
-  WebContentsView
 } from 'electron'
 import path from 'node:path'
 import {
@@ -115,6 +114,9 @@ export class OverlayWindow {
       this.applyClickThrough(true)
       this.setState('CLICK_THROUGH')
     } else {
+      // Ensure mouse events reach the window regardless of the previous state
+      // (e.g. show() called via a global shortcut while in CLICK_THROUGH mode).
+      this.win.setIgnoreMouseEvents(false)
       app.focus({ steal: true })
       if (this.state !== 'FOCUSED') {
         this.setState('FOCUSED')
@@ -292,48 +294,30 @@ export class OverlayWindow {
   //  WebContentsView management (tabs)
   // ─────────────────────────────────────────────────────────────────────
 
-  attachView(view: WebContentsView): void {
-    this.win.contentView.addChildView(view)
-    this.layoutView(view)
-  }
-
-  detachView(view: WebContentsView): void {
-    try {
-      this.win.contentView.removeChildView(view)
-    } catch {
-      // already removed
-    }
-  }
-
-  layoutView(view: WebContentsView): void {
+  /** Returns the tab content area bounds (relative to the overlay's client area). */
+  getTabContentBounds(): { x: number; y: number; width: number; height: number } {
     const { width, height } = this.win.getContentBounds()
-    const SIDE   = 1
-    const TOP    = 1
-    const BOTTOM = 1
-    view.setBounds({
+    const SIDE = 1, TOP = 1, BOTTOM = 1
+    return {
       x: SIDE,
       y: this.chromeHeight + TOP,
       width: Math.max(0, width - this.panelWidth - SIDE * 2),
-      height: Math.max(0, height - this.chromeHeight - TOP - BOTTOM)
-    })
+      height: Math.max(0, height - this.chromeHeight - TOP - BOTTOM),
+    }
   }
 
   setChromeHeight(h: number): void {
     this.chromeHeight = Math.max(0, h)
-    const views = this.win.contentView.children as WebContentsView[]
-    for (const v of views) this.layoutView(v)
+    this.onLayoutChange?.()
   }
 
   setPanelWidth(w: number): void {
     this.panelWidth = Math.max(0, w)
-    // Re-layout all active views
-    const views = this.win.contentView.children as WebContentsView[]
-    for (const v of views) this.layoutView(v)
+    this.onLayoutChange?.()
   }
 
-  layoutAllViews(views: WebContentsView[]): void {
-    for (const view of views) this.layoutView(view)
-  }
+  /** Called by TabManager whenever chrome/panel dimensions change. */
+  onLayoutChange: (() => void) | null = null
 }
 
 export { DRAG_ZONE_HEIGHT, CHROME_HEIGHT }

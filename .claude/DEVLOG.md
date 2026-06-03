@@ -26,6 +26,37 @@ Le hook `SessionStart` injecte automatiquement la **dernière** entrée (titre +
 
 ---
 
+## [2026-06-03] [FEAT] Onglets WebView2 (Edge natif) + nettoyage chirurgical
+
+**Contexte :** L'approche « stealth » (spoofing UA + `tabStealth` sur `WebContentsView`) ne passait pas le Turnstile Cloudflare. Bascule des onglets sur un addon natif **WebView2** (vrai Edge) qui passe Google sign-in / Cloudflare nativement. Cette session : fiabiliser le working tree, sécuriser, et faire passer toutes les pipelines.
+
+**Fichiers modifiés (principaux) :**
+- `native/webview2-addon/src/webview2_addon.cpp` — addon N-API : ajout zoom (`setZoom` + `ZoomFactorChanged`), mute/audio (`setMuted`, `IsMuted/IsDocumentPlayingAudioChanged` via `ICoreWebView2_8`), téléchargements (`DownloadStarting` via `_4`), **garde de navigation** (`NavigationStarting` annule les schémas hors http(s)/about), échappement JSON robuste, nettoyage des tokens dans `DestroyTab`
+- `src/main/managers/tabs/WebView2View.ts` + `TabManager.ts` — recâblage zoom/mute/audio/download (plus de no-op) + garde protocole popup
+- `native/webview2-addon/{binding.gyp,README.md}` + `scripts/build-addon.mjs` + `package.json` — build-from-source : SDK WebView2 vendored (hermétique), `build:addon` (node-gyp, win32-guard), `postinstall`, c++20 (warning D9025 supprimé)
+- `forge.config.ts` — addon expédié en `extraResource` (→ `resources/webview2_addon.node`), `native/` exclu de l'asar
+- `.gitignore` — `native/webview2-addon/build/` ignoré (artefacts générés)
+- **Supprimés** : pile stealth (`OAuthPopupWindow`, `tabStealth.ts`, `userAgent.ts(+test)`), surface GGG/PoE OAuth (service, IPC, store, UI SettingsPanel), scripts jetables (`test-cf*`, `test-wv2`), devDep `playwright-core`, endpoints dev morts (`/oauth-popup`, `/debug/headers`, `/session/clear-cookies`)
+- Docs : `SECURITY.md` + `CLAUDE.md` réalignés sur le modèle WebView2
+
+**Observations :**
+- Pipelines vertes : `typecheck` (root), `lint`, `test:coverage` **100%**, `build`, addon (node-gyp), `pnpm smoke` ALL PASS (boot + overlay + addon chargé, RAM 257 MB < 300).
+- Un fichier corrompu de 2,6 Mo (résidu d'un `cp` shell raté) traînait dans `native/` — supprimé.
+
+**Décisions :**
+- SDK WebView2 **vendored** (header + `WebView2LoaderStatic.lib`) plutôt que fetch NuGet : build hermétique/offline, reproductible. Origine + licence + procédure de mise à jour documentées dans `native/webview2-addon/README.md`.
+- PoE/GGG OAuth retiré entièrement : avec WebView2, l'utilisateur se connecte directement dans un onglet (Cloudflare passe), le contournement POESESSID n'a plus lieu d'être.
+
+**Questions ouvertes :**
+- `typecheck:node` a 2 erreurs **préexistantes** hors périmètre (koffi sans default export dans `getVisibleGames.ts` ; typage `outDir` d'electron-vite). Non gating (la CI utilise `pnpm typecheck` racine), runtime OK. À traiter séparément.
+- Favicons + capture de la console webview non remontés par l'addon (limitation connue, hors périmètre).
+
+**Prochaine étape :**
+- Validation humaine réelle : login Google + site Cloudflare dans un onglet WebView2.
+- `pnpm make` pour vérifier le packaging de l'addon en `extraResource` sur une vraie install.
+
+---
+
 ## [2026-06-01] [FEAT] Compatibilité navigateur standard — résolution finale
 
 **Contexte :** Suite de l'itération précédente. Google login fonctionnait 1 fois sur 3 ; re-connexion après déconnexion nécessitait de boucler sur "Réessayer". Tout est maintenant résolu.

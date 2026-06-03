@@ -49,9 +49,9 @@ Main Process (Node.js)
 Renderer Process (React + Zustand)
   ├─ window.aether.* — the entire IPC API surface
   └─ src/renderer/store/ — Zustand stores (appStore, missionsStore)
-           ↕ WebContentsView (per tab)
+           ↕ WebView2 native addon (per tab)
 Web Content Layer
-  └─ Sandboxed Chromium per tab, no preload, no Node access
+  └─ Microsoft Edge WebView2 per tab — separate OS process, no preload, no Node access
 ```
 
 **Rule:** The renderer has zero Node.js access. Every OS operation goes through `window.aether.*` → preload → IPC handler → main process manager.
@@ -66,7 +66,7 @@ Web Content Layer
 | [src/preload/index.ts](src/preload/index.ts) | Full IPC API surface exposed to renderer (`window.aether`) |
 | [src/renderer/App.tsx](src/renderer/App.tsx) | React root, IPC subscriptions, event listeners |
 | [src/renderer/store/appStore.ts](src/renderer/store/appStore.ts) | Central Zustand store (tabs, profiles, collections, UI state) |
-| [src/main/managers/TabManager.ts](src/main/managers/TabManager.ts) | WebContentsView lifecycle, navigation, zoom, mute |
+| [src/main/managers/TabManager.ts](src/main/managers/TabManager.ts) | WebView2 tab lifecycle, navigation, zoom, mute, downloads |
 | [src/main/managers/ProfileManager.ts](src/main/managers/ProfileManager.ts) | Game process detection (polls every 5s), profile switching |
 | [src/main/store/index.ts](src/main/store/index.ts) | electron-store schema + defaults |
 | [src/shared/types.ts](src/shared/types.ts) | All shared TypeScript types (TabState, Profile, Collection, etc.) |
@@ -202,9 +202,9 @@ overframe/                  ← root (Electron app)
 | Concern | Mitigation |
 |---|---|
 | Renderer XSS | `contextIsolation: true`, no Node access in renderer |
-| Web content privilege escalation | `sandbox: true` on WebContentsView, no preload on web views |
-| Dangerous navigation | Block non-http(s) protocols in `will-navigate` |
-| New window popups | Open in new Overframe tab via `setWindowOpenHandler` |
+| Web content privilege escalation | Tabs render in Edge WebView2 (separate OS process) — no Electron preload, no Node bridge |
+| Dangerous navigation | `isSafeUrl()` on renderer requests + non-http(s)/about navigations cancelled in the addon's `NavigationStarting` |
+| New window popups | Open in new Overframe tab via the addon's `NewWindowRequested` (http/https only) |
 | Data exfiltration | Local storage only, no network calls from main process |
 
 ---

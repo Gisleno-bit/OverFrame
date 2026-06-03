@@ -31,7 +31,6 @@ export default defineConfig({
         'src/renderer/store/appStore.ts',
         'src/renderer/store/missionsStore.ts',
         'src/shared/gameDefaults.ts',
-        'src/shared/userAgent.ts',
       ],
       thresholds: {
         statements: 100,

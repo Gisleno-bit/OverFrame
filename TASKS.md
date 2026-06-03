@@ -9,8 +9,8 @@
 ## État actuel du projet
 
 **Version en cours :** v0.6 → v1.0 (Beta Polish → Release)
-**Branche active :** `dev` (setup d'autonomie mergé) ; feature en cours sur `feat/browser-compat`
-**Dernière session :** 2026-06-01 — [FEAT] Compatibilité navigateur (Google/Cloudflare) : UA + Sec-CH-UA alignés sur Chrome, AutomationControlled désactivé, sans preload. Checks verts, security-reviewer clean. Validation Google/Cloudflare = test humain réel.
+**Branche active :** `dev` (setup d'autonomie mergé) ; feature en cours sur `feat/oauth-popup` (onglets WebView2)
+**Dernière session :** 2026-06-03 — [FEAT] Bascule des onglets sur addon natif **WebView2** (vrai Edge → passe Google/Cloudflare nativement). Zoom/mute/audio/downloads réimplémentés côté natif, garde de navigation, build-from-source (SDK vendored). Pile stealth + OAuth GGG/PoE supprimés. Pipelines vertes (typecheck/lint/test:coverage 100%/build/smoke).
 
 Le cœur du produit est fonctionnel : overlay, tabs, profils, collections, sessions, raccourcis globaux, tray, auto-update, onboarding. L'objectif immédiat est de solidifier pour la release publique v1.0.
 
@@ -26,7 +26,7 @@ _(vide — à remplir par Claude au début d'une session de travail)_
 
 ### Qualité & robustesse
 - [ ] **[FIX] Smoke flaky sur `/overlay/show`** — `scripts/smoke.mjs` échoue ~1 run sur 2 (`overlay/show leaves HIDDEN`). Cause probable : le `sleep(500)` unique court contre le polling de détection de jeu / la séquence first-show. Remplacer par un poll-until (retry jusqu'à ~3 s) plutôt qu'un sleep fixe. Observé le 2026-06-01.
-- [ ] **[VALID HUMAIN] [FEAT] browser-compat — test réel Google + Cloudflare** — vérifier sur un vrai login Google (un onglet Overframe) et un site Cloudflare-protégé que les challenges passent. Résiduel connu : `navigator.userAgentData` (JS) annonce encore Electron faute de preload sur les WebContentsView (contrainte). Si Turnstile bloque encore, trancher : préload durci sur web views (relâche l'invariant) vs accepter.
+- [ ] **[VALID HUMAIN] [FEAT] WebView2 — test réel Google + Cloudflare** — vérifier un vrai login Google et un site Cloudflare-protégé (Turnstile inclus) dans un onglet Overframe. Les onglets sont désormais rendus par Edge WebView2 (vrai navigateur), donc plus de spoofing `navigator.userAgentData` : l'ancien résiduel Electron est levé. Vérifier aussi `pnpm make` (addon packagé en `extraResource`).
 - [ ] **[PERF] RAM au boot ~310 MB > budget 300** — détecté par `pnpm smoke` le 2026-06-01 (overlay FOCUSED / welcome au lancement). Lancer le subagent `perf-auditor`, isoler la cause (welcome page ? WebContentsView retenue ?), consigner avant/après. NB : la RAM observée varie fortement run-à-run (122–310 MB) — mesurer plusieurs fois.
 - [ ] **[PERF] Audit performance** : `curl http://127.0.0.1:9119/metrics` idle + 3 onglets. Corriger si hors budget (< 150 MB idle, < 300 MB actif). Consigner avant/après chiffrés dans DEVLOG. Guide : `.claude/guides/PERFORMANCE.md`
 - [ ] **[FIX] Multi-monitor** : vérifier que la fenêtre se souvient du bon écran après un changement de configuration moniteurs.
