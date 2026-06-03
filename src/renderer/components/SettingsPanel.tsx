@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 import { Heart, Palette, Keyboard, Gamepad2, Globe, Cpu, Info, ExternalLink, Mail, Trash2, FolderOpen } from 'lucide-react'
 import { DiscordIcon } from './icons/DiscordIcon'
-import type { Settings, BrowserIdentity } from '@shared/types'
-import { DEFAULT_SHORTCUTS, MIN_OPACITY, BROWSER_IDENTITIES } from '@shared/types'
+import type { Settings } from '@shared/types'
+import { DEFAULT_SHORTCUTS, MIN_OPACITY, DEFAULT_HOMEPAGE } from '@shared/types'
 import type { ShortcutId, Shortcuts } from '@shared/types'
 import { useAppStore } from '../store/appStore'
 import { Button } from './ui/Button'
@@ -34,10 +34,14 @@ export function SettingsPanel(): JSX.Element {
   const [active, setActive] = useState<TabId>('appearance')
   const [version, setVersion] = useState('')
   const [liveOpacity, setLiveOpacity] = useState(activeProfile?.opacity ?? 1)
+  const [homepageInput, setHomepageInput] = useState(activeProfile?.homepageUrl ?? DEFAULT_HOMEPAGE)
 
   useEffect(() => {
     void window.aether.system.getVersion().then(setVersion).catch(() => { /* non-critical */ })
   }, [])
+  useEffect(() => {
+    setHomepageInput(activeProfile?.homepageUrl ?? DEFAULT_HOMEPAGE)
+  }, [activeProfile?.id, activeProfile?.homepageUrl])
   useEffect(() => {
     setLiveOpacity(activeProfile?.opacity ?? 1)
   }, [activeProfile?.opacity])
@@ -53,6 +57,13 @@ export function SettingsPanel(): JSX.Element {
   )
 
   if (!settings) return <div className="p-4 text-xs text-muted-foreground">Loading…</div>
+
+  const saveHomepage = async (url: string): Promise<void> => {
+    if (!activeProfile) return
+    const trimmed = url.trim() || DEFAULT_HOMEPAGE
+    const updated = await window.aether.profiles.update(activeProfile.id, { homepageUrl: trimmed })
+    if (updated) setActiveProfile(updated as typeof activeProfile)
+  }
 
   const setOpacity = async (val: number): Promise<void> => {
     if (!activeProfile) return
@@ -163,44 +174,55 @@ export function SettingsPanel(): JSX.Element {
 
           {active === 'browser' && (
             <>
-              {/* ── Browser identity ──────────────────────────── */}
+              {/* ── Homepage ──────────────────────────────────── */}
               <Section
-                title="Browser identity"
-                description="The User-Agent string presented to websites. Edge is recommended — it passes Cloudflare and Google sign-in natively. Chrome and Firefox are cosmetic overrides only; fingerprinting still reveals the real engine."
+                title="Homepage"
+                description="The page that opens when you create a new tab or press the Home button. Applies to the current profile."
               >
-                <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Browser identity">
-                  {(Object.keys(BROWSER_IDENTITIES) as BrowserIdentity[]).map((id) => {
-                    const def = BROWSER_IDENTITIES[id]
-                    const checked = (settings.browserIdentity ?? 'edge') === id
-                    return (
-                      <label
-                        key={id}
-                        className={cn(
-                          'flex items-start gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-colors',
-                          checked
-                            ? 'border-primary/60 bg-primary/8'
-                            : 'border-border hover:border-border/80 hover:bg-muted/40',
-                        )}
+                <Field label="URL">
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={homepageInput}
+                      onChange={(e) => setHomepageInput(e.target.value)}
+                      onBlur={() => void saveHomepage(homepageInput)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur() } }}
+                      placeholder="https://www.google.com"
+                      spellCheck={false}
+                      className="flex-1 h-8 rounded border border-border bg-input px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                    {homepageInput !== (activeProfile?.homepageUrl ?? DEFAULT_HOMEPAGE) && (
+                      <button
+                        type="button"
+                        onClick={() => void saveHomepage(homepageInput)}
+                        className="h-8 px-3 rounded border border-primary/60 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
                       >
-                        <input
-                          type="radio"
-                          name="browserIdentity"
-                          value={id}
-                          checked={checked}
-                          onChange={() => void updateSetting('browserIdentity', id as BrowserIdentity)}
-                          className="mt-0.5 shrink-0 accent-primary"
-                        />
-                        <div className="min-w-0">
-                          <p className={cn('text-[12px] font-medium', checked ? 'text-foreground' : 'text-foreground/80')}>
-                            {def.label}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-                            {def.description}
-                          </p>
-                        </div>
-                      </label>
-                    )
-                  })}
+                        Save
+                      </button>
+                    )}
+                  </div>
+                </Field>
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {[
+                    { label: 'Google',  url: 'https://www.google.com'   },
+                    { label: 'YouTube', url: 'https://www.youtube.com'  },
+                    { label: 'Twitch',  url: 'https://www.twitch.tv'    },
+                    { label: 'Discord', url: 'https://discord.com/app'  },
+                  ].map(({ label, url }) => (
+                    <button
+                      key={url}
+                      type="button"
+                      onClick={() => { setHomepageInput(url); void saveHomepage(url) }}
+                      className={cn(
+                        'h-6 px-2.5 rounded-full border text-[11px] transition-colors',
+                        (activeProfile?.homepageUrl ?? DEFAULT_HOMEPAGE) === url
+                          ? 'border-primary/60 bg-primary/10 text-primary'
+                          : 'border-border text-muted-foreground hover:border-border/80 hover:text-foreground',
+                      )}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
               </Section>
 

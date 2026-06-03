@@ -84,8 +84,6 @@ export interface Settings {
   // ── Browser ──────────────────────────────────────────────────────────
   /** Default search engine used when a non-URL query is typed in the address bar. */
   searchEngine?: SearchEngineId
-  /** Browser identity presented to websites (User-Agent string). Default: 'edge'. */
-  browserIdentity?: BrowserIdentity
   /** When true, system dark mode is forced so sites with dark-mode support render dark. Default: true. */
   applyDarkMode?: boolean
   // ── Profile automation ───────────────────────────────────────────────
@@ -289,34 +287,6 @@ export const SEARCH_ENGINES = {
 } as const
 export type SearchEngineId = keyof typeof SEARCH_ENGINES
 
-// ── Browser identity ──────────────────────────────────────────────────────────
-
-export type BrowserIdentity = 'edge' | 'chrome' | 'firefox'
-
-export interface BrowserIdentityDef {
-  label: string
-  description: string
-  /** Empty string = use WebView2's native Edge UA (recommended). */
-  ua: string
-}
-
-export const BROWSER_IDENTITIES: Record<BrowserIdentity, BrowserIdentityDef> = {
-  edge: {
-    label: 'Edge',
-    description: 'Real Edge identity — best compatibility with Cloudflare and Google sign-in',
-    ua: '',
-  },
-  chrome: {
-    label: 'Chrome',
-    description: 'Presents as Chrome — some sites serve optimised content for Chrome',
-    ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-  },
-  firefox: {
-    label: 'Firefox',
-    description: 'Presents as Firefox — use for sites that are optimised for Firefox',
-    ua: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0',
-  },
-} as const
 
 
 

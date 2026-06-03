@@ -10,8 +10,8 @@ import type { ProfileManager } from '../managers/ProfileManager'
 import type { CollectionsManager } from '../managers/CollectionsManager'
 import type { ShortcutManager } from '../managers/ShortcutManager'
 import type { OverlayWindow } from '../windows/OverlayWindow'
-import { DEFAULT_HOMEPAGE, DEFAULT_SHORTCUTS, BROWSER_IDENTITIES } from '@shared/types'
-import type { BookmarkPopupPayload, AchievementPayload, CollectionsPopupPayload, LinkOverflowPayload, MemoryPopupPayload, Settings, Shortcuts, BrowserIdentity } from '@shared/types'
+import { DEFAULT_HOMEPAGE, DEFAULT_SHORTCUTS } from '@shared/types'
+import type { BookmarkPopupPayload, AchievementPayload, CollectionsPopupPayload, LinkOverflowPayload, MemoryPopupPayload, Settings, Shortcuts } from '@shared/types'
 import { getVisibleGames } from '../utils/getVisibleGames'
 import { crashLogPath, ensureLogsDir, logCrash } from '../utils/crashLogger'
 import { logConsole, readLog } from '../utils/devLogger'
@@ -119,7 +119,6 @@ const SETTINGS_ALLOWLIST: ReadonlySet<keyof Settings> = new Set([
   'searchEngine',
   'autoCreateProfiles',
   'autoSwitchProfile',
-  'browserIdentity',
   'applyDarkMode',
 ])
 
@@ -428,10 +427,6 @@ export function registerIpcHandlers(deps: Deps): void {
     }
     if (key === 'startWithWindows' && typeof value === 'boolean') {
       setStartupWithWindows(value)
-    }
-    if (key === 'browserIdentity') {
-      const def = BROWSER_IDENTITIES[(value as BrowserIdentity) ?? 'edge']
-      tabs.setUserAgent(def?.ua ?? '')
     }
     if (key === 'applyDarkMode') {
       nativeTheme.themeSource = (value !== false) ? 'dark' : 'system'

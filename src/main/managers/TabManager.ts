@@ -33,10 +33,8 @@ export class TabManager {
   private recentPopups = new Map<string, number>()
   private stoppedDuringHide = new Set<string>()
   private unloadedUrls = new Map<string, string>()
-  private _userAgent = ''
 
-  constructor(private overlay: OverlayWindow, userAgent = '') {
-    this._userAgent = userAgent
+  constructor(private overlay: OverlayWindow) {
     // Relayout the active WebView2 tab whenever the overlay is resized
     // or chrome/panel dimensions change.
     this.overlay.win.on('resize', () => this.relayoutActive())
@@ -93,7 +91,7 @@ export class TabManager {
     // WebView2View embeds a real Edge WebView2 control as a child HWND of the
     // overlay window. No tabStealth or UA spoofing needed — Edge passes CF natively.
     const bounds = this.overlay.getTabContentBounds()
-    const view = new WebView2View(this.overlay.win, this._userAgent)
+    const view = new WebView2View(this.overlay.win, '')
     view.init(bounds.x, bounds.y, bounds.width, bounds.height)
     view.setVisible(false) // hidden until setActive()
 
@@ -184,13 +182,6 @@ export class TabManager {
     })
   }
 
-  /** Update the User-Agent for all existing tabs and future tabs. */
-  setUserAgent(ua: string): void {
-    this._userAgent = ua
-    for (const tab of this.tabs.values()) {
-      tab.view.setUserAgent(ua)
-    }
-  }
 
   // ── Close ────────────────────────────────────────────────────────────────────
 

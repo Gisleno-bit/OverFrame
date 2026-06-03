@@ -23,7 +23,7 @@ import { registerIpcHandlers } from './ipc/handlers'
 import { installChromeCsp } from './lifecycle/csp'
 import { buildShortcutActions } from './lifecycle/shortcutActions'
 import { IPC } from '@shared/ipc'
-import { DEFAULT_SHORTCUTS, DEFAULT_PROFILE_ID, BROWSER_IDENTITIES, type Shortcuts } from '@shared/types'
+import { DEFAULT_SHORTCUTS, DEFAULT_PROFILE_ID, type Shortcuts } from '@shared/types'
 import { logCrash } from './utils/crashLogger'
 import { startDevServer } from './utils/devServer'
 
@@ -96,9 +96,7 @@ app.whenReady().then(() => {
   overlay = new OverlayWindow(active.windowBounds)
   overlay.setOpacity(active.opacity)
   popup = new PopupWindow(overlay.win)
-  const startSettings = store.get('settings')
-  const initialUA = BROWSER_IDENTITIES[startSettings.browserIdentity ?? 'edge']?.ua ?? ''
-  tabs = new TabManager(overlay, initialUA)
+  tabs = new TabManager(overlay)
   sessionManager = new SessionManager(tabs)
 
   store.set('sessionDirty', true)

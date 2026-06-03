@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAppStore } from '../store/appStore'
-import { DEFAULT_SHORTCUTS, BROWSER_IDENTITIES, type BrowserIdentity } from '@shared/types'
+import { DEFAULT_SHORTCUTS, DEFAULT_HOMEPAGE } from '@shared/types'
 import { cn } from '../lib/cn'
 
 const KBD = 'inline-flex items-center justify-center min-w-[26px] h-[26px] px-2 font-mono text-[11px] font-semibold bg-muted border border-border/80 rounded-md text-foreground/80 shadow-[0_2px_0_rgba(0,0,0,0.35)] leading-none'
@@ -50,15 +50,33 @@ function KeysDuo({ a, b }: { a: string; b: string }): JSX.Element {
   )
 }
 
+const HOMEPAGE_PRESETS = [
+  { label: 'Google',   url: 'https://www.google.com'  },
+  { label: 'YouTube',  url: 'https://www.youtube.com' },
+  { label: 'Twitch',   url: 'https://www.twitch.tv'   },
+  { label: 'Discord',  url: 'https://discord.com/app' },
+] as const
+
 export function OnboardingOverlay(): JSX.Element | null {
-  const { settings, setSettings } = useAppStore()
+  const { settings, setSettings, activeProfile, setActiveProfile } = useAppStore()
   const [step, setStep] = useState(0)
-  const [selectedBrowser, setSelectedBrowser] = useState<BrowserIdentity>('edge')
+  const [homepageUrl, setHomepageUrl] = useState(DEFAULT_HOMEPAGE)
+  const [customInput, setCustomInput] = useState('')
+  const showCustom = !HOMEPAGE_PRESETS.some((p) => p.url === homepageUrl)
 
   if (!settings || settings.hasCompletedOnboarding) return null
 
+  const selectPreset = (url: string): void => {
+    setHomepageUrl(url)
+    setCustomInput('')
+  }
+
   const finish = async (): Promise<void> => {
-    await window.aether.settings.set('browserIdentity', selectedBrowser)
+    const finalUrl = showCustom && customInput.trim() ? customInput.trim() : homepageUrl
+    if (activeProfile) {
+      const updated = await window.aether.profiles.update(activeProfile.id, { homepageUrl: finalUrl })
+      if (updated) setActiveProfile(updated as typeof activeProfile)
+    }
     const next = await window.aether.settings.set('hasCompletedOnboarding', true)
     if (next) setSettings(next)
   }
@@ -176,48 +194,69 @@ export function OnboardingOverlay(): JSX.Element | null {
           </>
         ) : step === 2 ? (
           <>
-            {/* ── Step 3: Browser identity ─────────────────── */}
+            {/* ── Step 3: Homepage ─────────────────────────── */}
             <h2 className="text-[16px] font-semibold leading-snug tracking-tight">
-              Choose your browser
+              Your default page
             </h2>
             <p className="text-[12px] text-muted-foreground leading-relaxed -mt-2">
-              How Overframe identifies itself to websites. You can change this later in Settings → Browser.
+              The page that opens when you launch Overframe. Change it anytime in Settings → Browser.
             </p>
 
-            <div className="flex flex-col gap-1.5 w-full" role="radiogroup" aria-label="Browser identity">
-              {(Object.keys(BROWSER_IDENTITIES) as BrowserIdentity[]).map((id) => {
-                const def = BROWSER_IDENTITIES[id]
-                const checked = selectedBrowser === id
-                return (
-                  <label
-                    key={id}
-                    className={cn(
-                      'flex items-start gap-3 px-3 py-2.5 rounded-xl border cursor-pointer transition-colors',
-                      checked
-                        ? 'border-primary/60 bg-primary/10'
-                        : 'border-border/40 bg-muted/40 hover:border-border/80',
-                    )}
-                  >
-                    <input
-                      type="radio"
-                      name="browserIdentity"
-                      value={id}
-                      checked={checked}
-                      onChange={() => setSelectedBrowser(id)}
-                      className="mt-0.5 shrink-0 accent-primary"
-                    />
-                    <div>
-                      <p className={cn('text-[12px] font-medium', checked ? 'text-foreground' : 'text-foreground/80')}>
-                        {def.label}
-                        {id === 'edge' && <span className="ml-1.5 text-[10px] text-primary/70 font-normal">Recommended</span>}
-                      </p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
-                        {def.description}
-                      </p>
-                    </div>
-                  </label>
-                )
-              })}
+            <div className="flex flex-col gap-1.5 w-full" role="radiogroup" aria-label="Default homepage">
+              <div className="grid grid-cols-2 gap-1.5">
+                {HOMEPAGE_PRESETS.map(({ label, url }) => {
+                  const checked = homepageUrl === url && !showCustom
+                  return (
+                    <button
+                      key={url}
+                      type="button"
+                      role="radio"
+                      aria-checked={checked}
+                      onClick={() => selectPreset(url)}
+                      className={cn(
+                        'flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-colors',
+                        checked
+                          ? 'border-primary/60 bg-primary/10'
+                          : 'border-border/40 bg-muted/40 hover:border-border/80',
+                      )}
+                    >
+                      <span className={cn('text-[12px] font-medium', checked ? 'text-foreground' : 'text-foreground/80')}>
+                        {label}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Custom URL option */}
+              <button
+                type="button"
+                role="radio"
+                aria-checked={showCustom}
+                onClick={() => { setHomepageUrl('custom'); setCustomInput('') }}
+                className={cn(
+                  'flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-colors',
+                  showCustom
+                    ? 'border-primary/60 bg-primary/10'
+                    : 'border-border/40 bg-muted/40 hover:border-border/80',
+                )}
+              >
+                <span className={cn('text-[12px] font-medium', showCustom ? 'text-foreground' : 'text-foreground/80')}>
+                  Custom URL…
+                </span>
+              </button>
+
+              {showCustom && (
+                <input
+                  type="url"
+                  autoFocus
+                  value={customInput}
+                  onChange={(e) => setCustomInput(e.target.value)}
+                  placeholder="https://…"
+                  spellCheck={false}
+                  className="w-full h-8 rounded border border-border bg-input px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              )}
             </div>
 
             <div className="flex flex-col items-center gap-1.5 w-full">
