@@ -53,7 +53,6 @@ const defaults: AetherStoreSchema = {
     performanceMode: false,
     browserIdentity: 'edge',
     applyDarkMode: true,
-    uiScale: 'normal',
     blockedProcesses: [...DEFAULT_BLOCKED_PROCESSES],
     nonGameDirs: [...DEFAULT_NON_GAME_DIRS],
     gamePathHints: [...DEFAULT_GAME_PATH_HINTS],

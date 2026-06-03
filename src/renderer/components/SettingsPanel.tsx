@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 import { Heart, Palette, Keyboard, Gamepad2, Globe, Cpu, Info, ExternalLink, Mail, Trash2, FolderOpen } from 'lucide-react'
 import { DiscordIcon } from './icons/DiscordIcon'
-import type { Settings, BrowserIdentity, UIScale } from '@shared/types'
+import type { Settings, BrowserIdentity } from '@shared/types'
 import { DEFAULT_SHORTCUTS, MIN_OPACITY, BROWSER_IDENTITIES } from '@shared/types'
 import type { ShortcutId, Shortcuts } from '@shared/types'
 import { useAppStore } from '../store/appStore'
@@ -221,39 +221,6 @@ export function SettingsPanel(): JSX.Element {
                 </Check>
               </Section>
 
-              {/* ── UI scale ─────────────────────────────────── */}
-              <Section
-                title="Interface scale"
-                description="Zoom level applied to the overlay UI. Use Large on high-DPI or large monitors."
-              >
-                <div className="flex gap-2" role="radiogroup" aria-label="Interface scale">
-                  {([['compact', 'Compact', '90%'], ['normal', 'Normal', '100%'], ['large', 'Large', '120%']] as const).map(([val, label, pct]) => {
-                    const checked = (settings.uiScale ?? 'normal') === val
-                    return (
-                      <label
-                        key={val}
-                        className={cn(
-                          'flex-1 flex flex-col items-center gap-1 px-2 py-2 rounded-lg border cursor-pointer transition-colors text-center',
-                          checked
-                            ? 'border-primary/60 bg-primary/8 text-foreground'
-                            : 'border-border hover:border-border/80 hover:bg-muted/40 text-muted-foreground',
-                        )}
-                      >
-                        <input
-                          type="radio"
-                          name="uiScale"
-                          value={val}
-                          checked={checked}
-                          onChange={() => void updateSetting('uiScale', val as UIScale)}
-                          className="sr-only"
-                        />
-                        <span className="text-[13px] font-semibold">{pct}</span>
-                        <span className="text-[10px]">{label}</span>
-                      </label>
-                    )
-                  })}
-                </div>
-              </Section>
             </>
           )}
 
@@ -365,7 +332,7 @@ export function SettingsPanel(): JSX.Element {
                 </p>
                 <p className="text-[11px] text-muted-foreground">
                   Version <span className="text-foreground font-medium">{version || '\u2014'}</span>
-                  <span className="text-muted-foreground/40"> · </span>
+                  <span className="text-muted-foreground"> · </span>
                   MIT License
                 </p>
               </Section>
@@ -379,7 +346,7 @@ export function SettingsPanel(): JSX.Element {
                     className="justify-start gap-2 hover:border-indigo-500/50 hover:text-indigo-400"
                   >
                     <DiscordIcon size={11} /> Discord &mdash; bugs, ideas &amp; chat
-                    <ExternalLink size={10} className="ml-auto text-muted-foreground/40" />
+                    <ExternalLink size={10} className="ml-auto text-muted-foreground" />
                   </Button>
                   <Button
                     size="sm"
@@ -388,7 +355,7 @@ export function SettingsPanel(): JSX.Element {
                     className="justify-start gap-2"
                   >
                     <Globe size={11} /> overframe.app
-                    <ExternalLink size={10} className="ml-auto text-muted-foreground/40" />
+                    <ExternalLink size={10} className="ml-auto text-muted-foreground" />
                   </Button>
                   <Button
                     size="sm"
@@ -397,7 +364,7 @@ export function SettingsPanel(): JSX.Element {
                     className="justify-start gap-2"
                   >
                     <Mail size={11} /> contact@overframe.app
-                    <ExternalLink size={10} className="ml-auto text-muted-foreground/40" />
+                    <ExternalLink size={10} className="ml-auto text-muted-foreground" />
                   </Button>
                   <Button
                     size="sm"
@@ -406,7 +373,7 @@ export function SettingsPanel(): JSX.Element {
                     className="justify-start gap-2 hover:border-pink-500/50 hover:text-pink-400"
                   >
                     <Heart size={11} /> Support development on Ko-fi
-                    <ExternalLink size={10} className="ml-auto text-muted-foreground/40" />
+                    <ExternalLink size={10} className="ml-auto text-muted-foreground" />
                   </Button>
                 </div>
               </Section>

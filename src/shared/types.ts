@@ -88,9 +88,6 @@ export interface Settings {
   browserIdentity?: BrowserIdentity
   /** When true, system dark mode is forced so sites with dark-mode support render dark. Default: true. */
   applyDarkMode?: boolean
-  /** UI zoom level applied to the overlay chrome. Default: 'normal' (100%). */
-  uiScale?: UIScale
-
   // ── Profile automation ───────────────────────────────────────────────
   /** When false, Overframe will never auto-create a profile for an unrecognised game. */
   autoCreateProfiles?: boolean
@@ -321,16 +318,6 @@ export const BROWSER_IDENTITIES: Record<BrowserIdentity, BrowserIdentityDef> = {
   },
 } as const
 
-// ── UI scale ──────────────────────────────────────────────────────────────────
-
-export type UIScale = 'compact' | 'normal' | 'large'
-
-/** webContents zoom factor applied to the overlay window. */
-export const UI_SCALE_ZOOM: Record<UIScale, number> = {
-  compact: 0.9,
-  normal:  1.0,
-  large:   1.2,
-}
 
 
 // ── Downloads ─────────────────────────────────────────────────────────────────

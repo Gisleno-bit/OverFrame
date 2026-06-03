@@ -124,7 +124,7 @@ export function GameDetectionSection(): JSX.Element {
       >
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] text-muted-foreground/60">
+            <span className="text-xs text-muted-foreground">
               Anything launched from inside is treated as a potential game.
             </span>
             <button
@@ -132,28 +132,28 @@ export function GameDetectionSection(): JSX.Element {
               aria-label="Add a game folder"
               disabled={busy}
               onClick={() => void handleAddCustomPath()}
-              className="flex items-center gap-1 text-[10px] text-muted-foreground/70 hover:text-foreground disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 transition-colors"
             >
               <FolderPlus size={11} />
               Add
             </button>
           </div>
           {customPaths.length === 0 ? (
-            <p className="text-[10px] text-muted-foreground/40 leading-snug italic">
+            <p className="text-xs text-muted-foreground leading-snug">
               No custom folders added.
             </p>
           ) : (
             <ul className="space-y-1 max-h-32 overflow-y-auto pr-0.5" aria-label="Custom game folders">
               {customPaths.map((p) => (
                 <li key={p} className="flex items-center gap-2 rounded bg-muted/40 px-2 py-1 min-w-0">
-                  <span title={p} className="flex-1 truncate text-[10px] text-muted-foreground font-mono min-w-0">
+                  <span title={p} className="flex-1 truncate text-[11px] text-foreground/80 font-mono min-w-0">
                     {p}
                   </span>
                   <button
                     type="button"
                     aria-label={`Remove ${p}`}
                     onClick={() => void handleRemoveCustomPath(p)}
-                    className="shrink-0 text-muted-foreground/50 hover:text-destructive transition-colors"
+                    className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
                   >
                     <X size={11} />
                   </button>
@@ -170,7 +170,7 @@ export function GameDetectionSection(): JSX.Element {
         description="Games you've removed from auto-detection. Click the restore icon to allow auto-creation again."
       >
         {excluded.length === 0 ? (
-          <p className="text-[10px] text-muted-foreground/50 leading-snug">
+          <p className="text-xs text-muted-foreground leading-snug">
             None yet — when you remove a game from auto-detection it appears here.
           </p>
         ) : (
@@ -182,14 +182,14 @@ export function GameDetectionSection(): JSX.Element {
                 placeholder="Filter…"
                 value={excludedFilter}
                 onChange={(e) => setExcludedFilter(e.target.value)}
-                className="w-full mb-1.5 rounded border border-border bg-transparent px-2 py-1 text-[10px] text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+                className="w-full mb-1.5 rounded border border-border bg-transparent px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               />
             )}
             <div className="flex items-center gap-1 mb-1.5">
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-xs text-foreground/80">
                 Excluded
                 {excluded.length > 0 && (
-                  <span className="ml-0.5 text-[9px] bg-muted rounded px-1 py-0.5 align-middle">
+                  <span className="ml-0.5 text-[10px] bg-muted rounded px-1 py-0.5 align-middle text-muted-foreground">
                     {excluded.length}
                   </span>
                 )}
@@ -198,7 +198,7 @@ export function GameDetectionSection(): JSX.Element {
             <ul className="space-y-1 max-h-40 overflow-y-auto pr-0.5" aria-label="Excluded processes">
               {filteredExcluded.map((name) => (
                 <li key={name} className="flex items-center gap-2 rounded bg-muted/40 px-2 py-1 min-w-0">
-                  <span className="flex-1 truncate text-[10px] text-muted-foreground font-mono min-w-0">
+                  <span className="flex-1 truncate text-[11px] text-foreground/80 font-mono min-w-0">
                     {name}
                   </span>
                   <button
@@ -206,14 +206,14 @@ export function GameDetectionSection(): JSX.Element {
                     aria-label={`Re-enable ${name}`}
                     title="Restore"
                     onClick={() => void handleUnexclude(name)}
-                    className="shrink-0 text-muted-foreground/50 hover:text-emerald-400 transition-colors"
+                    className="shrink-0 text-muted-foreground hover:text-emerald-400 transition-colors"
                   >
                     <RotateCcw size={11} />
                   </button>
                 </li>
               ))}
               {filteredExcluded.length === 0 && excludedFilter.trim() !== '' && (
-                <p className="text-[10px] text-muted-foreground/50">No matches.</p>
+                <p className="text-xs text-muted-foreground">No matches.</p>
               )}
             </ul>
           </>
@@ -222,7 +222,7 @@ export function GameDetectionSection(): JSX.Element {
 
       {/* ── Advanced (collapsible) ────────────────────────────── */}
       <details className="group">
-        <summary className="flex items-center gap-1.5 cursor-pointer list-none select-none text-[9px] uppercase tracking-[0.12em] font-semibold text-muted-foreground/70 hover:text-foreground transition-colors">
+        <summary className="flex items-center gap-1.5 cursor-pointer list-none select-none text-[11px] uppercase tracking-[0.08em] font-semibold text-muted-foreground hover:text-foreground transition-colors">
           <ChevronRight size={10} className="transition-transform duration-150 group-open:rotate-90 shrink-0" />
           Advanced detection settings
         </summary>

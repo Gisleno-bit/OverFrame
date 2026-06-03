@@ -23,7 +23,7 @@ import { registerIpcHandlers } from './ipc/handlers'
 import { installChromeCsp } from './lifecycle/csp'
 import { buildShortcutActions } from './lifecycle/shortcutActions'
 import { IPC } from '@shared/ipc'
-import { DEFAULT_SHORTCUTS, DEFAULT_PROFILE_ID, BROWSER_IDENTITIES, UI_SCALE_ZOOM, type Shortcuts } from '@shared/types'
+import { DEFAULT_SHORTCUTS, DEFAULT_PROFILE_ID, BROWSER_IDENTITIES, type Shortcuts } from '@shared/types'
 import { logCrash } from './utils/crashLogger'
 import { startDevServer } from './utils/devServer'
 
@@ -99,11 +99,6 @@ app.whenReady().then(() => {
   const startSettings = store.get('settings')
   const initialUA = BROWSER_IDENTITIES[startSettings.browserIdentity ?? 'edge']?.ua ?? ''
   tabs = new TabManager(overlay, initialUA)
-  // Apply UI scale to the overlay chrome.
-  const initialZoom = UI_SCALE_ZOOM[startSettings.uiScale ?? 'normal'] ?? 1.0
-  overlay.win.webContents.on('did-finish-load', () => {
-    if (!overlay!.win.isDestroyed()) overlay!.win.webContents.setZoomFactor(initialZoom)
-  })
   sessionManager = new SessionManager(tabs)
 
   store.set('sessionDirty', true)

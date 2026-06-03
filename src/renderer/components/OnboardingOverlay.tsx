@@ -70,7 +70,7 @@ export function OnboardingOverlay(): JSX.Element | null {
         {step === 0 ? (
           <>
             {/* ── Step 1: THE shortcut ─────────────────────────── */}
-            <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-primary/50">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-primary/80">
               Welcome to Overframe
             </p>
 
@@ -83,12 +83,12 @@ export function OnboardingOverlay(): JSX.Element | null {
                       {k}
                     </kbd>
                     {i < arr.length - 1 && (
-                      <span className="text-[18px] font-light text-muted-foreground/40">+</span>
+                      <span className="text-[18px] font-light text-muted-foreground/60">+</span>
                     )}
                   </span>
                 ))}
               </div>
-              <p className="text-[11px] text-muted-foreground/50 tracking-wide">
+              <p className="text-xs text-muted-foreground tracking-wide">
                 show / hide · works from any game
               </p>
             </div>
@@ -114,7 +114,7 @@ export function OnboardingOverlay(): JSX.Element | null {
               <button
                 type="button"
                 onClick={() => void finish()}
-                className="text-[10px] text-muted-foreground/35 hover:text-muted-foreground/60 transition-colors"
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
                 Skip intro
               </button>
@@ -136,7 +136,7 @@ export function OnboardingOverlay(): JSX.Element | null {
               <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-muted/40 border border-border/40">
                 <div>
                   <p className="text-[12px] font-medium text-foreground/90">Click-through</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">Clicks go straight to the game</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Clicks go straight to the game</p>
                 </div>
                 <Keys shortcut={DEFAULT_SHORTCUTS.clickThrough!} />
               </div>
@@ -145,7 +145,7 @@ export function OnboardingOverlay(): JSX.Element | null {
               <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-muted/40 border border-border/40">
                 <div>
                   <p className="text-[12px] font-medium text-foreground/90">Focus mode</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">Hides the toolbar, nothing else</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Hides the toolbar, nothing else</p>
                 </div>
                 <Keys shortcut={DEFAULT_SHORTCUTS.toggleFocusMode!} />
               </div>
@@ -154,7 +154,7 @@ export function OnboardingOverlay(): JSX.Element | null {
               <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl bg-muted/40 border border-border/40">
                 <div>
                   <p className="text-[12px] font-medium text-foreground/90">Opacity</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">Tune transparency on the fly</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Tune transparency on the fly</p>
                 </div>
                 <KeysDuo a={DEFAULT_SHORTCUTS.opacityUp!} b={DEFAULT_SHORTCUTS.opacityDown!} />
               </div>
@@ -169,7 +169,7 @@ export function OnboardingOverlay(): JSX.Element | null {
               >
                 Next →
               </button>
-              <p className="text-[10px] text-muted-foreground/30">
+              <p className="text-xs text-muted-foreground">
                 All shortcuts can be changed in Settings
               </p>
             </div>

@@ -10,8 +10,8 @@ import type { ProfileManager } from '../managers/ProfileManager'
 import type { CollectionsManager } from '../managers/CollectionsManager'
 import type { ShortcutManager } from '../managers/ShortcutManager'
 import type { OverlayWindow } from '../windows/OverlayWindow'
-import { DEFAULT_HOMEPAGE, DEFAULT_SHORTCUTS, BROWSER_IDENTITIES, UI_SCALE_ZOOM } from '@shared/types'
-import type { BookmarkPopupPayload, AchievementPayload, CollectionsPopupPayload, LinkOverflowPayload, MemoryPopupPayload, Settings, Shortcuts, BrowserIdentity, UIScale } from '@shared/types'
+import { DEFAULT_HOMEPAGE, DEFAULT_SHORTCUTS, BROWSER_IDENTITIES } from '@shared/types'
+import type { BookmarkPopupPayload, AchievementPayload, CollectionsPopupPayload, LinkOverflowPayload, MemoryPopupPayload, Settings, Shortcuts, BrowserIdentity } from '@shared/types'
 import { getVisibleGames } from '../utils/getVisibleGames'
 import { crashLogPath, ensureLogsDir, logCrash } from '../utils/crashLogger'
 import { logConsole, readLog } from '../utils/devLogger'
@@ -121,7 +121,6 @@ const SETTINGS_ALLOWLIST: ReadonlySet<keyof Settings> = new Set([
   'autoSwitchProfile',
   'browserIdentity',
   'applyDarkMode',
-  'uiScale',
 ])
 
 /** User-configurable string list caps — prevents storing pathological lists. */
@@ -436,10 +435,6 @@ export function registerIpcHandlers(deps: Deps): void {
     }
     if (key === 'applyDarkMode') {
       nativeTheme.themeSource = (value !== false) ? 'dark' : 'system'
-    }
-    if (key === 'uiScale') {
-      const factor = UI_SCALE_ZOOM[(value as UIScale) ?? 'normal'] ?? 1.0
-      if (!overlay.win.isDestroyed()) overlay.win.webContents.setZoomFactor(factor)
     }
     return next
   })
