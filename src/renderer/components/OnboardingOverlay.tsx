@@ -1,7 +1,13 @@
 import { useState } from 'react'
 import { useAppStore } from '../store/appStore'
-import { DEFAULT_SHORTCUTS, DEFAULT_HOMEPAGE } from '@shared/types'
+import { DEFAULT_SHORTCUTS, DEFAULT_HOMEPAGE, HOMEPAGE_PRESETS } from '@shared/types'
+import type { Settings } from '@shared/types'
 import { cn } from '../lib/cn'
+
+/** Returns true when a bare domain string has at least one dot and a 2+-char TLD. */
+function isValidDomain(domain: string): boolean {
+  return /^[^\s/]+\.[a-z]{2,}/i.test(domain.trim())
+}
 
 const KBD = 'inline-flex items-center justify-center min-w-[26px] h-[26px] px-2 font-mono text-[11px] font-semibold bg-muted border border-border/80 rounded-md text-foreground/80 shadow-[0_2px_0_rgba(0,0,0,0.35)] leading-none'
 const PLUS = <span className="text-[10px] text-muted-foreground/40">+</span>
@@ -50,19 +56,14 @@ function KeysDuo({ a, b }: { a: string; b: string }): JSX.Element {
   )
 }
 
-const HOMEPAGE_PRESETS = [
-  { label: 'Google',   url: 'https://www.google.com'  },
-  { label: 'YouTube',  url: 'https://www.youtube.com' },
-  { label: 'Twitch',   url: 'https://www.twitch.tv'   },
-  { label: 'Discord',  url: 'https://discord.com/app' },
-] as const
-
 export function OnboardingOverlay(): JSX.Element | null {
-  const { settings, setSettings, activeProfile, setActiveProfile } = useAppStore()
+  const { settings, setSettings } = useAppStore()
   const [step, setStep] = useState(0)
   const [homepageUrl, setHomepageUrl] = useState(DEFAULT_HOMEPAGE)
   const [customInput, setCustomInput] = useState('')
   const showCustom = !HOMEPAGE_PRESETS.some((p) => p.url === homepageUrl)
+  const domainError = showCustom && customInput.trim() !== '' && !isValidDomain(customInput)
+  const canFinish = !showCustom || isValidDomain(customInput)
 
   if (!settings || settings.hasCompletedOnboarding) return null
 
@@ -72,13 +73,10 @@ export function OnboardingOverlay(): JSX.Element | null {
   }
 
   const finish = async (): Promise<void> => {
-    const finalUrl = showCustom && customInput.trim() ? customInput.trim() : homepageUrl
-    if (activeProfile) {
-      const updated = await window.aether.profiles.update(activeProfile.id, { homepageUrl: finalUrl })
-      if (updated) setActiveProfile(updated as typeof activeProfile)
-    }
+    const finalUrl = showCustom ? 'https://' + customInput.trim() : homepageUrl
+    await window.aether.settings.set('homepageUrl', finalUrl)
     const next = await window.aether.settings.set('hasCompletedOnboarding', true)
-    if (next) setSettings(next)
+    if (next) setSettings(next as Settings)
   }
 
   return (
@@ -247,23 +245,48 @@ export function OnboardingOverlay(): JSX.Element | null {
               </button>
 
               {showCustom && (
-                <input
-                  type="url"
-                  autoFocus
-                  value={customInput}
-                  onChange={(e) => setCustomInput(e.target.value)}
-                  placeholder="https://…"
-                  spellCheck={false}
-                  className="w-full h-8 rounded border border-border bg-input px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                />
+                <div className="flex flex-col gap-1 w-full">
+                  <div className={cn(
+                    'flex h-8 w-full rounded border bg-input text-xs overflow-hidden focus-within:ring-1',
+                    domainError
+                      ? 'border-destructive focus-within:ring-destructive'
+                      : 'border-border focus-within:ring-ring',
+                  )}>
+                    <span className="flex items-center px-2 text-muted-foreground bg-muted/40 border-r border-border/60 select-none shrink-0">
+                      https://
+                    </span>
+                    <input
+                      type="text"
+                      autoFocus
+                      value={customInput}
+                      onChange={(e) => setCustomInput(e.target.value)}
+                      placeholder="example.com"
+                      spellCheck={false}
+                      aria-invalid={domainError}
+                      aria-describedby={domainError ? 'onboarding-url-error' : undefined}
+                      className="flex-1 min-w-0 bg-transparent px-2 text-foreground placeholder:text-muted-foreground focus:outline-none"
+                    />
+                  </div>
+                  {domainError && (
+                    <p id="onboarding-url-error" role="alert" className="text-[11px] text-destructive text-left">
+                      Enter a valid domain — e.g. example.com
+                    </p>
+                  )}
+                </div>
               )}
             </div>
 
             <div className="flex flex-col items-center gap-1.5 w-full">
               <button
                 type="button"
-                onClick={() => void finish()}
-                className="w-full h-9 rounded-lg text-[13px] font-medium bg-primary text-primary-foreground hover:bg-primary/90 active:scale-[0.98] transition-all"
+                aria-disabled={!canFinish}
+                onClick={() => { if (canFinish) void finish() }}
+                className={cn(
+                  'w-full h-9 rounded-lg text-[13px] font-medium transition-all',
+                  canFinish
+                    ? 'bg-primary text-primary-foreground hover:bg-primary/90 active:scale-[0.98]'
+                    : 'bg-primary/40 text-primary-foreground/50 cursor-not-allowed',
+                )}
               >
                 Start browsing →
               </button>
@@ -287,4 +310,3 @@ export function OnboardingOverlay(): JSX.Element | null {
     </div>
   )
 }
-

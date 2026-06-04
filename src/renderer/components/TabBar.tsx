@@ -1,4 +1,4 @@
-﻿import { MousePointer2, Plus, Volume2, VolumeX, X, Minimize2, Maximize2 } from 'lucide-react'
+﻿import { MousePointer2, Plus, Volume2, VolumeX, X, Minimize2, Maximize2, Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store/appStore'
 import { cn } from '../lib/cn'
@@ -455,12 +455,16 @@ export function TabBar(): JSX.Element {
                     : 'text-muted-foreground hover:bg-muted/40 hover:text-foreground/80',
                 )}
               >
-                  {!hideIcon && tab.favicon && (
-                    <img
-                      src={tab.favicon}
-                      alt=""
-                      className={cn('h-4 w-4 shrink-0', poppingFavicons.has(tab.id) ? 'favicon-pop' : 'opacity-80')}
-                    />
+                  {!hideIcon && (
+                    tab.isLoading ? (
+                      <Loader2 size={13} className="animate-spin shrink-0 text-muted-foreground/50" aria-hidden="true" />
+                    ) : tab.favicon ? (
+                      <img
+                        src={tab.favicon}
+                        alt=""
+                        className={cn('h-4 w-4 shrink-0', poppingFavicons.has(tab.id) ? 'favicon-pop' : 'opacity-80')}
+                      />
+                    ) : null
                   )}
 
                   {/* Audio indicator — shown when audio is playing or tab is muted */}
@@ -560,13 +564,15 @@ export function TabBar(): JSX.Element {
                   isActive ? 'bg-[#1d1d1d] text-foreground' : 'bg-muted/40 text-muted-foreground',
                 )}
               >
-                {tab.favicon && (
+                {tab.isLoading ? (
+                  <Loader2 size={13} className="animate-spin shrink-0 text-muted-foreground/50" aria-hidden="true" />
+                ) : tab.favicon ? (
                   <img
                     src={tab.favicon}
                     alt=""
                     className={cn('h-4 w-4 shrink-0', poppingFavicons.has(tab.id) ? 'favicon-pop' : 'opacity-80')}
                   />
-                )}
+                ) : null}
                 <span
                   className="text-[12px] h-full items-center flex leading-none whitespace-nowrap flex-1 min-w-0"
                   style={{

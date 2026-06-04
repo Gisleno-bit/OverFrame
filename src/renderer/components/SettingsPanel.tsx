@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 import { Heart, Palette, Keyboard, Gamepad2, Globe, Cpu, Info, ExternalLink, Mail, Trash2, FolderOpen } from 'lucide-react'
 import { DiscordIcon } from './icons/DiscordIcon'
 import type { Settings } from '@shared/types'
-import { DEFAULT_SHORTCUTS, MIN_OPACITY, DEFAULT_HOMEPAGE } from '@shared/types'
+import { DEFAULT_SHORTCUTS, MIN_OPACITY, DEFAULT_HOMEPAGE, HOMEPAGE_PRESETS, SEARCH_ENGINES } from '@shared/types'
+import type { SearchEngineId } from '@shared/types'
 import type { ShortcutId, Shortcuts } from '@shared/types'
 import { useAppStore } from '../store/appStore'
 import { Button } from './ui/Button'
@@ -12,7 +13,18 @@ import { ShortcutsSection } from './settings/ShortcutsSection'
 import { GameDetectionSection } from './settings/GameDetectionSection'
 import { cn } from '../lib/cn'
 
+function isValidDomain(domain: string): boolean {
+  return /^[^\s/]+\.[a-z]{2,}/i.test(domain.trim())
+}
+
 type TabId = 'appearance' | 'browser' | 'shortcuts' | 'detection' | 'system' | 'about'
+
+const HOMEPAGE_TO_ENGINE: Partial<Record<string, SearchEngineId>> = {
+  'https://www.google.com':   'google',
+  'https://duckduckgo.com':   'duckduckgo',
+  'https://www.bing.com':     'bing',
+  'https://search.brave.com': 'brave',
+}
 
 interface TabDef {
   id: TabId
@@ -34,14 +46,15 @@ export function SettingsPanel(): JSX.Element {
   const [active, setActive] = useState<TabId>('appearance')
   const [version, setVersion] = useState('')
   const [liveOpacity, setLiveOpacity] = useState(activeProfile?.opacity ?? 1)
-  const [homepageInput, setHomepageInput] = useState(activeProfile?.homepageUrl ?? DEFAULT_HOMEPAGE)
+  const [homepageInput, setHomepageInput] = useState(settings?.homepageUrl ?? DEFAULT_HOMEPAGE)
+  const [homepageError, setHomepageError] = useState(false)
 
   useEffect(() => {
     void window.aether.system.getVersion().then(setVersion).catch(() => { /* non-critical */ })
   }, [])
   useEffect(() => {
-    setHomepageInput(activeProfile?.homepageUrl ?? DEFAULT_HOMEPAGE)
-  }, [activeProfile?.id, activeProfile?.homepageUrl])
+    setHomepageInput(settings?.homepageUrl ?? DEFAULT_HOMEPAGE)
+  }, [settings?.homepageUrl])
   useEffect(() => {
     setLiveOpacity(activeProfile?.opacity ?? 1)
   }, [activeProfile?.opacity])
@@ -59,10 +72,23 @@ export function SettingsPanel(): JSX.Element {
   if (!settings) return <div className="p-4 text-xs text-muted-foreground">Loading…</div>
 
   const saveHomepage = async (url: string): Promise<void> => {
-    if (!activeProfile) return
-    const trimmed = url.trim() || DEFAULT_HOMEPAGE
-    const updated = await window.aether.profiles.update(activeProfile.id, { homepageUrl: trimmed })
-    if (updated) setActiveProfile(updated as typeof activeProfile)
+    const domain = url.replace(/^https?:\/\//i, '').trim()
+    if (!domain) { setHomepageInput(settings?.homepageUrl ?? DEFAULT_HOMEPAGE); setHomepageError(false); return }
+    if (!isValidDomain(domain)) { setHomepageError(true); return }
+    setHomepageError(false)
+    const next = await window.aether.settings.set('homepageUrl', 'https://' + domain)
+    if (next) { setSettings(next as Settings); setHomepageInput('https://' + domain) }
+    else setHomepageInput(settings?.homepageUrl ?? DEFAULT_HOMEPAGE)
+  }
+
+  const selectHomepagePreset = async (url: string): Promise<void> => {
+    setHomepageInput(url)
+    await saveHomepage(url)
+    const engineId = HOMEPAGE_TO_ENGINE[url]
+    if (engineId && SEARCH_ENGINES[engineId]) {
+      const next = await window.aether.settings.set('searchEngine', engineId)
+      if (next) setSettings(next as Settings)
+    }
   }
 
   const setOpacity = async (val: number): Promise<void> => {
@@ -177,63 +203,82 @@ export function SettingsPanel(): JSX.Element {
               {/* ── Homepage ──────────────────────────────────── */}
               <Section
                 title="Homepage"
-                description="The page that opens when you create a new tab or press the Home button. Applies to the current profile."
+                description="The page that opens when you create a new tab. This is a global setting — it applies regardless of the active game profile."
               >
-                <Field label="URL">
-                  <div className="flex gap-2">
-                    <input
-                      type="url"
-                      value={homepageInput}
-                      onChange={(e) => setHomepageInput(e.target.value)}
-                      onBlur={() => void saveHomepage(homepageInput)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.currentTarget.blur() } }}
-                      placeholder="https://www.google.com"
-                      spellCheck={false}
-                      className="flex-1 h-8 rounded border border-border bg-input px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                    />
-                    {homepageInput !== (activeProfile?.homepageUrl ?? DEFAULT_HOMEPAGE) && (
-                      <button
-                        type="button"
-                        onClick={() => void saveHomepage(homepageInput)}
-                        className="h-8 px-3 rounded border border-primary/60 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
-                      >
-                        Save
-                      </button>
-                    )}
+                <div className="flex flex-col gap-1.5">
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {HOMEPAGE_PRESETS.map(({ label, url }) => {
+                      const checked = (settings.homepageUrl ?? DEFAULT_HOMEPAGE) === url
+                      return (
+                        <button
+                          key={url}
+                          type="button"
+                          onClick={() => void selectHomepagePreset(url)}
+                          className={cn(
+                            'flex items-center justify-center h-8 rounded-lg border text-xs font-medium transition-colors',
+                            checked
+                              ? 'border-primary/60 bg-primary/10 text-primary'
+                              : 'border-border text-muted-foreground hover:border-border/80 hover:text-foreground',
+                          )}
+                        >
+                          {label}
+                        </button>
+                      )
+                    })}
                   </div>
-                </Field>
-                <div className="flex flex-wrap gap-1.5 pt-0.5">
-                  {[
-                    { label: 'Google',  url: 'https://www.google.com'   },
-                    { label: 'YouTube', url: 'https://www.youtube.com'  },
-                    { label: 'Twitch',  url: 'https://www.twitch.tv'    },
-                    { label: 'Discord', url: 'https://discord.com/app'  },
-                  ].map(({ label, url }) => (
-                    <button
-                      key={url}
-                      type="button"
-                      onClick={() => { setHomepageInput(url); void saveHomepage(url) }}
-                      className={cn(
-                        'h-6 px-2.5 rounded-full border text-[11px] transition-colors',
-                        (activeProfile?.homepageUrl ?? DEFAULT_HOMEPAGE) === url
-                          ? 'border-primary/60 bg-primary/10 text-primary'
-                          : 'border-border text-muted-foreground hover:border-border/80 hover:text-foreground',
+                  <Field label="Custom URL">
+                    <div className="flex gap-2 items-start">
+                      <div className="flex flex-col gap-1 flex-1 min-w-0">
+                        <div className={cn(
+                          'flex h-8 rounded border bg-input text-xs overflow-hidden focus-within:ring-1',
+                          homepageError
+                            ? 'border-destructive focus-within:ring-destructive'
+                            : 'border-border focus-within:ring-ring',
+                        )}>
+                          <span className="flex items-center px-2 text-muted-foreground bg-muted/40 border-r border-border/60 select-none shrink-0">
+                            https://
+                          </span>
+                          <input
+                            type="text"
+                            value={homepageInput.replace(/^https?:\/\//i, '')}
+                            onChange={(e) => { setHomepageError(false); setHomepageInput('https://' + e.target.value) }}
+                            onBlur={() => void saveHomepage(homepageInput)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                            placeholder="example.com"
+                            spellCheck={false}
+                            aria-invalid={homepageError}
+                            aria-describedby={homepageError ? 'homepage-url-error' : undefined}
+                            className="flex-1 min-w-0 bg-transparent px-2 text-foreground placeholder:text-muted-foreground focus:outline-none"
+                          />
+                        </div>
+                        {homepageError && (
+                          <p id="homepage-url-error" role="alert" className="text-[11px] text-destructive">
+                            Enter a valid domain — e.g. example.com
+                          </p>
+                        )}
+                      </div>
+                      {homepageInput !== (settings.homepageUrl ?? DEFAULT_HOMEPAGE) && (
+                        <button
+                          type="button"
+                          onClick={() => void saveHomepage(homepageInput)}
+                          className="h-8 px-3 rounded border border-primary/60 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
+                        >
+                          Save
+                        </button>
                       )}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                    </div>
+                  </Field>
                 </div>
               </Section>
 
               {/* ── Dark mode ────────────────────────────────── */}
               <Section
                 title="Dark mode"
-                description="When enabled, websites with dark-mode support will render in dark mode. Sites that don't support it are unaffected."
+                description="When enabled, sites that support dark mode activate it automatically via prefers-color-scheme. Sites without dark mode support are unaffected."
               >
                 <Check
-                  label="Apply dark mode to websites"
-                  hint="Sets system dark mode so Edge WebView2 tabs serve dark content for supported sites."
+                  label="Enable dark mode for websites"
+                  hint="Signals prefers-color-scheme: dark to Edge WebView2 — sites with a dark theme use it automatically."
                 >
                   <input
                     type="checkbox"
