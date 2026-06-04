@@ -11,6 +11,7 @@ import type { CollectionsManager } from '../managers/CollectionsManager'
 import type { ShortcutManager } from '../managers/ShortcutManager'
 import type { OverlayWindow } from '../windows/OverlayWindow'
 import { DEFAULT_HOMEPAGE, DEFAULT_SHORTCUTS } from '@shared/types'
+import { WebView2View } from '../managers/tabs/WebView2View'
 import type { BookmarkPopupPayload, AchievementPayload, CollectionsPopupPayload, LinkOverflowPayload, MemoryPopupPayload, Settings, Shortcuts } from '@shared/types'
 import { getVisibleGames } from '../utils/getVisibleGames'
 import { crashLogPath, ensureLogsDir, logCrash } from '../utils/crashLogger'
@@ -120,6 +121,7 @@ const SETTINGS_ALLOWLIST: ReadonlySet<keyof Settings> = new Set([
   'autoCreateProfiles',
   'autoSwitchProfile',
   'applyDarkMode',
+  'homepageUrl',
 ])
 
 /** User-configurable string list caps — prevents storing pathological lists. */
@@ -181,7 +183,7 @@ export function registerIpcHandlers(deps: Deps): void {
 
   // ─── Tabs ────────────────────────────────────────────────────────────
   ipcMain.handle(IPC.TabsCreate, (_e, url?: string) => {
-    const target = isSafeBoundedUrl(url) ? url : (profiles.getActive().homepageUrl || DEFAULT_HOMEPAGE)
+    const target = isSafeBoundedUrl(url) ? url : (store.get('settings').homepageUrl || DEFAULT_HOMEPAGE)
     return tabs.create(target)
   })
   ipcMain.handle(IPC.TabsClose, (_e, id: string) => tabs.close(id))
@@ -192,6 +194,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle(IPC.TabsGoBack, (_e, id: string) => tabs.goBack(id))
   ipcMain.handle(IPC.TabsGoForward, (_e, id: string) => tabs.goForward(id))
   ipcMain.handle(IPC.TabsReload, (_e, id: string) => tabs.reload(id))
+  ipcMain.handle(IPC.TabsStop,   (_e, id: string) => tabs.stop(id))
   ipcMain.handle(IPC.TabsSetActive, (_e, id: string) => tabs.setActive(id))
   ipcMain.handle(IPC.TabsDeactivate, () => tabs.deactivate())
   ipcMain.handle(IPC.TabsReorder, (_e, ids: string[]) => {
@@ -245,6 +248,13 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle(IPC.OverlayHide, () => overlay.hide())
   ipcMain.on(IPC.OverlayShow, () => overlay.show())
   ipcMain.handle(IPC.OverlayGetState, () => overlay.getState())
+  // Reclaim OS keyboard focus from WebView2 back to the Electron renderer.
+  // Uses sendSync so the renderer blocks until ::SetFocus(chromiumRenderWidgetHwnd)
+  // completes — ensuring keyboard input reaches the address bar before any key is pressed.
+  ipcMain.on(IPC.RendererClaimFocus, (e) => {
+    WebView2View.claimFocus(overlay.win.getNativeWindowHandle())
+    e.returnValue = null // required for sendSync
+  })
   ipcMain.handle(IPC.OverlayToggleMaximize, () => overlay.toggleMaximize())
   ipcMain.handle(IPC.OverlayIsMaximized, () => overlay.isMaximized())
   ipcMain.handle(IPC.OverlayUnmaximize, () => overlay.unmaximize())
@@ -411,6 +421,7 @@ export function registerIpcHandlers(deps: Deps): void {
       'gamePathHints',
     ])
     if (LIST_KEYS.has(key as keyof Settings) && !isBoundedStringList(value)) return null
+    if (key === 'homepageUrl' && (typeof value !== 'string' || !isSafeBoundedUrl(value as string))) return null
 
     const settings = store.get('settings')
     const next = { ...settings, [key]: value } as Settings
@@ -429,7 +440,10 @@ export function registerIpcHandlers(deps: Deps): void {
       setStartupWithWindows(value)
     }
     if (key === 'applyDarkMode') {
-      nativeTheme.themeSource = (value !== false) ? 'dark' : 'system'
+      const dark = value !== false
+      nativeTheme.themeSource = dark ? 'dark' : 'light'
+      WebView2View.setColorScheme(dark ? 2 : 1)
+      tabs.setDarkMode(dark)
     }
     return next
   })

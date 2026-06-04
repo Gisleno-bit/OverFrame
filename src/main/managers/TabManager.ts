@@ -2,6 +2,7 @@ import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
 import type { TabState, MemorySnapshot, DownloadEvent } from '@shared/types'
 import { DEFAULT_HOMEPAGE } from '@shared/types'
+import { IPC } from '@shared/ipc'
 import type { OverlayWindow } from '../windows/OverlayWindow'
 import { WebView2View } from './tabs/WebView2View'
 import {
@@ -33,10 +34,9 @@ export class TabManager {
   private recentPopups = new Map<string, number>()
   private stoppedDuringHide = new Set<string>()
   private unloadedUrls = new Map<string, string>()
+  private _dark = true
 
   constructor(private overlay: OverlayWindow) {
-    // Relayout the active WebView2 tab whenever the overlay is resized
-    // or chrome/panel dimensions change.
     this.overlay.win.on('resize', () => this.relayoutActive())
     this.overlay.onLayoutChange = () => this.relayoutActive()
   }
@@ -88,10 +88,8 @@ export class TabManager {
   create(url: string): TabState {
     const id = randomUUID()
 
-    // WebView2View embeds a real Edge WebView2 control as a child HWND of the
-    // overlay window. No tabStealth or UA spoofing needed — Edge passes CF natively.
     const bounds = this.overlay.getTabContentBounds()
-    const view = new WebView2View(this.overlay.win, '')
+    const view = new WebView2View(this.overlay.win)
     view.init(bounds.x, bounds.y, bounds.width, bounds.height)
     view.setVisible(false) // hidden until setActive()
 
@@ -132,13 +130,25 @@ export class TabManager {
 
     view.on('did-start-loading', () => update({ isLoading: true }))
 
-    view.on('did-finish-load', () =>
-      update({
-        isLoading: false,
-        canGoBack: view.canGoBack(),
-        canGoForward: view.canGoForward(),
-      })
-    )
+    view.on('did-finish-load', () => {
+      update({ isLoading: false, canGoBack: view.canGoBack(), canGoForward: view.canGoForward() })
+      const url = view.getURL()
+      if (!url.startsWith('http://') && !url.startsWith('https://')) return
+      const d = this._dark
+      // Activate framework-based dark/light themes (Docusaurus, Tailwind, etc.)
+      // data-theme covers Docusaurus/VitePress; .dark class covers Tailwind/Next.js.
+      // Sites without these patterns are unaffected.
+      void view.executeJavaScript(
+        `(function(d){` +
+        `document.documentElement.setAttribute('data-theme',d?'dark':'light');` +
+        `document.documentElement.classList[d?'add':'remove']('dark')` +
+        `})(${d})`
+      )
+    })
+
+    view.on('focus', () => {
+      this.overlay.win.webContents.send(IPC.EventWebviewFocused)
+    })
 
     view.on('did-navigate', (url: unknown) => {
       if (typeof url !== 'string') return
@@ -280,6 +290,14 @@ export class TabManager {
 
   reload(id: string): void {
     this.tabs.get(id)?.view.reload()
+  }
+
+  stop(id: string): void {
+    this.tabs.get(id)?.view.stop()
+  }
+
+  setDarkMode(dark: boolean): void {
+    this._dark = dark
   }
 
   // ── Suspend / unload / resume (performance mode) ──────────────────────────────

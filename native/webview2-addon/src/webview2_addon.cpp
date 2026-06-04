@@ -47,6 +47,7 @@
 #include <atomic>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 #include <functional>
@@ -149,6 +150,7 @@ struct TabEntry {
   EventRegistrationToken tokAudioPlaying{};
   EventRegistrationToken tokMutedChanged{};
   EventRegistrationToken tokDownloadStarting{};
+  EventRegistrationToken tokGotFocus{};
 };
 
 static ComPtr<ICoreWebView2Environment> g_env;
@@ -156,6 +158,8 @@ static std::mutex                       g_tabsMutex;
 static std::map<int, TabEntry>          g_tabs;
 static std::atomic<int>                 g_nextTabId{1};
 static std::atomic<int>                 g_nextDownloadId{1};
+// 0=auto, 1=light, 2=dark — applied to the shared profile so prefers-color-scheme works correctly
+static std::atomic<int>                 g_colorScheme{0};
 
 // ── Thread-safe JS callback ───────────────────────────────────────────────────
 
@@ -308,10 +312,35 @@ Napi::Value CreateTab(const Napi::CallbackInfo& info) {
           tab.controller = ctrl;
           ctrl->get_CoreWebView2(&tab.webview);
 
+          // Apply stored color scheme to the shared profile (prefers-color-scheme).
+          // All tabs share one Edge profile so this only needs to be applied once,
+          // but re-applying on each tab creation is harmless.
+          if (tab.webview) {
+            ComPtr<ICoreWebView2_13> wv13;
+            if (SUCCEEDED(tab.webview.As(&wv13))) {
+              ComPtr<ICoreWebView2Profile> profile;
+              if (SUCCEEDED(wv13->get_Profile(&profile))) {
+                ComPtr<ICoreWebView2Profile3> profile3;
+                if (SUCCEEDED(profile.As(&profile3))) {
+                  profile3->put_PreferredColorScheme(
+                    static_cast<COREWEBVIEW2_PREFERRED_COLOR_SCHEME>(g_colorScheme.load()));
+                }
+              }
+            }
+          }
+
           // Size
           RECT bounds = {x, y, x + w, y + h};
           ctrl->put_Bounds(bounds);
           ctrl->put_IsVisible(TRUE);
+
+          // Hook GotFocus — fires when the WebView2 controller receives input focus
+          ctrl->add_GotFocus(
+            Callback<ICoreWebView2FocusChangedEventHandler>(
+              [tabId](ICoreWebView2Controller*, IUnknown*) -> HRESULT {
+                CallJS(tabId, "got_focus", "{}");
+                return S_OK;
+              }).Get(), &tab.tokGotFocus);
 
           // Hook NavigationStarting
           tab.webview->add_NavigationStarting(
@@ -681,6 +710,7 @@ Napi::Value DestroyTab(const Napi::CallbackInfo& info) {
     }
     if (it->second.controller) {
       it->second.controller->remove_ZoomFactorChanged(it->second.tokZoomChanged);
+      it->second.controller->remove_GotFocus(it->second.tokGotFocus);
       it->second.controller->Close();
     }
     g_tabs.erase(it);
@@ -814,6 +844,82 @@ Napi::Value SetEventCallback(const Napi::CallbackInfo& info) {
   return env.Undefined();
 }
 
+// ── ClaimFocus ────────────────────────────────────────────────────────────────
+// Gives OS keyboard focus to the Electron/Chromium render widget HWND by
+// enumerating the overlay window's direct child HWNDs and calling SetFocus()
+// on the first one that is NOT a WebView2 controller HWND we manage.
+// This is necessary because webContents.focus() / BrowserWindow.focus() do not
+// call ::SetFocus() at the Win32 level when the overlay is already the foreground
+// window — so keyboard input stays on Edge's HWND even after clicking the chrome.
+
+Napi::Value ClaimFocus(const Napi::CallbackInfo& info) {
+  Napi::Buffer<uint8_t> hwndBuf = info[0].As<Napi::Buffer<uint8_t>>();
+  HWND parentHwnd = *reinterpret_cast<HWND*>(hwndBuf.Data());
+
+  // Collect every HWND owned by WebView2 (controller + all its descendants).
+  std::set<HWND> wv2Hwnds;
+  {
+    std::lock_guard<std::mutex> lk(g_tabsMutex);
+    for (auto& [id, tab] : g_tabs) {
+      if (!tab.hwnd) continue;
+      wv2Hwnds.insert(tab.hwnd);
+      EnumChildWindows(tab.hwnd, [](HWND h, LPARAM lp) -> BOOL {
+        reinterpret_cast<std::set<HWND>*>(lp)->insert(h);
+        return TRUE;
+      }, reinterpret_cast<LPARAM>(&wv2Hwnds));
+    }
+  }
+
+  // Search ALL descendants of the overlay for the Chromium render widget HWND.
+  // Its Win32 class is "Chrome_RenderWidgetHostHWND" in all Electron versions.
+  struct Ctx { HWND result; std::set<HWND>* skip; };
+  Ctx ctx = {nullptr, &wv2Hwnds};
+
+  EnumChildWindows(parentHwnd, [](HWND hwnd, LPARAM lp) -> BOOL {
+    auto* c = reinterpret_cast<Ctx*>(lp);
+    if (c->skip->count(hwnd)) return TRUE; // skip WebView2-owned HWNDs
+    char cls[256] = {};
+    GetClassNameA(hwnd, cls, sizeof(cls));
+    if (strstr(cls, "RenderWidgetHostHWND") != nullptr) {
+      c->result = hwnd;
+      return FALSE; // stop on first match
+    }
+    return TRUE;
+  }, reinterpret_cast<LPARAM>(&ctx));
+
+  // If found, SetFocus to the render widget; otherwise fall back to the frame HWND.
+  SetFocus(ctx.result ? ctx.result : parentHwnd);
+
+  return info.Env().Undefined();
+}
+
+// ── SetColorScheme ─────────────────────────────────────────────────────────────
+// Sets the Edge profile's PreferredColorScheme so that prefers-color-scheme
+// media queries in all WebView2 tabs reflect the app's dark/light preference.
+// scheme: 0=auto (follow OS), 1=light, 2=dark
+
+Napi::Value SetColorScheme(const Napi::CallbackInfo& info) {
+  int scheme = info[0].As<Napi::Number>().Int32Value();
+  g_colorScheme.store(scheme);
+  std::lock_guard<std::mutex> lk(g_tabsMutex);
+  for (auto& [id, tab] : g_tabs) {
+    if (!tab.webview) continue;
+    ComPtr<ICoreWebView2_13> wv13;
+    if (SUCCEEDED(tab.webview.As(&wv13))) {
+      ComPtr<ICoreWebView2Profile> profile;
+      if (SUCCEEDED(wv13->get_Profile(&profile))) {
+        ComPtr<ICoreWebView2Profile3> profile3;
+        if (SUCCEEDED(profile.As(&profile3))) {
+          profile3->put_PreferredColorScheme(
+            static_cast<COREWEBVIEW2_PREFERRED_COLOR_SCHEME>(scheme));
+        }
+      }
+    }
+    break; // all tabs share the same profile — one call is enough
+  }
+  return info.Env().Undefined();
+}
+
 // ── Module init ───────────────────────────────────────────────────────────────
 
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
@@ -837,6 +943,8 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("setUserAgent",     Napi::Function::New(env, SetUserAgent));
   exports.Set("setZoom",          Napi::Function::New(env, SetZoom));
   exports.Set("setMuted",         Napi::Function::New(env, SetMuted));
+  exports.Set("setColorScheme",   Napi::Function::New(env, SetColorScheme));
+  exports.Set("claimFocus",       Napi::Function::New(env, ClaimFocus));
   exports.Set("setEventCallback", Napi::Function::New(env, SetEventCallback));
   return exports;
 }

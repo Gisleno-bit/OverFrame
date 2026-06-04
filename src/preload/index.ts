@@ -32,6 +32,7 @@ const api = {
     goBack: (id: string) => ipcRenderer.invoke(IPC.TabsGoBack, id),
     goForward: (id: string) => ipcRenderer.invoke(IPC.TabsGoForward, id),
     reload: (id: string) => ipcRenderer.invoke(IPC.TabsReload, id),
+    stop: (id: string) => ipcRenderer.invoke(IPC.TabsStop, id),
     setActive: (id: string) => ipcRenderer.invoke(IPC.TabsSetActive, id),
     deactivate: () => ipcRenderer.invoke(IPC.TabsDeactivate),
     reorder: (ids: string[]) => ipcRenderer.invoke(IPC.TabsReorder, ids),
@@ -54,6 +55,10 @@ const api = {
     leaveClickThrough: () => ipcRenderer.send(IPC.OverlayLeaveClickThrough),
     setPanelWidth: (w: number) => ipcRenderer.send(IPC.OverlaySetPanelWidth, w),
     setChromeHeight: (h: number) => ipcRenderer.send(IPC.OverlaySetChromeHeight, h),
+    // sendSync blocks the renderer until the main process calls ::SetFocus on the
+    // Chromium render widget HWND — this is synchronous so focus is restored before
+    // the browser processes the address bar's focus/input events.
+    claimFocus: (): void => { ipcRenderer.sendSync(IPC.RendererClaimFocus) },
     toggleMaximize: () => ipcRenderer.invoke(IPC.OverlayToggleMaximize),
     isMaximized: (): Promise<boolean> => ipcRenderer.invoke(IPC.OverlayIsMaximized),
     unmaximize: (): Promise<WindowBounds | null> => ipcRenderer.invoke(IPC.OverlayUnmaximize),
@@ -242,6 +247,11 @@ const api = {
       const listener = (_e: unknown, p: { status: string; version?: string; message?: string }): void => cb(p)
       ipcRenderer.on(IPC.EventUpdateStatus, listener)
       return (): void => { ipcRenderer.removeListener(IPC.EventUpdateStatus, listener) }
+    },
+    webviewFocused: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on(IPC.EventWebviewFocused, listener)
+      return (): void => { ipcRenderer.removeListener(IPC.EventWebviewFocused, listener) }
     },
   },
 }

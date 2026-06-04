@@ -14,6 +14,7 @@ import { PopupWindow } from './windows/PopupWindow'
 import { TrayManager } from './windows/TrayManager'
 import { ShortcutManager } from './managers/ShortcutManager'
 import { TabManager } from './managers/TabManager'
+import { WebView2View } from './managers/tabs/WebView2View'
 import { ProfileManager } from './managers/ProfileManager'
 import { CollectionsManager } from './managers/CollectionsManager'
 import { SessionManager } from './managers/SessionManager'
@@ -23,7 +24,7 @@ import { registerIpcHandlers } from './ipc/handlers'
 import { installChromeCsp } from './lifecycle/csp'
 import { buildShortcutActions } from './lifecycle/shortcutActions'
 import { IPC } from '@shared/ipc'
-import { DEFAULT_SHORTCUTS, DEFAULT_PROFILE_ID, type Shortcuts } from '@shared/types'
+import { DEFAULT_SHORTCUTS, DEFAULT_HOMEPAGE, DEFAULT_PROFILE_ID, type Shortcuts } from '@shared/types'
 import { logCrash } from './utils/crashLogger'
 import { startDevServer } from './utils/devServer'
 
@@ -74,10 +75,12 @@ if (app.isPackaged) {
 }
 
 app.whenReady().then(() => {
-  // Apply dark mode for web content based on stored setting (default: on).
-  // This makes Edge WebView2 tabs serve dark-mode content to sites that support it.
   const initialSettings = store.get('settings')
-  nativeTheme.themeSource = (initialSettings.applyDarkMode ?? true) ? 'dark' : 'system'
+  const initialDark = initialSettings.applyDarkMode ?? true
+  nativeTheme.themeSource = initialDark ? 'dark' : 'light'
+  // Store the preference so newly created WebView2 tabs inherit the correct color scheme.
+  // The static call has no effect at boot (no tabs exist yet); createTab picks up g_colorScheme.
+  WebView2View.setColorScheme(initialDark ? 2 : 1)
   // Enable standard edit shortcuts (Ctrl+Z/Y/X/C/V/A) in the BrowserWindow renderer.
   Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'editMenu' }]))
 
@@ -97,6 +100,7 @@ app.whenReady().then(() => {
   overlay.setOpacity(active.opacity)
   popup = new PopupWindow(overlay.win)
   tabs = new TabManager(overlay)
+  tabs.setDarkMode(initialDark)
   sessionManager = new SessionManager(tabs)
 
   store.set('sessionDirty', true)
@@ -178,10 +182,11 @@ app.whenReady().then(() => {
     // If hidden (user deliberately hid the overlay), defer until the overlay is
     // opened — avoids background network activity the user never requested
     // (e.g. YouTube autoplay while working without the overlay).
+    const homepageUrl = store.get('settings').homepageUrl ?? DEFAULT_HOMEPAGE
     if (overlay.getState() !== 'HIDDEN') {
-      sessionManager?.restore(profile.id, profile.homepageUrl)
+      sessionManager?.restore(profile.id, homepageUrl)
     } else {
-      pendingSessionRestore = { profileId: profile.id, fallbackUrl: profile.homepageUrl }
+      pendingSessionRestore = { profileId: profile.id, fallbackUrl: homepageUrl }
     }
   })
 
@@ -284,7 +289,7 @@ app.whenReady().then(() => {
    */
   overlay.onFirstShow(() => {
     const current = profiles!.getActive()
-    sessionManager!.restoreOrCreate(current.id, current.homepageUrl)
+    sessionManager!.restoreOrCreate(current.id, store.get('settings').homepageUrl ?? DEFAULT_HOMEPAGE)
   })
 
   if (!process.argv.includes('--hidden')) overlay.show()

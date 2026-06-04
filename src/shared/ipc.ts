@@ -8,6 +8,7 @@ export const IPC = {
   TabsGoBack: 'tabs:goBack',
   TabsGoForward: 'tabs:goForward',
   TabsReload: 'tabs:reload',
+  TabsStop: 'tabs:stop',
   TabsSetActive: 'tabs:setActive',
   TabsDeactivate: 'tabs:deactivate',
   TabsReorder: 'tabs:reorder',
@@ -111,6 +112,10 @@ export const IPC = {
   EventOpacityChanged: 'event:opacity:changed',
   /** Fired by main when settings are saved from any window — lets all renderers sync their store. */
   EventSettingsChanged: 'event:settings:changed',
+  /** Fired by main when a WebView2 tab receives focus — renderer uses this to deselect the address bar. */
+  EventWebviewFocused: 'event:webview:focused',
+  /** Renderer → Main: reclaim OS keyboard focus from WebView2 back to the Electron renderer. */
+  RendererClaimFocus: 'renderer:claimFocus',
 
   // Popup → Main (close popup and open a side panel)
   OpenPanelFromPopup: 'popup:openPanel',

@@ -84,8 +84,10 @@ export interface Settings {
   // ── Browser ──────────────────────────────────────────────────────────
   /** Default search engine used when a non-URL query is typed in the address bar. */
   searchEngine?: SearchEngineId
-  /** When true, system dark mode is forced so sites with dark-mode support render dark. Default: true. */
+  /** When true, Edge WebView2 reports prefers-color-scheme:dark to sites that have a dark mode. Default: true. */
   applyDarkMode?: boolean
+  /** Global homepage URL — the page that opens when creating a new tab. */
+  homepageUrl?: string
   // ── Profile automation ───────────────────────────────────────────────
   /** When false, Overframe will never auto-create a profile for an unrecognised game. */
   autoCreateProfiles?: boolean
@@ -106,7 +108,7 @@ export interface Profile {
   name: string
   processNames: string[]
   priority: number
-  homepageUrl: string
+  homepageUrl?: string
   opacity: number
   windowBounds: WindowBounds
   iconUrl?: string
@@ -276,6 +278,14 @@ export interface ProfileSession {
   activeTabIndex: number
   savedAt: number
 }
+
+// ── Homepage presets ──────────────────────────────────────────────────────────
+
+export const HOMEPAGE_PRESETS = [
+  { id: 'chrome',  label: 'Google',  url: 'https://www.google.com'  },
+  { id: 'edge',    label: 'Bing',    url: 'https://www.bing.com'    },
+  { id: 'brave',   label: 'Brave',   url: 'https://search.brave.com' },
+] as const
 
 // ── Search engines ───────────────────────────────────────────────────────────
 

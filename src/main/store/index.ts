@@ -33,7 +33,6 @@ const defaultProfile: Profile = {
   name: 'Default',
   processNames: [],
   priority: 0,
-  homepageUrl: DEFAULT_HOMEPAGE,
   opacity: DEFAULT_OPACITY,
   windowBounds: { x: 100, y: 100, width: 900, height: 600 }
 }
@@ -52,6 +51,7 @@ const defaults: AetherStoreSchema = {
     showMemoryUsage: false,
     performanceMode: false,
     applyDarkMode: true,
+    homepageUrl: DEFAULT_HOMEPAGE,
     blockedProcesses: [...DEFAULT_BLOCKED_PROCESSES],
     nonGameDirs: [...DEFAULT_NON_GAME_DIRS],
     gamePathHints: [...DEFAULT_GAME_PATH_HINTS],

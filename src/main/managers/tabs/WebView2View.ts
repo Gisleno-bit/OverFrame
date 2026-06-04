@@ -54,6 +54,10 @@ interface NativeAddon {
   setUserAgent(tabId: number, ua: string): void
   setZoom(tabId: number, factor: number): void
   setMuted(tabId: number, muted: boolean): void
+  /** Set prefers-color-scheme for the shared Edge profile. 0=auto, 1=light, 2=dark. */
+  setColorScheme(scheme: number): void
+  /** Restore OS keyboard focus to the first non-WebView2 child HWND (Chromium render widget). */
+  claimFocus(overlayHwnd: Buffer): void
   setEventCallback(cb: (tabId: number, type: string, dataJson: string) => void): void
 }
 
@@ -91,6 +95,7 @@ export interface WV2EventMap {
   'audio_changed': { playing: boolean }
   'muted_changed': { muted: boolean }
   'download': { id: string; filename: string; url: string; receivedBytes: number; totalBytes: number; state: string }
+  'got_focus': Record<string, never>
 }
 
 export class WebView2View extends EventEmitter {
@@ -105,10 +110,7 @@ export class WebView2View extends EventEmitter {
   private _canGoBack = false
   private _canGoForward = false
 
-  constructor(
-    private readonly _overlay: BrowserWindow,
-    private readonly _userAgent: string,
-  ) {
+  constructor(private readonly _overlay: BrowserWindow) {
     super()
   }
 
@@ -124,8 +126,6 @@ export class WebView2View extends EventEmitter {
     const addon = getAddon()
     this._nativeId = addon.createTab(hwnd, x, y, w, h)
     WebView2View._registry.set(this._nativeId, this)
-
-    if (this._userAgent) addon.setUserAgent(this._nativeId, this._userAgent)
 
     // Route raw addon events to typed EventEmitter events
     this.on('wv2event', (type: string, data: Record<string, unknown>) => {
@@ -171,8 +171,25 @@ export class WebView2View extends EventEmitter {
         case 'download':
           this.emit('download', data)
           break
+        case 'got_focus':
+          this.emit('focus')
+          break
       }
     })
+  }
+
+  /** Set prefers-color-scheme for all WebView2 tabs (shared profile). 0=auto, 1=light, 2=dark. */
+  static setColorScheme(scheme: number): void {
+    try { getAddon().setColorScheme(scheme) } catch { /* addon not loaded yet */ }
+  }
+
+  /**
+   * Restore OS keyboard focus to the Electron/Chromium render widget.
+   * Calls ::SetFocus() on the first non-WebView2 child HWND of the overlay window.
+   * Must be called from the main process with the overlay window HWND.
+   */
+  static claimFocus(overlayHwnd: Buffer): void {
+    try { getAddon().claimFocus(overlayHwnd) } catch { /* addon not loaded yet */ }
   }
 
   destroy(): void {
