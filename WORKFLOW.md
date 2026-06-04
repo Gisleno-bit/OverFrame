@@ -49,13 +49,28 @@ Humain
         ↓
 Claude (session autonome)
   lit TASKS.md → choisit tâche → crée branche feat/fix/chore
-  code + tests + observer HTTP + logs
-  pnpm typecheck && pnpm lint && pnpm test (doit être vert)
-  ouvre PR vers dev avec checklist remplie
+  code + tests
+        ↓
+Claude — Phase QA automatisée (OBLIGATOIRE avant tout commit)
+  pnpm typecheck && pnpm lint && pnpm test:coverage && pnpm build
+  lance l'app via devServer → screenshots → /overlay/eval → logs
+  vérifie chaque feature modifiée visuellement et fonctionnellement
+        ↓
+Claude → Humain — Checklist de validation
+  présente les résultats de ses tests
+  liste les points qu'il ne peut pas vérifier seul (gaming réel, etc.)
+  ATTEND la validation humaine — NE commit PAS encore
+        ↓
+Humain — Garde-fou final
+  valide les points de la checklist
+  signale tout problème constaté
+        ↓
+Claude — Commit uniquement après validation
+  git commit avec message conventionnel
+  ouvre PR vers dev
         ↓
 Humain
-  reçoit notification PR
-  review (voir section 4)
+  review PR (voir section 4)
   merge ou demande de correction
         ↓
 CI (automatique)
@@ -146,6 +161,82 @@ Claude ne peut pas tester avec un vrai jeu. L'humain doit :
 2. Lancer l'app avec `pnpm dev`
 3. Lancer le jeu en mode borderless windowed
 4. Vérifier le comportement overlay
+
+---
+
+## 2bis. Protocole QA avant commit — Détail
+
+### Étape 1 — Pipelines automatisées (Claude seul)
+
+```bash
+pnpm typecheck    # zéro erreur TypeScript
+pnpm lint         # zéro warning ESLint
+pnpm test:coverage  # 100% sur le périmètre logique
+pnpm build        # build de production sans erreur
+pnpm smoke        # boot réel de l'app + devServer répond + overlay + RAM
+```
+
+### Étape 2 — Tests UI via devServer (Claude seul)
+
+L'app est lancée via le script Node.js (pas pnpm dev — voir ci-dessous) pour exécuter des vérifications automatisées :
+
+```js
+// Lancement correct de l'app depuis un script Node.js (évite ELECTRON_RUN_AS_NODE)
+import electronPath from 'electron'
+import { spawn } from 'node:child_process'
+const childEnv = { ...process.env, NODE_ENV: 'development' }
+delete childEnv.ELECTRON_RUN_AS_NODE
+delete childEnv.ELECTRON_NO_ATTACH_CONSOLE
+const child = spawn(electronPath, ['out/main/index.js'], { cwd: root, env: childEnv, stdio: 'ignore', detached: true })
+child.unref()
+```
+
+Endpoints utilisés pour les tests automatisés :
+
+| Endpoint | Usage |
+|---|---|
+| `GET /ping` | L'app répond |
+| `GET /screenshot` | Capture visuelle de l'overlay (tab bar, adresse bar, UI chrome) |
+| `GET /state` | État structuré (tabs, profil actif, homepage, URLs) |
+| `GET /log/renderer?lines=50` | Erreurs JavaScript dans la renderer |
+| `GET /overlay/show` + `/hide` | Contrôle de l'état de l'overlay |
+| `GET /overlay/eval?js=<urlencoded>` | **Exécute du JS dans le renderer Electron** — accès à `window.aether.*` pour tester les IPC (save settings, update profile, open popup, etc.) |
+| `GET /tab/new?url=` + `/tab/navigate?url=` | Navigation pour tester favicons, loading spinner |
+| `GET /tab/eval?js=` | Exécute du JS dans le tab WebView2 actif |
+
+> **Important** : `/overlay/eval` s'exécute dans le renderer Electron (overlay chrome).
+> `/tab/eval` s'exécute dans le tab WebView2 (Edge) — `window.aether` n'y est PAS disponible.
+
+**Scénarios de test systématiques pour chaque PR UI :**
+
+1. Screenshot overlay → vérifier tab bar, adressbar, icônes, texte lisible
+2. Naviguer vers un site connu (youtube.com) → vérifier favicon dans tab + adressbar
+3. Reset onboarding → screenshot step 1, 2, 3 via click JS
+4. `/overlay/eval` → lire et écrire un setting → vérifier persistance
+5. Ouvrir popup (settings, bookmark) → confirmer "ok" dans la réponse
+6. Vérifier logs renderer : zéro erreur, zéro SyntaxError
+
+### Étape 3 — Checklist humain (présentée AVANT le commit)
+
+Claude présente sous ce format :
+
+```
+## Tests automatisés — résultats
+
+| Test | Résultat | Détail |
+|------|----------|--------|
+| Pipelines (typecheck/lint/test/build) | ✅ PASS | ... |
+| Feature X — vérification visuelle | ✅ CONFIRMÉ | screenshot test-XX.png |
+| Feature Y — IPC round-trip | ✅ FONCTIONNEL | valeur attendue retournée |
+| Feature Z — logs propres | ✅ PROPRES | 0 erreur |
+
+## Ta validation finale (points que je ne peux pas vérifier)
+
+- [ ] [description du test gaming ou interaction manuelle requise]
+- [ ] [vérification subjective UX/visuelle]
+```
+
+Claude **attend** la réponse avant de committer.
 
 ---
 
@@ -257,12 +348,14 @@ Ajouter dans TASKS.md :
 ## 9. Règles non négociables
 
 **Pour Claude :**
-1. Toujours runner `pnpm typecheck && pnpm lint && pnpm test` avant d'ouvrir une PR
-2. Toujours mettre à jour DEVLOG.md en fin de session avec changements significatifs
-3. Toujours mettre à jour TASKS.md quand une tâche est terminée
-4. Ne jamais committer sur `main` directement
-5. Lire `.claude/guides/SECURITY.md` avant toute modification IPC ou sécurité
-6. Lire `.claude/guides/ACCESSIBILITY.md` avant toute modification UI
+1. Toujours runner `pnpm typecheck && pnpm lint && pnpm test:coverage && pnpm build && pnpm smoke` avant tout commit
+2. **Toujours tester l'app via devServer** (screenshots + /overlay/eval + logs) avant tout commit UI
+3. **Toujours présenter la checklist humaine et ATTENDRE sa validation** avant de committer
+4. Toujours mettre à jour DEVLOG.md en fin de session avec changements significatifs
+5. Toujours mettre à jour TASKS.md quand une tâche est terminée
+6. Ne jamais committer sur `main` directement
+7. Lire `.claude/guides/SECURITY.md` avant toute modification IPC ou sécurité
+8. Lire `.claude/guides/ACCESSIBILITY.md` avant toute modification UI
 
 **Pour l'Humain :**
 1. Toujours définir des critères d'acceptance mesurables dans les tâches

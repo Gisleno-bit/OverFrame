@@ -242,6 +242,13 @@ curl http://127.0.0.1:9119/metrics
 curl http://127.0.0.1:9119/overlay/show
 curl http://127.0.0.1:9119/overlay/hide
 
+# Exécuter du JS dans le renderer Electron (accès window.aether.*)
+# Utiliser PowerShell pour l'encodage URL sur Windows :
+# $js = "window.aether.settings.get().then(function(s){return s.applyDarkMode})"
+# $enc = [System.Uri]::EscapeDataString($js)
+# Invoke-WebRequest "http://127.0.0.1:9119/overlay/eval?js=$enc"
+# ⚠️  S'exécute dans l'overlay Electron — PAS dans les tabs WebView2
+
 # Logs console (300 lignes par défaut)
 curl http://127.0.0.1:9119/log/renderer
 curl http://127.0.0.1:9119/log/webview
@@ -331,16 +338,48 @@ curl http://127.0.0.1:9119/state
 - Si modification main/preload : `pnpm smoke` lance la vraie app et vérifie boot + overlay + screenshot + RAM via le devServer
 - Si modification main/preload : redémarrer `pnpm dev` (hot reload ne couvre pas le main process)
 
+### Avant tout commit — Protocole QA obligatoire
+
+**Le commit n'intervient qu'APRÈS validation humaine. Séquence :**
+
+```
+1. pnpm typecheck && pnpm lint && pnpm test:coverage && pnpm build && pnpm smoke
+2. Lancer l'app pour tests UI (script Node.js — voir WORKFLOW.md §2bis)
+3. Tests via devServer :
+   - Screenshots avec Read tool : overlay/state visible, favicons, texte lisible
+   - /overlay/eval : vérifier les IPC (settings save, profile update, popup open)
+   - /log/renderer : zéro erreur JavaScript
+4. Présenter le tableau de résultats + checklist humaine → ATTENDRE validation
+5. Committer uniquement après réponse positive
+```
+
+**Lancement de l'app pour tests (sans ELECTRON_RUN_AS_NODE) :**
+```js
+// scripts/test-launch.mjs ou inline dans un node --input-type=module
+import electronPath from 'electron'
+import { spawn } from 'node:child_process'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+const childEnv = { ...process.env, NODE_ENV: 'development' }
+delete childEnv.ELECTRON_RUN_AS_NODE
+delete childEnv.ELECTRON_NO_ATTACH_CONSOLE
+const child = spawn(electronPath, [path.join(root,'out/main/index.js')], { cwd: root, env: childEnv, stdio: 'ignore', detached: true })
+child.unref()
+```
+
 ### Ajouter un canal IPC
 1. Déclarer la constante dans [src/shared/ipc.ts](src/shared/ipc.ts)
 2. Ajouter le handler dans [src/main/ipc/handlers.ts](src/main/ipc/handlers.ts)
 3. Exposer dans [src/preload/index.ts](src/preload/index.ts) sous `window.aether.*`
 
 ### Clore une session
-1. `pnpm typecheck && pnpm lint && pnpm test` — doit passer au vert
-2. Mettre à jour [TASKS.md](TASKS.md) — déplacer les tâches terminées dans "Done"
-3. Mettre à jour [.claude/DEVLOG.md](.claude/DEVLOG.md) — nouvelle entrée avec contexte, décisions, prochaine étape
-4. `git add` + `git commit` sur la branche feature
+1. `pnpm typecheck && pnpm lint && pnpm test:coverage && pnpm build && pnpm smoke`
+2. Tests UI via devServer (screenshots + /overlay/eval + logs)
+3. Présenter les résultats + checklist humaine — **attendre validation avant commit**
+4. Après validation : `git add` + `git commit` sur la branche feature
+5. Mettre à jour [TASKS.md](TASKS.md) — déplacer les tâches terminées dans "Done"
+6. Mettre à jour [.claude/DEVLOG.md](.claude/DEVLOG.md) — nouvelle entrée avec contexte, décisions, prochaine étape
 
 ### Hooks automatiques
 | Hook | Déclencheur | Action |
