@@ -259,6 +259,10 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle(IPC.OverlayIsMaximized, () => overlay.isMaximized())
   ipcMain.handle(IPC.OverlayUnmaximize, () => overlay.unmaximize())
   ipcMain.on(IPC.OverlaySetPosition, (_e, x: number, y: number) => overlay.setPositionXY(x, y))
+  ipcMain.on(IPC.OverlayMoveByDelta, (_e, dx: number, dy: number) => overlay.moveByDelta(dx, dy))
+  ipcMain.on(IPC.OverlaySetWebViewBounds, (_e, x: number, y: number, w: number, h: number) =>
+    tabs.setActiveViewBounds(x, y, w, h)
+  )
   ipcMain.on(IPC.OverlaySetMouseInteractive, (_e, interactive: boolean) =>
     overlay.setMouseInteractive(interactive)
   )

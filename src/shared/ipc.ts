@@ -27,6 +27,8 @@ export const IPC = {
   OverlayIsMaximized: 'overlay:isMaximized',
   OverlayUnmaximize: 'overlay:unmaximize',
   OverlaySetPosition: 'overlay:setPosition',
+  OverlayMoveByDelta: 'overlay:moveByDelta',
+  OverlaySetWebViewBounds: 'overlay:setWebViewBounds',
   OverlaySetMouseInteractive: 'overlay:setMouseInteractive',
   OverlayRequestClickThrough: 'overlay:requestClickThrough',
   OverlayLeaveClickThrough: 'overlay:leaveClickThrough',

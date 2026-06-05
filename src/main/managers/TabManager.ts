@@ -36,9 +36,18 @@ export class TabManager {
   private unloadedUrls = new Map<string, string>()
   private _dark = true
 
+  private viewBoundsCache: { x: number; y: number; w: number; h: number } | null = null
+
   constructor(private overlay: OverlayWindow) {
-    this.overlay.win.on('resize', () => this.relayoutActive())
     this.overlay.onLayoutChange = () => this.relayoutActive()
+  }
+
+  /** Called from renderer with exact CSS-computed bounds of the WebView2 host div. */
+  setActiveViewBounds(x: number, y: number, w: number, h: number): void {
+    this.viewBoundsCache = { x, y, w, h }
+    const tab = this.activeTabId ? this.tabs.get(this.activeTabId) : null
+    if (!tab || tab.view.isDestroyed()) return
+    tab.view.setBounds(x, y, w, h)
   }
 
   // ── Listeners ────────────────────────────────────────────────────────────────
@@ -248,9 +257,15 @@ export class TabManager {
       if (other.id !== id) other.view.setVisible(false)
     }
 
-    // Position + show the active tab
-    const { x, y, width, height } = this.overlay.getTabContentBounds()
-    tab.view.setBounds(x, y, width, height)
+    // Position + show the active tab — prefer the renderer-provided bounds (accurate)
+    // and fall back to the formula for the very first activation before any DOM update.
+    if (this.viewBoundsCache) {
+      const { x, y, w, h } = this.viewBoundsCache
+      tab.view.setBounds(x, y, w, h)
+    } else {
+      const { x, y, width, height } = this.overlay.getTabContentBounds()
+      tab.view.setBounds(x, y, width, height)
+    }
     tab.view.setVisible(true)
 
     this.activeTabId = id

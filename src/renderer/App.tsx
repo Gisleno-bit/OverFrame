@@ -138,6 +138,25 @@ export function App(): JSX.Element {
     window.aether.overlay.setPanelWidth(missionsPanelOpen ? 320 : 0)
   }, [missionsPanelOpen])
 
+  // Keep WebView2 bounds in sync with the CSS-computed bounds of its host div.
+  // ResizeObserver fires after layout but before paint. Reading getBoundingClientRect()
+  // here gives the exact pixel bounds Chromium has already committed for the next
+  // frame, so WebView2 and the HTML panel update in the same vsync.
+  const webViewRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = webViewRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect()
+      window.aether.overlay.setWebViewBounds(
+        Math.round(r.left), Math.round(r.top),
+        Math.round(r.width), Math.round(r.height),
+      )
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   // Global shortcut Ctrl+Shift+F is registered in main process (works even when a game has focus).
   // Main sends EventToggleFocusMode → renderer toggles focus mode state.
   useEffect(() => {
@@ -200,7 +219,7 @@ export function App(): JSX.Element {
 
       {/* Main area */}
       <div className="flex-1 flex overflow-hidden min-h-0">
-        <div className="flex-1 relative min-w-0">
+        <div ref={webViewRef} className="flex-1 relative min-w-0">
           <OnboardingOverlay />
           <WelcomePage />
         </div>

@@ -63,6 +63,9 @@ const api = {
     isMaximized: (): Promise<boolean> => ipcRenderer.invoke(IPC.OverlayIsMaximized),
     unmaximize: (): Promise<WindowBounds | null> => ipcRenderer.invoke(IPC.OverlayUnmaximize),
     setPosition: (x: number, y: number): void => ipcRenderer.send(IPC.OverlaySetPosition, x, y),
+    moveByDelta: (dx: number, dy: number): void => ipcRenderer.send(IPC.OverlayMoveByDelta, dx, dy),
+    setWebViewBounds: (x: number, y: number, w: number, h: number): void =>
+      ipcRenderer.send(IPC.OverlaySetWebViewBounds, x, y, w, h),
   },
   collections: {
     getAll: (): Promise<Collection[]> => ipcRenderer.invoke(IPC.CollectionsGetAll),

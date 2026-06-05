@@ -273,10 +273,7 @@ app.whenReady().then(() => {
     }, 500)
   }
   overlay.win.on('move', persistBounds)
-  overlay.win.on('resize', () => {
-    persistBounds()
-    tabs?.relayoutActive()
-  })
+  overlay.win.on('resize', persistBounds)
 
   // ── Startup ────────────────────────────────────────────────────────────────
 

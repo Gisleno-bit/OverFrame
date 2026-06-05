@@ -270,6 +270,13 @@ export class OverlayWindow {
     this.win.setPosition(Math.round(x), Math.round(y))
   }
 
+  /** Translate the window by (dx, dy) logical pixels relative to its current position. */
+  moveByDelta(dx: number, dy: number): void {
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) return
+    const [x, y] = this.win.getPosition()
+    this.win.setPosition(Math.round(x + dx), Math.round(y + dy))
+  }
+
   setBounds(bounds: WindowBounds): void {
     const safe = this.clampToDisplay(bounds)
     this.win.setBounds(safe)

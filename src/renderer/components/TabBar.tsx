@@ -285,6 +285,8 @@ export function TabBar(): JSX.Element {
   const captureX = useRef(0)
   const captureY = useRef(0)
   const pointerDownScreenX = useRef(0)
+  const lastScreenX = useRef(0)
+  const lastScreenY = useRef(0)
 
   const onFillerPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
     if (e.button !== 0) return
@@ -296,6 +298,8 @@ export function TabBar(): JSX.Element {
     captureX.current = e.clientX
     captureY.current = e.clientY
     pointerDownScreenX.current = e.screenX
+    lastScreenX.current = e.screenX
+    lastScreenY.current = e.screenY
   }
 
   const onFillerPointerMove = (e: React.PointerEvent<HTMLDivElement>): void => {
@@ -325,6 +329,8 @@ export function TabBar(): JSX.Element {
               Math.round(sx - newCaptureX),
               Math.round(sy - captureY.current),
             )
+            lastScreenX.current = sx
+            lastScreenY.current = sy
           }
           unmaximizing.current = false
         })()
@@ -332,10 +338,11 @@ export function TabBar(): JSX.Element {
       }
     }
 
-    window.aether.overlay.setPosition(
-      Math.round(e.screenX - captureX.current),
-      Math.round(e.screenY - captureY.current),
-    )
+    const dx = Math.round(e.screenX - lastScreenX.current)
+    const dy = Math.round(e.screenY - lastScreenY.current)
+    lastScreenX.current = e.screenX
+    lastScreenY.current = e.screenY
+    if (dx !== 0 || dy !== 0) window.aether.overlay.moveByDelta(dx, dy)
   }
 
   const onFillerPointerUp = (e: React.PointerEvent<HTMLDivElement>): void => {
