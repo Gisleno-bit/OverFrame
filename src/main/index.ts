@@ -24,7 +24,7 @@ import { registerIpcHandlers } from './ipc/handlers'
 import { installChromeCsp } from './lifecycle/csp'
 import { buildShortcutActions } from './lifecycle/shortcutActions'
 import { IPC } from '@shared/ipc'
-import { DEFAULT_SHORTCUTS, DEFAULT_HOMEPAGE, DEFAULT_PROFILE_ID, type Shortcuts } from '@shared/types'
+import { DEFAULT_SHORTCUTS, DEFAULT_PROFILE_ID, DEFAULT_PROTECTED_DOMAINS, type Shortcuts } from '@shared/types'
 import { logCrash } from './utils/crashLogger'
 import { startDevServer } from './utils/devServer'
 
@@ -141,8 +141,9 @@ app.whenReady().then(() => {
   const debouncedSave = (): void => {
     if (saveDebounce) clearTimeout(saveDebounce)
     saveDebounce = setTimeout(() => {
+      saveDebounce = null
       if (profiles && sessionManager) sessionManager.save(profiles.getActive().id)
-    }, 2_000)
+    }, 300)
   }
 
   tabs.on((event) => {
@@ -150,13 +151,23 @@ app.whenReady().then(() => {
     const wc = overlay.win.webContents
     if (event.type === 'updated') wc.send(IPC.EventTabUpdated, event.tab)
     if (event.type === 'removed') { wc.send(IPC.EventTabRemoved, event.id); debouncedSave() }
-    if (event.type === 'activeChanged') { wc.send(IPC.EventActiveTabChanged, event.id); debouncedSave() }
+    if (event.type === 'activeChanged') { wc.send(IPC.EventActiveTabChanged, event.id) }
     if (event.type === 'download') wc.send(IPC.EventDownload, event.event)
+    // A tab Show()/navigation re-raises the WebView2 to HWND_TOP; keep the IG
+    // promo (an overlay child) above it, and re-measure the scrollbar so its
+    // right gap stays correct after navigation.
+    if ((event.type === 'activeChanged' || event.type === 'updated')
+        && (popup?.isIGPromoVisible() || popup?.isAchievementVisible())) {
+      void tabs.measureActiveScrollbarWidth().then((w) => {
+        popup?.raiseIGPromo(w)
+        popup?.raiseAchievement(w)
+      })
+    }
   })
 
   // ── Profile events ─────────────────────────────────────────────────────────
 
-  let pendingSessionRestore: { profileId: string; fallbackUrl: string } | null = null
+  let pendingSessionRestore: { profileId: string } | null = null
   /**
    * True when the overlay was automatically hidden by game detection
    * (i.e. the user did not explicitly hide it). Used to restore the overlay
@@ -182,11 +193,12 @@ app.whenReady().then(() => {
     // If hidden (user deliberately hid the overlay), defer until the overlay is
     // opened — avoids background network activity the user never requested
     // (e.g. YouTube autoplay while working without the overlay).
-    const homepageUrl = store.get('settings').homepageUrl ?? DEFAULT_HOMEPAGE
+    const { protectedDomains } = store.get('settings')
+    const protected_ = protectedDomains ?? DEFAULT_PROTECTED_DOMAINS
     if (overlay.getState() !== 'HIDDEN') {
-      sessionManager?.restore(profile.id, homepageUrl)
+      sessionManager?.restore(profile.id, protected_)
     } else {
-      pendingSessionRestore = { profileId: profile.id, fallbackUrl: homepageUrl }
+      pendingSessionRestore = { profileId: profile.id }
     }
   })
 
@@ -230,6 +242,7 @@ app.whenReady().then(() => {
   })
 
   profiles.onBeforeSwitch((fromId) => {
+    if (saveDebounce) { clearTimeout(saveDebounce); saveDebounce = null }
     sessionManager?.save(fromId)
   })
 
@@ -241,8 +254,8 @@ app.whenReady().then(() => {
     if (state === 'HIDDEN') {
       // Dismiss any floating achievement notification so it never appears above the game.
       popup?.dismissAchievements()
-      const perfMode = store.get('settings').performanceMode ?? false
-      if (perfMode) tabs?.unloadAll()
+      const { performanceMode, protectedDomains: pd } = store.get('settings')
+      if (performanceMode) tabs?.unloadAll(pd ?? DEFAULT_PROTECTED_DOMAINS)
       else tabs?.suspendAll()
       // Reduce poll frequency only when no game is active.
       if (profiles && profiles.getActive().id === DEFAULT_PROFILE_ID) {
@@ -256,9 +269,13 @@ app.whenReady().then(() => {
       if (pendingSessionRestore) {
         const p = pendingSessionRestore
         pendingSessionRestore = null
-        sessionManager?.restore(p.profileId, p.fallbackUrl)
+        sessionManager?.restore(p.profileId, store.get('settings').protectedDomains ?? DEFAULT_PROTECTED_DOMAINS)
       }
       tabs?.resumeAll()
+      // Overlay is visible again → bring back the IG promo if it was only
+      // retracted by the hide (not dismissed by the user). Deferred a tick so it
+      // re-reveals after the overlay's show() window churn has settled.
+      setImmediate(() => popup?.restoreIGPromo())
     }
   })
 
@@ -284,9 +301,14 @@ app.whenReady().then(() => {
    * Keeps the process idle (zero web traffic) while hidden at startup or during
    * a game session where the user hasn't opened the overlay yet.
    */
+  // Retract the IG promo before the overlay's Alt+B hide churn — but keep it
+  // "wanted" so it re-appears when the overlay is shown again (restored in the
+  // overlay state-change handler below).
+  overlay.onBeforeHide(() => popup?.retractIGPromo())
+
   overlay.onFirstShow(() => {
     const current = profiles!.getActive()
-    sessionManager!.restoreOrCreate(current.id, store.get('settings').homepageUrl ?? DEFAULT_HOMEPAGE)
+    sessionManager!.restoreOrCreate(current.id)
   })
 
   if (!process.argv.includes('--hidden')) overlay.show()

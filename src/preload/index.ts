@@ -22,6 +22,7 @@ import type {
   GameUndetectedPayload,
   WindowBounds,
   DownloadEvent,
+  IGPromoPayload,
 } from '@shared/types'
 
 const api = {
@@ -127,6 +128,7 @@ const api = {
     simulateCrash: (): Promise<void> => ipcRenderer.invoke(IPC.DevSimulateCrash),
     resetData: (): Promise<void> => ipcRenderer.invoke(IPC.SystemResetData),
     checkForUpdates: (): Promise<void> => ipcRenderer.invoke(IPC.AppCheckForUpdates),
+    restartToUpdate: (): Promise<void> => ipcRenderer.invoke(IPC.AppRestartToUpdate),
     /** Dev only — captures the overlay window to %TEMP%\overframe-dev-screenshot.png. Returns the path. */
     devScreenshot: (): Promise<string | null> => ipcRenderer.invoke(IPC.DevScreenshot),
     /** Dev only — returns the last N lines of a log file. */
@@ -135,6 +137,10 @@ const api = {
   },
   achievement: {
     notify: (title: string): Promise<void> => ipcRenderer.invoke(IPC.AchievementNotify, { title }),
+  },
+  igPromo: {
+    show: (payload: IGPromoPayload): Promise<void> => ipcRenderer.invoke(IPC.IGPromoShow, payload),
+    close: (dismissed = false): void => { ipcRenderer.send(IPC.IGPromoClose, dismissed) },
   },
   popup: {
     open: (type: 'bookmark', data: BookmarkPopupPayload): Promise<void> =>
@@ -214,6 +220,11 @@ const api = {
       const listener = (): void => cb()
       ipcRenderer.on(IPC.PopupDone, listener)
       return (): void => { ipcRenderer.removeListener(IPC.PopupDone, listener) }
+    },
+    igPromoDismissed: (cb: () => void): (() => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on(IPC.IGPromoDismissed, listener)
+      return (): void => { ipcRenderer.removeListener(IPC.IGPromoDismissed, listener) }
     },
     memoryUpdated: (cb: (snapshot: MemorySnapshot) => void): (() => void) => {
       const listener = (_e: unknown, s: MemorySnapshot): void => cb(s)

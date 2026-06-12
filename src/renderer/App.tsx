@@ -8,7 +8,11 @@ import { OnboardingOverlay } from './components/OnboardingOverlay'
 import { WelcomePage } from './components/WelcomePage'
 import { MissionsTracker } from './components/MissionsTracker'
 import { MissionsPanel } from './components/MissionsPanel'
+import { IGNudge } from './components/IGNudge'
+import { getCatalogForProfile, localizeIGUrl } from '@shared/ig-affiliate'
+import { DEFAULT_PROFILE_ID } from '@shared/types'
 import { notify } from './lib/notify'
+import { igPromoState } from './lib/igPromoState'
 
 export function App(): JSX.Element {
   const {
@@ -20,6 +24,7 @@ export function App(): JSX.Element {
     upsertTab,
     removeTab,
     setActiveTab,
+    activeProfile,
     overlayState,
     setOverlayState,
     isFocusMode,
@@ -96,6 +101,54 @@ export function App(): JSX.Element {
     setOverlayState,
     setSettings,
   ])
+
+  // IG promo: show once per game-profile change, restore when user returns to a web tab.
+  const prevPromoIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    const id = activeProfile?.id ?? null
+    if (id === prevPromoIdRef.current) return
+    prevPromoIdRef.current = id
+
+    window.aether.igPromo.close()
+    igPromoState.reset()
+
+    const entry = activeProfile && id !== DEFAULT_PROFILE_ID
+      ? getCatalogForProfile(activeProfile.processNames, id, DEFAULT_PROFILE_ID, activeProfile.name)
+      : null
+
+    if (entry && useAppStore.getState().settings?.showIGPromo !== false) {
+      const payload = { purchaseHint: entry.purchaseHint, browseUrl: localizeIGUrl(entry.browseUrl) }
+      const t = setTimeout(() => {
+        igPromoState.payload = payload
+        if (useAppStore.getState().overlayState !== 'HIDDEN' && useAppStore.getState().activeTabId !== null) {
+          void window.aether.igPromo.show(payload)
+        }
+        // If on Home, payload is stored — will show when user opens a web tab.
+      }, 1500)
+      return () => clearTimeout(t)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProfile?.id])
+
+  // Hide promo on Home, restore it only when coming back FROM Home (not on every tab switch).
+  const activeTabId = useAppStore((s) => s.activeTabId)
+  const prevActiveTabIdRef = useRef<string | null | undefined>(undefined)
+  useEffect(() => {
+    const prev = prevActiveTabIdRef.current
+    prevActiveTabIdRef.current = activeTabId
+    if (activeTabId === null) {
+      window.aether.igPromo.close()
+    } else if (prev === null && igPromoState.payload && !igPromoState.dismissed
+        && useAppStore.getState().settings?.showIGPromo !== false) {
+      void window.aether.igPromo.show(igPromoState.payload)
+    }
+  }, [activeTabId])
+
+  // Sync dismissed state from the popup renderer (separate V8 context) to this one.
+  useEffect(() => window.aether.on.igPromoDismissed(() => igPromoState.dismiss()), [])
+
+  // (Hiding the overlay no longer dismisses the promo here — the main process
+  // retracts it on hide and restores it on show, so it survives an Alt+B cycle.)
 
   // Send the keyboard layout map to the main process so ShortcutManager can
   // resolve logical letters (e.g. 'Z') to physical keycodes correctly on
@@ -212,6 +265,7 @@ export function App(): JSX.Element {
         <AddressBar />
         <CollectionBar />
         <PinnedBar />
+        <IGNudge />
       </div>
 
       {/* Achievement notifications — rendered here so they appear above the WebContentsView */}

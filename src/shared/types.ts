@@ -86,14 +86,23 @@ export interface Settings {
   searchEngine?: SearchEngineId
   /** When true, Edge WebView2 reports prefers-color-scheme:dark to sites that have a dark mode. Default: true. */
   applyDarkMode?: boolean
+  /** When false, the Instant Gaming deal card is never shown. Default: true. */
+  showIGPromo?: boolean
   /** Global homepage URL — the page that opens when creating a new tab. */
   homepageUrl?: string
+  /** Domains whose tabs survive profile switches and performance-mode unloads. */
+  protectedDomains?: string[]
+  /** User-defined quick access links shown on the home page. */
+  quickLinks?: Array<{ name: string; url: string }>
   // ── Profile automation ───────────────────────────────────────────────
   /** When false, Overframe will never auto-create a profile for an unrecognised game. */
   autoCreateProfiles?: boolean
   /** When false, Overframe will never auto-switch to a matching profile when a game is detected. */
   autoSwitchProfile?: boolean
 
+  // ── Instant Gaming affiliate ─────────────────────────────────────────
+  /** When true, automatically adds the affiliate tag when navigating to Instant Gaming. */
+  igAutoAffiliate?: boolean
 }
 
 export interface WindowBounds {
@@ -256,6 +265,11 @@ export interface AchievementPayload {
   title: string
 }
 
+export interface IGPromoPayload {
+  purchaseHint: string
+  browseUrl: string
+}
+
 /** Fired when a visible game was seen but could not be auto-profiled. */
 export interface GameUndetectedPayload {
   /** Candidates that passed blocklist/excluded checks but failed the game-path filter. */
@@ -313,6 +327,7 @@ export interface DownloadEvent {
 }
 
 export const DEFAULT_HOMEPAGE = 'https://www.google.com'
+export const DEFAULT_PROTECTED_DOMAINS: string[] = ['discord.com']
 export const DEFAULT_OPACITY = 1.0
 export const MIN_OPACITY = 0.2
 export const MAX_OPACITY = 1.0

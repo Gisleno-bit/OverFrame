@@ -80,9 +80,17 @@ export const IPC = {
   SystemUninstall: 'system:uninstall',
   /** Renderer → Main: show an achievement notification popup window. */
   AchievementNotify: 'achievement:notify',
+  /** Renderer → Main: open the IG promo popup window (bottom-right, above WebView2). */
+  IGPromoShow: 'igPromo:show',
+  /** Renderer or promo popup → Main: close the IG promo window. */
+  IGPromoClose: 'igPromo:close',
+  /** Main → Overlay renderer: user explicitly dismissed the IG promo (clicked X). */
+  IGPromoDismissed: 'igPromo:dismissed',
   AppGetVersion: 'app:getVersion',
   /** Renderer → Main: trigger an update check. */
   AppCheckForUpdates: 'app:checkForUpdates',
+  /** Renderer → Main: quit and install the downloaded update. */
+  AppRestartToUpdate: 'app:restartToUpdate',
   /** Main → Renderer: live update-check status. */
   EventUpdateStatus: 'event:update:status',
 

@@ -14,7 +14,10 @@ import {
 import { DiscordIcon } from './icons/DiscordIcon'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DEFAULT_PROFILE_ID, SEARCH_ENGINES } from '@shared/types'
+import { IGLogoIcon } from './icons/IGLogoIcon'
+import { localizeIGUrl, IG_HOME } from '@shared/ig-affiliate'
 import { useAppStore } from '../store/appStore'
+import { useDiscordUrl } from '../hooks/useDiscordUrl'
 import { Input } from './ui/Input'
 import { cn } from '../lib/cn'
 
@@ -55,6 +58,7 @@ function MemoryWidget(): JSX.Element {
 
 export function AddressBar(): JSX.Element {
   const { tabs, activeTabId, activeProfile, collections, settings } = useAppStore()
+  const discordUrl = useDiscordUrl()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const [value, setValue] = useState('')
   // Timestamp of the last mousedown on the address bar. Used to suppress the
@@ -185,7 +189,7 @@ export function AddressBar(): JSX.Element {
           {activeTab?.favicon ? (
             <img src={activeTab.favicon} alt="" className="h-4 w-4 favicon-pop" />
           ) : activeTab ? (
-            <Globe size={12} className="text-muted-foreground/40" aria-hidden="true" />
+            <Globe size={12} className="text-muted-foreground" aria-hidden="true" />
           ) : null}
         </span>
         <Input
@@ -236,7 +240,7 @@ export function AddressBar(): JSX.Element {
           className={cn(
             'absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 transition-colors',
             'hover:text-foreground disabled:opacity-30 disabled:pointer-events-none',
-            isBookmarked ? 'text-primary' : 'text-muted-foreground/60'
+            isBookmarked ? 'text-primary' : 'text-muted-foreground'
           )}
           title={isBookmarked ? 'Edit bookmark' : 'Bookmark page'}
         >
@@ -275,9 +279,18 @@ export function AddressBar(): JSX.Element {
       )}
       <button
         type="button"
+        aria-label="Shop on Instant Gaming"
+        onClick={() => void window.aether.tabs.create(localizeIGUrl(IG_HOME))}
+        className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-ig-orange hover:bg-background/70 transition-colors"
+        title="Instant Gaming — save on games & top-ups"
+      >
+        <IGLogoIcon size={15} mono />
+      </button>
+      <button
+        type="button"
         aria-label="Join the Discord community"
-        onClick={() => void window.aether.tabs.create('https://discord.com/channels/1501993110291349584/1501996196103979251')}
-        className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground/60 hover:text-indigo-400 hover:bg-background/70 transition-colors"
+        onClick={() => void window.aether.tabs.create(discordUrl)}
+        className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-indigo-400 hover:bg-background/70 transition-colors"
         title="Discord community"
       >
         <DiscordIcon size={15} />
@@ -286,7 +299,7 @@ export function AddressBar(): JSX.Element {
         type="button"
         aria-label="Support the developer on Ko-fi"
         onClick={() => void window.aether.tabs.create('https://ko-fi.com/overframe')}
-        className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground/60 hover:text-pink-400 hover:bg-background/70 transition-colors"
+        className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-pink-400 hover:bg-background/70 transition-colors"
         title="Support development"
       >
         <Heart size={15} />

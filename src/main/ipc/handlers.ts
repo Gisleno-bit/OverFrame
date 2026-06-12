@@ -12,7 +12,7 @@ import type { ShortcutManager } from '../managers/ShortcutManager'
 import type { OverlayWindow } from '../windows/OverlayWindow'
 import { DEFAULT_HOMEPAGE, DEFAULT_SHORTCUTS } from '@shared/types'
 import { WebView2View } from '../managers/tabs/WebView2View'
-import type { BookmarkPopupPayload, AchievementPayload, CollectionsPopupPayload, LinkOverflowPayload, MemoryPopupPayload, Settings, Shortcuts } from '@shared/types'
+import type { BookmarkPopupPayload, AchievementPayload, CollectionsPopupPayload, LinkOverflowPayload, MemoryPopupPayload, Settings, Shortcuts, IGPromoPayload } from '@shared/types'
 import { getVisibleGames } from '../utils/getVisibleGames'
 import { crashLogPath, ensureLogsDir, logCrash } from '../utils/crashLogger'
 import { logConsole, readLog } from '../utils/devLogger'
@@ -122,6 +122,10 @@ const SETTINGS_ALLOWLIST: ReadonlySet<keyof Settings> = new Set([
   'autoSwitchProfile',
   'applyDarkMode',
   'homepageUrl',
+  'igAutoAffiliate',
+  'showIGPromo',
+  'protectedDomains',
+  'quickLinks',
 ])
 
 /** User-configurable string list caps — prevents storing pathological lists. */
@@ -151,6 +155,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle(IPC.PopupOpen, (_e, type: 'bookmark' | 'memory', data: BookmarkPopupPayload | MemoryPopupPayload) => {
     popup.open({ type, data } as Parameters<typeof popup.open>[0])
   })
+
   ipcMain.handle(IPC.PopupOpenLinkOverflow, (_e, data: LinkOverflowPayload) => {
     if (!data || typeof data.anchorX !== 'number' || !Array.isArray(data.links)) return
     popup.open({ type: 'linkOverflow', data })
@@ -163,10 +168,24 @@ export function registerIpcHandlers(deps: Deps): void {
   })
   ipcMain.on(IPC.PopupCloseNotification, () => popup.closeNotification())
 
-  ipcMain.handle(IPC.AchievementNotify, (_e, payload: AchievementPayload) => {
+  ipcMain.handle(IPC.AchievementNotify, async (_e, payload: AchievementPayload) => {
     if (!payload || typeof payload.title !== 'string' || payload.title.length > 200) return
-    popup.openAchievementNotification(payload)
+    const scrollbar = await tabs.measureActiveScrollbarWidth()
+    popup.openAchievementNotification(payload, scrollbar)
   })
+
+  ipcMain.handle(IPC.IGPromoShow, async (_e, payload: IGPromoPayload) => {
+    if (!payload || typeof payload.purchaseHint !== 'string' || typeof payload.browseUrl !== 'string') return
+    // Measure the active tab's scrollbar so the promo keeps an equal gap to the
+    // visible content edge on the right and bottom.
+    const scrollbar = await tabs.measureActiveScrollbarWidth()
+    popup.openIGPromo(payload, scrollbar)
+  })
+  ipcMain.on(IPC.IGPromoClose, (_e, dismissed: boolean) => {
+    popup.closeIGPromo()
+    if (dismissed) overlay.win.webContents.send(IPC.IGPromoDismissed)
+  })
+
   ipcMain.handle(IPC.OpenPanelFromPopup, (e, panelId?: string, collectionId?: string, prefillNewProfile?: { name: string; processName: string }) => {
     if (e.sender === popup.getWebContents()) {
       popup.close()
@@ -221,7 +240,15 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle(IPC.SystemToggleDevTools, () => {
     const wc = overlay.win.webContents
     if (wc.isDevToolsOpened()) wc.closeDevTools()
-    else wc.openDevTools({ mode: 'detach' })
+    else {
+      popup.retractIGPromo()
+      // `activate: false` opens DevTools WITHOUT bringing it to the foreground.
+      // A detached DevTools window that steals foreground triggers a focus /
+      // activation reshuffle over the transparent overlay + WebView2 children,
+      // which trips Chromium's hwnd_util GetClassName FATAL 1400 (same family as
+      // the Alt+B crash). Not stealing focus avoids that reshuffle.
+      wc.openDevTools({ mode: 'detach', activate: false })
+    }
   })
   ipcMain.handle(IPC.DevStoreReset, () => {
     if (app.isPackaged) return // safety guard — dev only
@@ -252,7 +279,10 @@ export function registerIpcHandlers(deps: Deps): void {
   // Uses sendSync so the renderer blocks until ::SetFocus(chromiumRenderWidgetHwnd)
   // completes — ensuring keyboard input reaches the address bar before any key is pressed.
   ipcMain.on(IPC.RendererClaimFocus, (e) => {
-    WebView2View.claimFocus(overlay.win.getNativeWindowHandle())
+    // Exclude the embedded child windows (IG promo + achievement) — each has its
+    // own render-widget HWND that must not capture focus, or the address bar
+    // becomes untypeable while one is shown.
+    WebView2View.claimFocus(overlay.win.getNativeWindowHandle(), ...popup.getEmbeddedHwnds())
     e.returnValue = null // required for sendSync
   })
   ipcMain.handle(IPC.OverlayToggleMaximize, () => overlay.toggleMaximize())
@@ -423,9 +453,21 @@ export function registerIpcHandlers(deps: Deps): void {
       'nonGameDirs',
       'launcherExceptions',
       'gamePathHints',
+      'protectedDomains',
     ])
     if (LIST_KEYS.has(key as keyof Settings) && !isBoundedStringList(value)) return null
     if (key === 'homepageUrl' && (typeof value !== 'string' || !isSafeBoundedUrl(value as string))) return null
+    if (key === 'quickLinks') {
+      if (!Array.isArray(value) || (value as unknown[]).length > 30) return null
+      const valid = (value as unknown[]).every((item) =>
+        typeof item === 'object' && item !== null &&
+        typeof (item as Record<string, unknown>).name === 'string' &&
+        typeof (item as Record<string, unknown>).url === 'string' &&
+        ((item as Record<string, unknown>).name as string).length <= 100 &&
+        ((item as Record<string, unknown>).url as string).length <= 500
+      )
+      if (!valid) return null
+    }
 
     const settings = store.get('settings')
     const next = { ...settings, [key]: value } as Settings
@@ -468,11 +510,15 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle(IPC.AppGetVersion, () => app.getVersion())
   ipcMain.handle(IPC.AppCheckForUpdates, () => {
     if (!app.isPackaged) {
-      broadcastUpdateStatus({ status: 'dev' })
+      broadcastUpdateStatus({ status: 'up-to-date' })
       return
     }
     ensureUpdater()
     autoUpdater.checkForUpdates()
+  })
+  ipcMain.handle(IPC.AppRestartToUpdate, () => {
+    if (!app.isPackaged) return
+    autoUpdater.quitAndInstall()
   })
   ipcMain.handle(IPC.SystemPickFolder, async (_e) => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })

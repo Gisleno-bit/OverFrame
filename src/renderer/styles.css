@@ -27,6 +27,11 @@
 
     /* ── Shape ───────────────────────────────────────── */
     --radius: 0.35rem;
+
+    /* ── Instant Gaming brand ────────────────────────── */
+    --ig-orange:       23 100% 50%;   /* #ff6400  brand orange            */
+    --ig-orange-dark:  24 100% 45%;   /* #e55a00  hover / active          */
+    --ig-orange-light: 37 100% 50%;   /* #ff9d00  gradient end            */
   }
 
   html, body, #root { height: 100%; margin: 0; }
