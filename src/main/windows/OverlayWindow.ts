@@ -24,6 +24,8 @@ export class OverlayWindow {
   private state: OverlayState = 'HIDDEN'
   private listeners = new Set<(state: OverlayState) => void>()
   private firstShowListeners = new Set<() => void>()
+  /** Fired synchronously at the very start of hide(), before any window op. */
+  private beforeHideListeners = new Set<() => void>()
   private currentOpacity = 1.0
   private panelWidth = 0
   private chromeHeight = CHROME_HEIGHT
@@ -126,6 +128,9 @@ export class OverlayWindow {
 
   hide(): void {
     if (this.state === 'HIDDEN') return
+    // Let companion windows (e.g. the IG promo) retract themselves BEFORE we
+    // start reshuffling always-on-top / focus below.
+    for (const cb of this.beforeHideListeners) cb()
     // Save current state so show() can restore it (e.g. CT mode survives a hide/show).
     this.stateBeforeHide = this.state
     // Drop alwaysOnTop while invisible — this removes the window from the DWM
@@ -171,6 +176,13 @@ export class OverlayWindow {
   onStateChange(cb: (state: OverlayState) => void): () => void {
     this.listeners.add(cb)
     return () => this.listeners.delete(cb)
+  }
+
+  /** Registers a callback fired synchronously at the start of every hide(),
+   *  before any window operation. Use it to retract companion windows. */
+  onBeforeHide(cb: () => void): () => void {
+    this.beforeHideListeners.add(cb)
+    return () => this.beforeHideListeners.delete(cb)
   }
 
   /** Registers a one-shot callback fired the first time the overlay becomes visible.
