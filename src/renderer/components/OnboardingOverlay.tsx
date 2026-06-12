@@ -10,7 +10,7 @@ function isValidDomain(domain: string): boolean {
 }
 
 const KBD = 'inline-flex items-center justify-center min-w-[26px] h-[26px] px-2 font-mono text-[11px] font-semibold bg-muted border border-border/80 rounded-md text-foreground/80 shadow-[0_2px_0_rgba(0,0,0,0.35)] leading-none'
-const PLUS = <span className="text-[10px] text-muted-foreground/40">+</span>
+const PLUS = <span className="text-[11px] text-muted-foreground">+</span>
 
 function splitKeys(shortcut: string): string[] {
   return shortcut.split('+').map((k) => {
@@ -50,7 +50,7 @@ function KeysDuo({ a, b }: { a: string; b: string }): JSX.Element {
         </span>
       ))}
       <kbd className={KBD}>{pa[pfx]}</kbd>
-      <span className="text-[10px] text-muted-foreground/40">/</span>
+      <span className="text-[11px] text-muted-foreground">/</span>
       <kbd className={KBD}>{pb[pfx]}</kbd>
     </span>
   )
@@ -99,7 +99,7 @@ export function OnboardingOverlay(): JSX.Element | null {
                       {k}
                     </kbd>
                     {i < arr.length - 1 && (
-                      <span className="text-[18px] font-light text-muted-foreground/60">+</span>
+                      <span className="text-[18px] font-light text-muted-foreground">+</span>
                     )}
                   </span>
                 ))}

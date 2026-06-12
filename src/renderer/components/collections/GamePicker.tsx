@@ -16,7 +16,7 @@ export function GamePicker({ games, onPick }: GamePickerProps): JSX.Element {
           <button key={g.exePath} type="button" onClick={() => onPick(g)}
             className="flex items-center gap-2 px-3 py-2 text-left text-[11px] hover:bg-muted/50 transition-colors border-b border-border/30 last:border-0">
             <span className="flex-1 truncate">{g.displayName || g.processName}</span>
-            <span className="text-muted-foreground/60 text-[10px] shrink-0">{g.processName.toLowerCase()}</span>
+            <span className="text-muted-foreground text-[11px] shrink-0">{g.processName.toLowerCase()}</span>
           </button>
         ))
       }
@@ -42,7 +42,7 @@ export function ProcessNamesField({ id, value, onChange, onPickGame }: ProcessNa
           <InfoTip text="Comma-separated .exe names (e.g. Game.exe). Overframe switches to this profile automatically when one of these processes becomes active." />
         </label>
         <button type="button" aria-label="Detect running games" onClick={() => void detect()} disabled={detectLoading}
-          className="flex items-center gap-1 h-5 px-1.5 rounded text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-50">
+          className="flex items-center gap-1 h-5 px-1.5 rounded text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-50">
           {detectLoading ? <Loader2 size={10} className="animate-spin" aria-hidden="true" /> : <Search size={10} aria-hidden="true" />}
           Detect
         </button>

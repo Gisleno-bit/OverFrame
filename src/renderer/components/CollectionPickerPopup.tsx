@@ -81,13 +81,13 @@ export function CollectionPickerPopup({ payload }: Props): JSX.Element {
                     ? <Check size={12} className="text-primary" aria-hidden="true" />
                     : c.iconUrl
                       ? <img src={c.iconUrl} alt="" aria-hidden="true" className="h-4 w-4 rounded-sm object-contain" />
-                      : <Globe size={11} className="text-muted-foreground/30" aria-hidden="true" />
+                      : <Globe size={11} className="text-muted-foreground" aria-hidden="true" />
                   }
                 </div>
                 <span className={cn('text-[12px] flex-1 truncate', isSelected && 'text-primary font-medium')}>
                   {c.name}
                 </span>
-                <span className="text-[10px] text-muted-foreground/50 shrink-0" aria-label={`${c.links.length} links`}>
+                <span className="text-[11px] text-muted-foreground shrink-0" aria-label={`${c.links.length} links`}>
                   {c.links.length}
                 </span>
               </button>
@@ -95,7 +95,7 @@ export function CollectionPickerPopup({ payload }: Props): JSX.Element {
           )
         })}
         {collections.length === 0 && (
-          <li className="px-3 py-6 text-center text-[11px] text-muted-foreground/50">
+          <li className="px-3 py-6 text-center text-[11px] text-muted-foreground">
             No collections
           </li>
         )}

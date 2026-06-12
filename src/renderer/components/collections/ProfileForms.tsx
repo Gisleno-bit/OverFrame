@@ -117,7 +117,7 @@ export function ProfileCreateForm({ onSave, onCancel, initialName, initialProces
             <InfoTip text="Comma-separated .exe names (e.g. Game.exe). Overframe switches to this profile automatically when one of these processes becomes active." />
           </label>
           <button type="button" aria-label="Detect running games" onClick={() => void detect()} disabled={detectLoading}
-            className="flex items-center gap-1 h-5 px-1.5 rounded text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-50">
+            className="flex items-center gap-1 h-5 px-1.5 rounded text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-50">
             {detectLoading ? <Loader2 size={10} className="animate-spin" aria-hidden="true" /> : <Search size={10} aria-hidden="true" />}
             Detect
           </button>

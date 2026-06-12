@@ -92,9 +92,9 @@ export function DragBar(): JSX.Element {
 export function TopToolbar(): JSX.Element {
   return (
     <div className="no-drag flex items-center gap-1 px-2 h-7 bg-background/90 border-b border-border">
-      <div className="flex items-center gap-1.5 ml-2 text-muted-foreground/60 select-none">
+      <div className="flex items-center gap-1.5 ml-2 text-muted-foreground select-none">
         <img src="/icons/icon-amber.svg" alt="" className="h-3.5 w-3.5 shrink-0" />
-        <span className="text-[10px] font-medium tracking-widest uppercase">Overframe</span>
+        <span className="text-[11px] font-medium tracking-widest uppercase">Overframe</span>
       </div>
       <div className="ml-auto flex items-center gap-1">
         <Tooltip label="Support development">

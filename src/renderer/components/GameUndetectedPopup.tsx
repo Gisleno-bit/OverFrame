@@ -49,14 +49,14 @@ export function GameUndetectedPopup({ data }: Props): JSX.Element {
           <AlertCircle size={16} aria-hidden="true" />
         </div>
         <div className="flex flex-col min-w-0 flex-1 text-left">
-          <span className="text-[10px] text-amber-400/80 leading-none mb-0.5">
+          <span className="text-[11px] text-amber-400/80 leading-none mb-0.5">
             Unrecognized game
           </span>
           <span className="text-[13px] font-semibold text-foreground truncate leading-tight">
             {firstName}{extra}
           </span>
         </div>
-        <span className="shrink-0 text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors pr-1">
+        <span className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground transition-colors pr-1">
           Create profile →
         </span>
       </button>
@@ -67,7 +67,7 @@ export function GameUndetectedPopup({ data }: Props): JSX.Element {
         onClick={handleBlock}
         aria-label={`Block detection of ${processName}`}
         title="Block"
-        className="shrink-0 flex h-6 w-6 items-center justify-center rounded text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+        className="shrink-0 flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
       >
         <Ban size={13} aria-hidden="true" />
       </button>

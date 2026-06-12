@@ -49,13 +49,13 @@ export function LinkRow({ link, isDragging, onOpen, onEdit, onRemove }: LinkRowP
 
   return (
     <div className={`flex items-center gap-2.5 px-3 py-2.5 hover:bg-muted/40 border-b border-border/40 flex-1 min-w-0${isDragging ? ' opacity-40' : ''}`}>
-      <GripVertical size={12} className="shrink-0 text-muted-foreground/30 cursor-grab -ml-1" aria-hidden="true" />
+      <GripVertical size={12} className="shrink-0 text-muted-foreground cursor-grab -ml-1" aria-hidden="true" />
       <button type="button" onClick={() => onOpen(link.url)} className="flex-1 min-w-0 text-left" aria-label={`Open ${link.title}`} title={link.url}>
         <div className="flex items-center gap-2">
           <Favicon url={link.url} favicon={link.favicon} className="w-4 h-4" />
           <div className="min-w-0">
             <div className="text-[12px] truncate">{link.title}</div>
-            <div className="text-[10px] text-muted-foreground/60 truncate">{link.url}</div>
+            <div className="text-[11px] text-muted-foreground truncate">{link.url}</div>
           </div>
         </div>
       </button>

@@ -326,22 +326,22 @@ export function CollectionsPanel({
           {level === 'collections' && (
             <>
               <button type="button" onClick={() => setLevel('profiles')} aria-label="Back to profiles"
-                className="text-muted-foreground/60 hover:text-muted-foreground transition-colors truncate shrink-0 max-w-[80px]">Profiles</button>
-              <ChevronRight size={10} className="text-muted-foreground/40 shrink-0" aria-hidden="true" />
+                className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0 max-w-[80px]">Profiles</button>
+              <ChevronRight size={10} className="text-muted-foreground shrink-0" aria-hidden="true" />
               <span className="font-medium truncate">{selectedProfile?.name ?? '—'}</span>
             </>
           )}
           {level === 'links' && (
             <>
               <button type="button" onClick={() => setLevel('profiles')} aria-label="Back to profiles"
-                className="text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors shrink-0">Profiles</button>
-              <ChevronRight size={10} className="text-muted-foreground/30 shrink-0" aria-hidden="true" />
+                className="text-muted-foreground hover:text-foreground transition-colors shrink-0">Profiles</button>
+              <ChevronRight size={10} className="text-muted-foreground shrink-0" aria-hidden="true" />
               <button type="button" onClick={() => { setLevel('collections') }}
                 aria-label={`Back to ${selectedProfile?.name ?? 'profile'} collections`}
-                className="text-muted-foreground/60 hover:text-muted-foreground transition-colors truncate shrink-0 max-w-[70px]">
+                className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0 max-w-[70px]">
                 {selectedProfile?.name ?? '—'}
               </button>
-              <ChevronRight size={10} className="text-muted-foreground/40 shrink-0" aria-hidden="true" />
+              <ChevronRight size={10} className="text-muted-foreground shrink-0" aria-hidden="true" />
               <span className="font-medium truncate">{selectedCollection?.name ?? '—'}</span>
             </>
           )}
@@ -394,7 +394,7 @@ export function CollectionsPanel({
           )}
           <ul className="flex-1 overflow-y-auto" role="list" aria-label="Profiles">
             {filteredProfiles.length === 0 && (
-              <li className="px-3 py-6 text-center text-[11px] text-muted-foreground/60">No profile matches &laquo;{profileSearch}&raquo;.</li>
+              <li className="px-3 py-6 text-center text-[11px] text-muted-foreground">No profile matches &laquo;{profileSearch}&raquo;.</li>
             )}
             {filteredProfiles.map((p) => {
               const isActive = p.id === activeProfile?.id
@@ -419,7 +419,7 @@ export function CollectionsPanel({
                         <ProfileIcon iconUrl={p.iconUrl} name={p.name} size={20} profileId={p.id} />
                         <div className="flex-1 min-w-0">
                           <div className={cn('text-[12px] truncate', isActive && 'text-primary font-medium')}>{p.name}</div>
-                          <div className="text-[10px] text-muted-foreground/60 truncate">
+                          <div className="text-[11px] text-muted-foreground truncate">
                             {collCount} collection{collCount !== 1 ? 's' : ''}
                           </div>
                         </div>
@@ -443,13 +443,13 @@ export function CollectionsPanel({
                             </Tooltip>
                           )}
                         </div>
-                        <ChevronRight size={12} className="text-muted-foreground/30 shrink-0 -mr-0.5" aria-hidden="true" />
+                        <ChevronRight size={12} className="text-muted-foreground shrink-0 -mr-0.5" aria-hidden="true" />
                       </button>
                       {deleteProfileConfirmId === p.id && (
                         <div className="px-3 py-2 bg-muted/30 border-t border-border/60" role="alert">
                           <p className="text-[11px] text-foreground mb-2">Delete &laquo;{p.name}&raquo;?</p>
                           {p.processNames.length > 0 && (
-                            <p className="text-[10px] text-muted-foreground mb-2">
+                            <p className="text-[11px] text-muted-foreground mb-2">
                               <strong className="text-foreground">Delete</strong> erases everything permanently.
                               &nbsp;<strong className="text-foreground">Exclude</strong> saves a restorable snapshot.
                             </p>
@@ -507,7 +507,7 @@ export function CollectionsPanel({
         <div className="flex flex-col flex-1 min-h-0">
           <ul className="flex-1 overflow-y-auto" role="list" aria-label="Collections">
             {filteredCollections.length === 0 && !showNewColl && (
-              <li className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground/50">
+              <li className="flex flex-col items-center justify-center py-8 gap-2 text-muted-foreground">
                 {isSearching
                   ? <p className="text-[11px]">No collections match &laquo;{debouncedQuery}&raquo;.</p>
                   : <><Globe size={20} aria-hidden="true" /><p className="text-[11px]">No collections yet.</p></>
@@ -532,7 +532,7 @@ export function CollectionsPanel({
                       <div className="flex items-center gap-2">
                         {sanitizeIconUrl(editCollIconUrl)
                           ? <img src={sanitizeIconUrl(editCollIconUrl)} alt="" className="h-5 w-5 shrink-0 rounded-sm object-contain" onError={(e) => { e.currentTarget.style.display = 'none' }} />
-                          : <div className="h-5 w-5 shrink-0 rounded-sm bg-muted-foreground/10 flex items-center justify-center"><Globe size={10} className="text-muted-foreground/30" /></div>
+                          : <div className="h-5 w-5 shrink-0 rounded-sm bg-muted/60 flex items-center justify-center"><Globe size={10} className="text-muted-foreground" /></div>
                         }
                         <Input autoFocus aria-label="Collection name" value={editCollName} onChange={(e) => setEditCollName(e.target.value)}
                           placeholder="Collection name…" className="h-7 text-xs flex-1"
@@ -555,11 +555,11 @@ export function CollectionsPanel({
                       onClick={() => { setSelectedCollectionId(c.id); setLevel('links') }}>
                       {c.iconUrl
                         ? <img src={c.iconUrl} alt="" className="h-5 w-5 shrink-0 rounded-sm object-contain" onError={(e) => { e.currentTarget.style.display = 'none' }} />
-                        : <div className="h-5 w-5 shrink-0 rounded-sm bg-muted-foreground/10 flex items-center justify-center"><Globe size={10} className="text-muted-foreground/30" /></div>
+                        : <div className="h-5 w-5 shrink-0 rounded-sm bg-muted/60 flex items-center justify-center"><Globe size={10} className="text-muted-foreground" /></div>
                       }
                       <div className="flex-1 min-w-0">
                         <span className={cn('text-[12px] truncate block', isSelected && 'text-primary font-medium')}>{c.name}</span>
-                        <div className="text-[10px] text-muted-foreground/60">{c.links.length} link{c.links.length !== 1 ? 's' : ''}</div>
+                        <div className="text-[11px] text-muted-foreground">{c.links.length} link{c.links.length !== 1 ? 's' : ''}</div>
                       </div>
                       {isSelected && <Check size={12} className="text-primary shrink-0" aria-hidden="true" />}
                       <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
@@ -586,7 +586,7 @@ export function CollectionsPanel({
                           </Tooltip>
                         )}
                       </div>
-                      <ChevronRight size={12} className="text-muted-foreground/30 shrink-0" aria-hidden="true" />
+                      <ChevronRight size={12} className="text-muted-foreground shrink-0" aria-hidden="true" />
                     </button>
                   )}
                   {deleteCollConfirmId === c.id && (
@@ -671,7 +671,7 @@ export function CollectionsPanel({
                       <Favicon url={l.url} favicon={l.favicon} />
                       <span className="truncate">{l.title}</span>
                     </div>
-                    <div className="text-[10px] text-muted-foreground truncate">{l.collectionName}</div>
+                    <div className="text-[11px] text-muted-foreground truncate">{l.collectionName}</div>
                   </button>
                   <Tooltip label="Remove link">
                     <Button size="icon" variant="ghost" aria-label={`Remove ${l.title}`}

@@ -163,7 +163,7 @@ function LinksArea({ links, selected: _selected }: { links: Link[]; selected: Co
 
   if (links.length === 0) {
     return (
-      <span className="text-[11px] text-muted-foreground/50 px-2">No links in this collection</span>
+      <span className="text-[11px] text-muted-foreground px-2">No links in this collection</span>
     )
   }
 

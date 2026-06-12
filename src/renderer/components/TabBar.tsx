@@ -464,7 +464,7 @@ export function TabBar(): JSX.Element {
               >
                   {!hideIcon && (
                     tab.isLoading ? (
-                      <Loader2 size={13} className="animate-spin shrink-0 text-muted-foreground/50" aria-hidden="true" />
+                      <Loader2 size={13} className="animate-spin shrink-0 text-muted-foreground" aria-hidden="true" />
                     ) : tab.favicon ? (
                       <img
                         src={tab.favicon}
@@ -572,7 +572,7 @@ export function TabBar(): JSX.Element {
                 )}
               >
                 {tab.isLoading ? (
-                  <Loader2 size={13} className="animate-spin shrink-0 text-muted-foreground/50" aria-hidden="true" />
+                  <Loader2 size={13} className="animate-spin shrink-0 text-muted-foreground" aria-hidden="true" />
                 ) : tab.favicon ? (
                   <img
                     src={tab.favicon}
@@ -611,7 +611,7 @@ export function TabBar(): JSX.Element {
             'flex items-center justify-center shrink-0 h-full transition-colors cursor-default ml-1',
             canCreate
               ? 'text-muted-foreground hover:text-foreground hover:bg-muted/30 rounded'
-              : 'text-muted-foreground/25',
+              : 'text-muted-foreground opacity-40',
           )}
         >
           <Plus size={16} />
@@ -634,7 +634,7 @@ export function TabBar(): JSX.Element {
               title="Overlay is transparent to clicks. Click to exit click-through mode."
               onClick={() => window.aether.overlay.leaveClickThrough()}
               onPointerDown={(e) => e.stopPropagation()}
-              className="pointer-events-auto flex items-center gap-1 shrink-0 h-5 px-2 rounded text-[10px] font-medium bg-amber-500/20 text-amber-400 hover:bg-amber-500/35 hover:text-amber-300 border border-amber-500/35 transition-colors cursor-default"
+              className="pointer-events-auto flex items-center gap-1 shrink-0 h-5 px-2 rounded text-[11px] font-medium bg-amber-500/20 text-amber-400 hover:bg-amber-500/35 hover:text-amber-300 border border-amber-500/35 transition-colors cursor-default"
             >
               <MousePointer2 size={10} />
               pass-through
@@ -647,7 +647,7 @@ export function TabBar(): JSX.Element {
       <div className="no-drag flex items-center gap-0.5 shrink-0">
 
         <div
-          className="no-drag pointer-events-auto flex items-center justify-center h-7 w-[41.09px] text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors"
+          className="no-drag pointer-events-auto flex items-center justify-center h-7 w-[41.09px] text-muted-foreground hover:text-foreground transition-colors"
           title="Drag to move"
           onPointerDown={onFillerPointerDown}
           onPointerMove={onFillerPointerMove}

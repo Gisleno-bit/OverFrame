@@ -17,10 +17,10 @@ export function Favicon({ url, favicon, className }: { url: string; favicon?: st
 export function InfoTip({ text }: { text: string }): JSX.Element {
   return (
     <span className="group relative inline-flex items-center ml-1">
-      <Info size={10} className="text-muted-foreground/50 hover:text-muted-foreground cursor-help" aria-hidden="true" />
+      <Info size={10} className="text-muted-foreground hover:text-foreground cursor-help" aria-hidden="true" />
       <span
         role="tooltip"
-        className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-50 w-48 rounded bg-muted border border-border px-2 py-1.5 text-[10px] text-foreground shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
+        className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-50 w-48 rounded bg-muted border border-border px-2 py-1.5 text-[11px] text-foreground shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
       >
         {text}
       </span>
