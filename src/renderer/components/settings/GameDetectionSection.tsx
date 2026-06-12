@@ -93,11 +93,10 @@ export function GameDetectionSection(): JSX.Element {
       {/* ── Automation ───────────────────────────────────────── */}
       <Section
         title="Automation"
-        description="Control what Overframe does automatically when a game is detected."
+        description="What Overframe does automatically when a game starts."
       >
         <Check
           label="Auto-create profiles for new games"
-          hint="When a game with no matching profile is detected, Overframe creates one automatically."
         >
           <input
             type="checkbox"
@@ -107,7 +106,6 @@ export function GameDetectionSection(): JSX.Element {
         </Check>
         <Check
           label="Auto-switch to matching profile"
-          hint="When a known game is running, Overframe switches to its profile automatically."
         >
           <input
             type="checkbox"
@@ -120,13 +118,10 @@ export function GameDetectionSection(): JSX.Element {
       {/* ── Custom game folders ───────────────────────────────── */}
       <Section
         title="Custom game folders"
-        description="Games installed outside a known store? Add their root folder — any game launched from inside will be auto-detected."
+        description="Got games installed outside Steam or Epic? Add the folder and Overframe will detect them."
       >
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs text-muted-foreground">
-              Anything launched from inside is treated as a potential game.
-            </span>
             <button
               type="button"
               aria-label="Add a game folder"
@@ -167,11 +162,11 @@ export function GameDetectionSection(): JSX.Element {
       {/* ── Excluded processes ───────────────────────────────── */}
       <Section
         title="Excluded processes"
-        description="Games you've removed from auto-detection. Click the restore icon to allow auto-creation again."
+        description="Games you've told Overframe to ignore. Click the restore icon to re-enable them."
       >
         {excluded.length === 0 ? (
           <p className="text-xs text-muted-foreground leading-snug">
-            None yet — when you remove a game from auto-detection it appears here.
+            Nothing here yet.
           </p>
         ) : (
           <>
@@ -189,7 +184,7 @@ export function GameDetectionSection(): JSX.Element {
               <span className="text-xs text-foreground/80">
                 Excluded
                 {excluded.length > 0 && (
-                  <span className="ml-0.5 text-[10px] bg-muted rounded px-1 py-0.5 align-middle text-muted-foreground">
+                  <span className="ml-0.5 text-[11px] bg-muted rounded px-1 py-0.5 align-middle text-muted-foreground">
                     {excluded.length}
                   </span>
                 )}
@@ -232,11 +227,11 @@ export function GameDetectionSection(): JSX.Element {
           {/* Store paths */}
           <Section
             title="Recognized store paths"
-            description="Path fragments that tell Overframe a folder contains store-installed games (e.g. \\steamapps\\). Remove one to stop detecting that store; add your own for any unlisted store."
+            description="Folder names Overframe uses to recognise game stores (e.g. \\steamapps\\). Remove one to stop detecting that store."
           >
             <StringListEditor
               label="Store path fragments"
-              hint="e.g. \\steamapps\\ identifies Steam games, \\epic games\\ for Epic. Remove to stop detecting that store."
+              hint="e.g. \\steamapps\\ for Steam, \\epic games\\ for Epic."
               values={gamePathHints}
               placeholder="\\mygames\\"
               normalize={normalisePathFragment}
@@ -250,11 +245,11 @@ export function GameDetectionSection(): JSX.Element {
           {/* System directories */}
           <Section
             title="System directories"
-            description="Path fragments that mark a location as a system folder, not a game install. Remove an entry if you actually have games installed there."
+            description="Folders Overframe skips when looking for games. Remove one if you actually have games there."
           >
             <StringListEditor
               label="Excluded path fragments"
-              hint="e.g. \\appdata\\local\\ prevents AppData apps from being detected as games. Remove to allow detection in that folder."
+              hint="e.g. \\appdata\\local\\ stops apps in AppData from being detected as games."
               values={nonGameDirs}
               placeholder="\\my apps\\"
               normalize={normalisePathFragment}
@@ -268,11 +263,11 @@ export function GameDetectionSection(): JSX.Element {
           {/* Blocked processes */}
           <Section
             title="Blocked processes"
-            description="Process names that are never auto-detected as games regardless of where they run from. 'electron' and 'overframe' are always blocked."
+            description="Apps that Overframe will never treat as a game, no matter where they run from."
           >
             <StringListEditor
               label="Blocked process names"
-              hint="Lowercase names without .exe — e.g. 'discord', 'obs64'. Remove an entry to allow that process to be auto-detected as a game."
+              hint="e.g. 'discord', 'obs64'. No .exe needed."
               values={blockedProcesses}
               placeholder="obs64"
               normalize={normaliseProcess}
@@ -286,16 +281,16 @@ export function GameDetectionSection(): JSX.Element {
           {/* Launcher exceptions */}
           <Section
             title="Launcher exceptions"
-            description="Some games have 'launcher', 'helper' or 'agent' in their process name and get incorrectly filtered out. Add them here to force detection."
+            description="Some games have 'launcher' in their process name and get ignored by mistake. Add them here to force detection."
           >
             <StringListEditor
               label="Exception names"
-              hint="e.g. if 'mygamelauncher' is a real game exe, add it here to bypass the launcher filter."
+              hint="e.g. 'mygamelauncher'."
               values={launcherExceptions}
               placeholder="mygamelauncher"
               normalize={normaliseProcess}
               validate={validateProcess}
-              emptyText="None — the launcher filter skips obvious helpers (*launcher, *updater, *service…)."
+              emptyText="None — processes with 'launcher', 'updater' or 'service' in their name are skipped by default."
               onChange={(next) => void persist('launcherExceptions', next)}
             />
           </Section>

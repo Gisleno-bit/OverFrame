@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
 import { Heart, Palette, Keyboard, Gamepad2, Globe, Cpu, Info, ExternalLink, Mail, Trash2, FolderOpen } from 'lucide-react'
 import { DiscordIcon } from './icons/DiscordIcon'
 import type { Settings } from '@shared/types'
-import { DEFAULT_SHORTCUTS, MIN_OPACITY, DEFAULT_HOMEPAGE, HOMEPAGE_PRESETS, SEARCH_ENGINES } from '@shared/types'
+import { DEFAULT_SHORTCUTS, MIN_OPACITY, DEFAULT_HOMEPAGE, DEFAULT_PROTECTED_DOMAINS, HOMEPAGE_PRESETS, SEARCH_ENGINES } from '@shared/types'
 import type { SearchEngineId } from '@shared/types'
 import type { ShortcutId, Shortcuts } from '@shared/types'
 import { useAppStore } from '../store/appStore'
+import { useDiscordUrl } from '../hooks/useDiscordUrl'
 import { Button } from './ui/Button'
 import { Slider } from './ui/Slider'
-import { Check, Field, Section } from './settings/Layout'
+import { Check, Field, Section, StringListEditor } from './settings/Layout'
 import { ShortcutsSection } from './settings/ShortcutsSection'
 import { GameDetectionSection } from './settings/GameDetectionSection'
 import { cn } from '../lib/cn'
@@ -43,6 +44,7 @@ const TABS: readonly TabDef[] = [
 
 export function SettingsPanel(): JSX.Element {
   const { settings, setSettings, activeProfile, setActiveProfile } = useAppStore()
+  const discordUrl = useDiscordUrl()
   const [active, setActive] = useState<TabId>('appearance')
   const [version, setVersion] = useState('')
   const [liveOpacity, setLiveOpacity] = useState(activeProfile?.opacity ?? 1)
@@ -171,11 +173,11 @@ export function SettingsPanel(): JSX.Element {
           {active === 'appearance' && (
             <Section
               title="Appearance"
-              description="Visual settings for the active profile."
+              description="How the overlay looks."
             >
               <Field
                 label={`Opacity — ${Math.round(liveOpacity * 100)}%`}
-                hint="Adjust the overlay's transparency. Use the opacity shortcuts to change this in-game."
+                hint="How see-through the overlay is. You can also use Ctrl+Shift+↑ and Ctrl+Shift+↓ while in-game."
               >
                 <Slider
                   value={[liveOpacity]}
@@ -187,7 +189,7 @@ export function SettingsPanel(): JSX.Element {
               </Field>
               <Check
                 label="Show memory usage in the tab bar"
-                hint="Displays a live memory-usage widget. Click it to see per-tab breakdown."
+                hint="Click it for a breakdown per tab."
               >
                 <input
                   type="checkbox"
@@ -203,7 +205,7 @@ export function SettingsPanel(): JSX.Element {
               {/* ── Homepage ──────────────────────────────────── */}
               <Section
                 title="Homepage"
-                description="The page that opens when you create a new tab. This is a global setting — it applies regardless of the active game profile."
+                description="The page that opens when you create a new tab."
               >
                 <div className="flex flex-col gap-1.5">
                   <div className="grid grid-cols-3 gap-1.5">
@@ -274,11 +276,10 @@ export function SettingsPanel(): JSX.Element {
               {/* ── Dark mode ────────────────────────────────── */}
               <Section
                 title="Dark mode"
-                description="When enabled, sites that support dark mode activate it automatically via prefers-color-scheme. Sites without dark mode support are unaffected."
+                description="Makes websites use dark mode when they support it."
               >
                 <Check
                   label="Enable dark mode for websites"
-                  hint="Signals prefers-color-scheme: dark to Edge WebView2 — sites with a dark theme use it automatically."
                 >
                   <input
                     type="checkbox"
@@ -286,6 +287,40 @@ export function SettingsPanel(): JSX.Element {
                     onChange={(e) => void updateSetting('applyDarkMode', e.target.checked)}
                   />
                 </Check>
+              </Section>
+
+              {/* ── Instant Gaming promo ─────────────────────── */}
+              <Section
+                title="Instant Gaming"
+                description="Overframe is affiliated with Instant Gaming. A small deal card may appear occasionally while browsing."
+              >
+                <Check
+                  label="Show Instant Gaming deal cards"
+                >
+                  <input
+                    type="checkbox"
+                    checked={settings.showIGPromo ?? true}
+                    onChange={(e) => void updateSetting('showIGPromo', e.target.checked)}
+                  />
+                </Check>
+              </Section>
+
+              {/* ── Protected tabs ───────────────────────────────── */}
+              <Section
+                title="Protected tabs"
+                description="These sites stay open when you switch profiles or hide the overlay — so your calls are never interrupted."
+              >
+                <StringListEditor
+                  label="Protected domains"
+                  hint="e.g. 'zoom.us', 'meet.google.com'."
+                  values={settings.protectedDomains ?? DEFAULT_PROTECTED_DOMAINS}
+                  placeholder="example.com"
+                  normalize={(v) => v.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')}
+                  validate={(v) => v.includes('.') ? null : 'Enter a valid domain (e.g. discord.com)'}
+                  emptyText="No protected tabs — all tabs close on profile switch."
+                  onReset={() => void updateSetting('protectedDomains', DEFAULT_PROTECTED_DOMAINS)}
+                  onChange={(next) => void updateSetting('protectedDomains', next)}
+                />
               </Section>
 
             </>
@@ -305,11 +340,11 @@ export function SettingsPanel(): JSX.Element {
             <>
               <Section
                 title="System"
-                description="Operating-system integration and performance trade-offs."
+                description="System and performance options."
               >
                 <Check
                   label="Launch at Windows startup"
-                  hint="Starts Overframe minimised in the tray when Windows boots."
+                  hint="Starts Overframe in the tray when Windows boots."
                 >
                   <input
                     type="checkbox"
@@ -318,8 +353,8 @@ export function SettingsPanel(): JSX.Element {
                   />
                 </Check>
                 <Check
-                  label="Performance mode — fully unload tabs when overlay is hidden"
-                  hint="Releases ~all memory used by hidden tabs at the cost of a brief reload when you re-open the overlay."
+                  label="Free up memory when the overlay is hidden"
+                  hint="Tabs reload when you reopen the overlay."
                 >
                   <input
                     type="checkbox"
@@ -331,7 +366,7 @@ export function SettingsPanel(): JSX.Element {
 
               <Section
                 title="Folders"
-                description="Open key directories in Windows Explorer."
+                description="Open Overframe's folders in Explorer."
               >
                 <div className="flex flex-col gap-1.5">
                   <Button
@@ -363,7 +398,7 @@ export function SettingsPanel(): JSX.Element {
 
               <Section
                 title="Reset"
-                description="Erase all profiles, collections, bookmarks, shortcuts and settings."
+                description="Delete all your data and start fresh."
               >
                 <Button
                   size="sm"
@@ -409,7 +444,7 @@ export function SettingsPanel(): JSX.Element {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => void window.aether.tabs.create('https://discord.gg/A2KPZn8WNd')}
+                    onClick={() => void window.aether.tabs.create(discordUrl)}
                     className="justify-start gap-2 hover:border-indigo-500/50 hover:text-indigo-400"
                   >
                     <DiscordIcon size={11} /> Discord &mdash; bugs, ideas &amp; chat

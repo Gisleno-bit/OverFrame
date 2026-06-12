@@ -48,7 +48,7 @@ export function ShortcutsSection({ shortcuts, onChange, onReset }: ShortcutsSect
       <div className="space-y-4">
         {SHORTCUT_GROUPS.map((group) => (
           <div key={group.label}>
-            <p className="text-[10px] uppercase tracking-[0.08em] font-semibold text-muted-foreground mb-2">
+            <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-muted-foreground mb-2">
               {group.label}
             </p>
             <div className="space-y-2">

@@ -181,7 +181,7 @@ export function StringListEditor({
         <label htmlFor={inputId} className="block text-xs text-foreground/80">
           {label}
           {values.length > 0 && (
-            <span className="ml-1.5 text-[10px] bg-muted rounded px-1 py-0.5 align-middle text-muted-foreground">
+            <span className="ml-1.5 text-[11px] bg-muted rounded px-1 py-0.5 align-middle text-muted-foreground">
               {values.length}
             </span>
           )}
