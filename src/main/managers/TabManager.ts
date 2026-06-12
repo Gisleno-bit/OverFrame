@@ -15,6 +15,16 @@ import {
 
 export type { TabEvent } from './tabs/types'
 
+function isProtectedUrl(url: string, protectedDomains: string[]): boolean {
+  if (!protectedDomains.length) return false
+  try {
+    const { hostname } = new URL(url)
+    return protectedDomains.some((d) => hostname === d || hostname.endsWith('.' + d))
+  } catch {
+    return false
+  }
+}
+
 /** Google's favicon service — returns a 32×32 PNG for any public hostname. */
 function faviconUrl(url: string): string | null {
   try {
@@ -137,12 +147,30 @@ export class TabManager {
       this.emit({ type: 'updated', tab: tab.state })
     }
 
-    view.on('did-start-loading', () => update({ isLoading: true }))
+    // Poll for SPA URL changes (pushState/replaceState don't fire WebView2 navigation events)
+    let spaPoller: ReturnType<typeof setInterval> | null = null
+    const clearSpaPoller = (): void => {
+      if (spaPoller !== null) { clearInterval(spaPoller); spaPoller = null }
+    }
+
+    view.on('did-start-loading', () => {
+      clearSpaPoller()
+      update({ isLoading: true })
+    })
 
     view.on('did-finish-load', () => {
       update({ isLoading: false, canGoBack: view.canGoBack(), canGoForward: view.canGoForward() })
       const url = view.getURL()
       if (!url.startsWith('http://') && !url.startsWith('https://')) return
+      // Google GSI uses this page to postMessage the OAuth token back to window.opener.
+      // Once it has finished loading the JS has already run — close the popup tab.
+      // Defer via setImmediate: closing a WebView2 tab synchronously from inside
+      // its own did-finish-load callback can leave stale HWND messages in flight.
+      if (url.includes('accounts.google.com/gsi/transform')) {
+        const tabId = tab.id
+        setImmediate(() => { if (this.tabs.has(tabId)) this.close(tabId) })
+        return
+      }
       const d = this._dark
       // Activate framework-based dark/light themes (Docusaurus, Tailwind, etc.)
       // data-theme covers Docusaurus/VitePress; .dark class covers Tailwind/Next.js.
@@ -153,6 +181,40 @@ export class TabManager {
         `document.documentElement.classList[d?'add':'remove']('dark')` +
         `})(${d})`
       )
+
+      // On Discord invite/onboarding pages, auto-click "Continue in browser" so the
+      // "Open App" dialog doesn't block the user. A MutationObserver handles the case
+      // where the dialog is injected after initial paint.
+      if (/^https:\/\/discord\.com\/(invite\/|app\/invite)/.test(url)) {
+        void view.executeJavaScript(
+          `(function(){` +
+          `function go(){` +
+          `for(var e of document.querySelectorAll('button,[role=button],a')){` +
+          `var t=(e.textContent||'').toLowerCase();` +
+          `if(t.includes('navigateur')||t.includes('browser')){e.click();return true}` +
+          `}return false}` +
+          `if(!go()){var o=new MutationObserver(function(){if(go())o.disconnect()});` +
+          `o.observe(document.documentElement,{childList:true,subtree:true});` +
+          `setTimeout(function(){o.disconnect()},15000)}` +
+          `})()`
+        )
+      }
+
+      // Start SPA poller after each full page load
+      clearSpaPoller()
+      let pollPending = false
+      spaPoller = setInterval(() => {
+        if (view.isDestroyed()) { clearSpaPoller(); return }
+        if (pollPending) return
+        pollPending = true
+        void view.executeJavaScript('window.location.href').then((raw) => {
+          pollPending = false
+          const current = JSON.parse(raw) as string
+          if (current && current !== tab.state.url) {
+            update({ url: current, favicon: faviconUrl(current) })
+          }
+        }).catch(() => { pollPending = false })
+      }, 300)
     })
 
     view.on('focus', () => {
@@ -180,8 +242,10 @@ export class TabManager {
       update({ canGoBack: view.canGoBack(), canGoForward: view.canGoForward() })
     })
 
-    view.on('new-window', (url: unknown) => {
-      if (typeof url === 'string') this.handlePopup(url)
+    view.on('new-window', (url: unknown, reqId: unknown) => {
+      if (typeof url === 'string') {
+        this.handlePopup(url, typeof reqId === 'number' ? reqId : undefined)
+      }
     })
 
     view.on('zoom-updated', (factor: unknown) => {
@@ -287,6 +351,23 @@ export class TabManager {
     tab.view.setBounds(x, y, width, height)
   }
 
+  /**
+   * Width (px) of the active tab's vertical scrollbar — 0 when there is none
+   * (or when the page uses overlay scrollbars). Used to position the IG promo
+   * with an equal visual gap to the visible content edge on the right and bottom.
+   */
+  async measureActiveScrollbarWidth(): Promise<number> {
+    const tab = this.activeTabId ? this.tabs.get(this.activeTabId) : null
+    if (!tab || tab.view.isDestroyed()) return 0
+    try {
+      const raw = await tab.view.executeJavaScript('(window.innerWidth - document.documentElement.clientWidth)')
+      const n = Number(JSON.parse(raw))
+      return Number.isFinite(n) && n >= 0 && n <= 40 ? Math.round(n) : 0
+    } catch {
+      return 0
+    }
+  }
+
   // ── Navigation ────────────────────────────────────────────────────────────────
 
   navigate(id: string, url: string): void {
@@ -329,18 +410,26 @@ export class TabManager {
     }
   }
 
-  unloadAll(): void {
+  unloadAll(protectedDomains: string[] = []): void {
     this.stoppedDuringHide.clear()
     this.unloadedUrls.clear()
     for (const tab of this.tabs.values()) {
       try {
         const url = tab.state.url
-        if (url && url !== 'about:blank') {
+        if (url && url !== 'about:blank' && !isProtectedUrl(url, protectedDomains)) {
           this.unloadedUrls.set(tab.id, url)
           tab.view.loadURL('about:blank')
         }
       } catch { /* destroyed */ }
     }
+  }
+
+  closeUnprotected(protectedDomains: string[]): void {
+    const toClose = [...this.displayOrder].filter((id) => {
+      const tab = this.tabs.get(id)
+      return tab && !isProtectedUrl(tab.state.url, protectedDomains)
+    })
+    for (const id of toClose) this.close(id)
   }
 
   resumeAll(): void {
@@ -383,17 +472,24 @@ export class TabManager {
 
   // ── Popup deduplication ───────────────────────────────────────────────────────
 
-  private handlePopup(url: string): void {
+  private handlePopup(url: string, reqId?: number): void {
+    const blockPopup = (): void => {
+      // Complete the deferral without a NewWindow → window.open() returns null.
+      if (reqId !== undefined) WebView2View.completeNewWindow(reqId, -1)
+    }
+
     // Security: only open http(s) popups as tabs — drop javascript:/data:/custom schemes.
     try {
       const proto = new URL(url).protocol
-      if (proto !== 'http:' && proto !== 'https:') return
+      if (proto !== 'http:' && proto !== 'https:') { blockPopup(); return }
     } catch {
-      return
+      blockPopup(); return
     }
+
     const now = Date.now()
     const last = this.recentPopups.get(url) ?? 0
-    if (now - last <= POPUP_DEDUP_WINDOW_MS) return
+    if (now - last <= POPUP_DEDUP_WINDOW_MS) { blockPopup(); return }
+
     this.recentPopups.set(url, now)
     if (this.recentPopups.size > POPUP_DEDUP_EVICT_THRESHOLD) {
       const cutoff = now - POPUP_DEDUP_MAX_AGE_MS
@@ -401,7 +497,16 @@ export class TabManager {
         if (t < cutoff) this.recentPopups.delete(u)
       }
     }
-    this.create(url)
+
+    const newTabState = this.create(url)
+
+    // Provide the new controller as NewWindow so the popup page has window.opener.
+    // This is required for OAuth flows (e.g. Google Sign-In) that postMessage
+    // the token back to window.opener after authentication completes.
+    if (reqId !== undefined) {
+      const nativeId = this.tabs.get(newTabState.id)?.view.nativeId ?? -1
+      WebView2View.completeNewWindow(reqId, nativeId)
+    }
   }
 
   // ── Dev eval ──────────────────────────────────────────────────────────────────

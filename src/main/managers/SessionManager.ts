@@ -19,7 +19,6 @@ export class SessionManager {
     const httpTabs = allTabs.filter(
       (t) => t.url.startsWith('http://') || t.url.startsWith('https://')
     )
-    if (httpTabs.length === 0) return
 
     const activeIndex = Math.max(0, httpTabs.findIndex((t) => t.id === activeId))
 
@@ -33,15 +32,10 @@ export class SessionManager {
     store.set('sessions', { ...sessions, [profileId]: session })
   }
 
-  /** On startup: restore saved session or open the homepage if none exists. */
-  restoreOrCreate(profileId: string, fallbackUrl: string): void {
+  /** On startup: restore saved session or show home page if none exists. */
+  restoreOrCreate(profileId: string): void {
     const session = store.get('sessions')[profileId]
-    // No session at all → first launch, leave tabs empty (onboarding state).
-    if (!session) return
-    if (session.tabs.length === 0) {
-      this.tabs.create(fallbackUrl)
-      return
-    }
+    if (!session || session.tabs.length === 0) return
     const createdIds: string[] = []
     for (const t of session.tabs) {
       const tab = this.tabs.create(t.url)
@@ -51,27 +45,55 @@ export class SessionManager {
     this.tabs.setActive(createdIds[targetIndex])
   }
 
-  restore(profileId: string, fallbackUrl: string): void {
+  restore(profileId: string, protectedDomains: string[] = []): void {
     const session = store.get('sessions')[profileId]
 
-    // Always close the current profile's tabs first — keeping them would show
-    // the wrong profile's content and corrupt the next save.
-    this.tabs.closeAll()
+    // Close current tabs except protected domains (e.g. Discord calls).
+    this.tabs.closeUnprotected(protectedDomains)
 
-    if (!session || session.tabs.length === 0) {
-      // No saved session — open the profile's homepage
-      this.tabs.create(fallbackUrl)
-      return
+    // After closeUnprotected(), find which protected base-domains still have an open tab.
+    // We won't reopen session tabs that belong to an already-open protected domain —
+    // otherwise switching between two profiles that both have Discord would create duplicates.
+    const coveredDomains = new Set<string>()
+    if (protectedDomains.length) {
+      for (const tab of this.tabs.getAll()) {
+        try {
+          const { hostname } = new URL(tab.url)
+          for (const d of protectedDomains) {
+            if (hostname === d || hostname.endsWith('.' + d)) coveredDomains.add(d)
+          }
+        } catch { /* destroyed or non-http */ }
+      }
     }
 
+    const isAlreadyCovered = (url: string): boolean => {
+      if (!coveredDomains.size) return false
+      try {
+        const { hostname } = new URL(url)
+        return protectedDomains.some(
+          (d) => coveredDomains.has(d) && (hostname === d || hostname.endsWith('.' + d))
+        )
+      } catch { return false }
+    }
+
+    // No saved session or nothing to restore → show home page (activeTabId → null).
+    if (!session || session.tabs.length === 0) return
+
+    const tabsToRestore = session.tabs.filter((t) => !isAlreadyCovered(t.url))
+
+    // All saved tabs were protected-domain duplicates → home page, don't open a redundant tab.
+    if (tabsToRestore.length === 0) return
+
     const createdIds: string[] = []
-    for (const t of session.tabs) {
+    for (const t of tabsToRestore) {
       const tab = this.tabs.create(t.url)
       createdIds.push(tab.id)
     }
 
-    const targetIndex = Math.min(session.activeTabIndex, createdIds.length - 1)
-    this.tabs.setActive(createdIds[targetIndex])
+    // Preserve the originally active tab if it wasn't filtered out; otherwise use the first.
+    const savedActive = session.tabs[session.activeTabIndex]
+    const filteredIndex = savedActive ? tabsToRestore.findIndex((t) => t.url === savedActive.url) : -1
+    this.tabs.setActive(createdIds[filteredIndex !== -1 ? filteredIndex : 0])
   }
 
   startAutoSave(getProfileId: () => string): void {
