@@ -161,6 +161,17 @@ static std::atomic<int>                 g_nextDownloadId{1};
 // 0=auto, 1=light, 2=dark — applied to the shared profile so prefers-color-scheme works correctly
 static std::atomic<int>                 g_colorScheme{0};
 
+// Pending NewWindowRequested deferrals — keyed by request ID.
+// When NewWindowRequested fires we take a deferral and emit the request ID to JS.
+// JS creates a new tab and calls completeNewWindow(reqId, newTabId) to provide the
+// ICoreWebView2 as NewWindow, establishing window.opener in the popup page.
+struct PendingNewWindow {
+  ComPtr<ICoreWebView2NewWindowRequestedEventArgs> args;
+  ComPtr<ICoreWebView2Deferral>                    deferral;
+};
+static std::map<int, PendingNewWindow> g_pendingNewWindows;
+static std::atomic<int>               g_nextNewWindowId{1};
+
 // ── Thread-safe JS callback ───────────────────────────────────────────────────
 
 static Napi::ThreadSafeFunction g_tsfn;
@@ -428,16 +439,33 @@ Napi::Value CreateTab(const Napi::CallbackInfo& info) {
                 return S_OK;
               }).Get(), &tab.tokHistoryChanged);
 
-          // Hook NewWindowRequested
+          // Hook NewWindowRequested — use a deferral so window.open() stays
+          // pending until JS provides the new WebView2 controller.  This lets
+          // the popup page's window.opener be set correctly (required for
+          // OAuth flows like Google Sign-In that postMessage back to opener).
           tab.webview->add_NewWindowRequested(
             Callback<ICoreWebView2NewWindowRequestedEventHandler>(
               [tabId](ICoreWebView2* wv, ICoreWebView2NewWindowRequestedEventArgs* args) -> HRESULT {
-                args->put_Handled(TRUE); // we handle popups ourselves
                 LPWSTR uriRaw = nullptr;
                 args->get_Uri(&uriRaw);
                 std::string url = uriRaw ? WideToUtf8(uriRaw) : "";
                 CoTaskMemFree(uriRaw);
-                CallJS(tabId, "new_window", "{\"url\":\"" + JsonEscape(url) + "\"}");
+
+                // Take a deferral — window.open() in the content process stays
+                // pending until CompleteNewWindow calls deferral->Complete().
+                ComPtr<ICoreWebView2Deferral> deferral;
+                args->GetDeferral(&deferral);
+
+                int reqId = g_nextNewWindowId.fetch_add(1);
+                {
+                  std::lock_guard<std::mutex> lk(g_tabsMutex);
+                  ComPtr<ICoreWebView2NewWindowRequestedEventArgs> argsPtr(args);
+                  g_pendingNewWindows[reqId] = { argsPtr, deferral };
+                }
+
+                std::string data = "{\"url\":\"" + JsonEscape(url) +
+                                   "\",\"reqId\":" + std::to_string(reqId) + "}";
+                CallJS(tabId, "new_window", data);
                 return S_OK;
               }).Get(), &tab.tokNewWindow);
 
@@ -654,6 +682,13 @@ Napi::Value SetBounds(const Napi::CallbackInfo& info) {
   if (it != g_tabs.end() && it->second.controller) {
     RECT bounds = {x, y, x + w, y + h};
     it->second.controller->put_Bounds(bounds);
+    // NOTE: do NOT call SetWindowPos(HWND_TOP) here. SetBounds is driven by the
+    // renderer's ResizeObserver, which fires very early during initial layout —
+    // before the WebView2 child HWND is fully parented. Re-ordering the Z-order
+    // at that point triggers a WM_WINDOWPOSCHANGED/focus cascade that makes
+    // Electron's Chromium call GetWindowClassName on a half-initialised sibling
+    // HWND → hwnd_util PLOG(FATAL) 1400 at startup. Z-order is asserted in Show()
+    // instead, which only runs once a tab is explicitly activated (HWND ready).
   }
   return info.Env().Undefined();
 }
@@ -834,6 +869,47 @@ Napi::Value SetMuted(const Napi::CallbackInfo& info) {
   return info.Env().Undefined();
 }
 
+// ── CompleteNewWindow ─────────────────────────────────────────────────────────
+// Called by JS after creating the new tab for a popup.
+// Sets the new WebView2 as NewWindow on the deferred args so window.open()
+// returns a proper window reference with window.opener set.
+// newTabId <= 0 means "block the popup" (window.open returns null).
+
+Napi::Value CompleteNewWindow(const Napi::CallbackInfo& info) {
+  int reqId    = info[0].As<Napi::Number>().Int32Value();
+  int newTabId = info[1].As<Napi::Number>().Int32Value();
+
+  ComPtr<ICoreWebView2NewWindowRequestedEventArgs> args;
+  ComPtr<ICoreWebView2Deferral>                    deferral;
+  ComPtr<ICoreWebView2>                            newWebView;
+
+  {
+    std::lock_guard<std::mutex> lk(g_tabsMutex);
+    auto reqIt = g_pendingNewWindows.find(reqId);
+    if (reqIt != g_pendingNewWindows.end()) {
+      args    = reqIt->second.args;
+      deferral = reqIt->second.deferral;
+      g_pendingNewWindows.erase(reqIt);
+    }
+    if (newTabId > 0) {
+      auto tabIt = g_tabs.find(newTabId);
+      if (tabIt != g_tabs.end()) newWebView = tabIt->second.webview;
+    }
+  }
+
+  if (args && deferral) {
+    if (newWebView) {
+      args->put_NewWindow(newWebView.Get());
+      args->put_Handled(TRUE);
+    } else {
+      args->put_Handled(TRUE); // block — window.open() returns null
+    }
+    deferral->Complete();
+  }
+
+  return info.Env().Undefined();
+}
+
 // ── SetEventCallback ──────────────────────────────────────────────────────────
 
 Napi::Value SetEventCallback(const Napi::CallbackInfo& info) {
@@ -856,28 +932,43 @@ Napi::Value ClaimFocus(const Napi::CallbackInfo& info) {
   Napi::Buffer<uint8_t> hwndBuf = info[0].As<Napi::Buffer<uint8_t>>();
   HWND parentHwnd = *reinterpret_cast<HWND*>(hwndBuf.Data());
 
-  // Collect every HWND owned by WebView2 (controller + all its descendants).
-  std::set<HWND> wv2Hwnds;
+  // Collect every HWND we must NOT focus: the WebView2 hosts (+ descendants) and
+  // any embedded companion window passed as info[1] (the IG promo child, which has
+  // its own Chrome_RenderWidgetHostHWND — without this we'd steal focus to the
+  // promo and the address bar could no longer be typed into).
+  std::set<HWND> skip;
   {
     std::lock_guard<std::mutex> lk(g_tabsMutex);
     for (auto& [id, tab] : g_tabs) {
       if (!tab.hwnd) continue;
-      wv2Hwnds.insert(tab.hwnd);
+      skip.insert(tab.hwnd);
       EnumChildWindows(tab.hwnd, [](HWND h, LPARAM lp) -> BOOL {
         reinterpret_cast<std::set<HWND>*>(lp)->insert(h);
         return TRUE;
-      }, reinterpret_cast<LPARAM>(&wv2Hwnds));
+      }, reinterpret_cast<LPARAM>(&skip));
     }
+  }
+  // Any number of additional buffers (info[1..]) are companion windows to skip
+  // (the embedded IG promo + achievement children, each with their own widget).
+  for (size_t i = 1; i < info.Length(); ++i) {
+    if (!info[i].IsBuffer()) continue;
+    HWND exclude = *reinterpret_cast<HWND*>(info[i].As<Napi::Buffer<uint8_t>>().Data());
+    if (!exclude) continue;
+    skip.insert(exclude);
+    EnumChildWindows(exclude, [](HWND h, LPARAM lp) -> BOOL {
+      reinterpret_cast<std::set<HWND>*>(lp)->insert(h);
+      return TRUE;
+    }, reinterpret_cast<LPARAM>(&skip));
   }
 
   // Search ALL descendants of the overlay for the Chromium render widget HWND.
   // Its Win32 class is "Chrome_RenderWidgetHostHWND" in all Electron versions.
   struct Ctx { HWND result; std::set<HWND>* skip; };
-  Ctx ctx = {nullptr, &wv2Hwnds};
+  Ctx ctx = {nullptr, &skip};
 
   EnumChildWindows(parentHwnd, [](HWND hwnd, LPARAM lp) -> BOOL {
     auto* c = reinterpret_cast<Ctx*>(lp);
-    if (c->skip->count(hwnd)) return TRUE; // skip WebView2-owned HWNDs
+    if (c->skip->count(hwnd)) return TRUE; // skip WebView2 / embedded-promo HWNDs
     char cls[256] = {};
     GetClassNameA(hwnd, cls, sizeof(cls));
     if (strstr(cls, "RenderWidgetHostHWND") != nullptr) {
@@ -890,6 +981,57 @@ Napi::Value ClaimFocus(const Napi::CallbackInfo& info) {
   // If found, SetFocus to the render widget; otherwise fall back to the frame HWND.
   SetFocus(ctx.result ? ctx.result : parentHwnd);
 
+  return info.Env().Undefined();
+}
+
+// ── Child-window embedding (IG promo) ─────────────────────────────────────────
+// Re-parents an Electron BrowserWindow's HWND as a WS_CHILD of the overlay's
+// top-level HWND (the same parent the WebView2 hosts use). As a child it is
+// clipped to the overlay client area and moves / Z-orders as part of it — it is
+// NO LONGER a separate top-level window with its own activation. That removes the
+// cross-window focus cascade that the overlay's Alt+B hide/show (app.focus steal
+// + moveTop + setAlwaysOnTop) triggered when a separate always-on-top promo
+// window coexisted with it → ui/gfx/win/hwnd_util.cc GetClassName FATAL 1400.
+
+Napi::Value AttachChildWindow(const Napi::CallbackInfo& info) {
+  HWND child  = *reinterpret_cast<HWND*>(info[0].As<Napi::Buffer<uint8_t>>().Data());
+  HWND parent = *reinterpret_cast<HWND*>(info[1].As<Napi::Buffer<uint8_t>>().Data());
+  if (!IsWindow(child) || !IsWindow(parent))
+    return Napi::Boolean::New(info.Env(), false);
+
+  // WS_POPUP → WS_CHILD. Keep WS_EX_NOACTIVATE / WS_EX_LAYERED (set by Electron
+  // for focusable:false + transparent) so the child never steals activation.
+  LONG_PTR style = GetWindowLongPtrW(child, GWL_STYLE);
+  style = (style & ~static_cast<LONG_PTR>(WS_POPUP)) | WS_CHILD;
+  SetWindowLongPtrW(child, GWL_STYLE, style);
+  SetParent(child, parent);
+  ShowWindow(child, SW_HIDE);   // stay hidden until JS reveals it
+  return Napi::Boolean::New(info.Env(), true);
+}
+
+// Position the embedded child in PARENT-CLIENT coordinates and toggle its
+// visibility. HWND_TOP raises it above the WebView2 sibling; SWP_NOACTIVATE keeps
+// it out of the activation path; show/hide of a *child* posts no WM_ACTIVATE, so
+// (unlike a top-level Show/Hide) it cannot interleave with the overlay cascade.
+
+Napi::Value SetChildWindowBounds(const Napi::CallbackInfo& info) {
+  HWND child   = *reinterpret_cast<HWND*>(info[0].As<Napi::Buffer<uint8_t>>().Data());
+  int  x       = info[1].As<Napi::Number>().Int32Value();
+  int  y       = info[2].As<Napi::Number>().Int32Value();
+  int  w       = info[3].As<Napi::Number>().Int32Value();
+  int  h       = info[4].As<Napi::Number>().Int32Value();
+  bool visible = info[5].As<Napi::Boolean>().Value();
+  if (!IsWindow(child)) return info.Env().Undefined();
+
+  UINT flags = SWP_NOACTIVATE | SWP_NOOWNERZORDER |
+               (visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW);
+  SetWindowPos(child, HWND_TOP, x, y, w, h, flags);
+
+  // Straight edges (no region): a Win32 window region is 1-bit, so rounded
+  // corners come out jagged/aliased. An embedded child can't do antialiased
+  // (transparency-backed) rounding, so we keep clean straight edges instead.
+  // Clear any region a previous build may have left on the window.
+  SetWindowRgn(child, nullptr, TRUE);
   return info.Env().Undefined();
 }
 
@@ -943,9 +1085,12 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("setUserAgent",     Napi::Function::New(env, SetUserAgent));
   exports.Set("setZoom",          Napi::Function::New(env, SetZoom));
   exports.Set("setMuted",         Napi::Function::New(env, SetMuted));
-  exports.Set("setColorScheme",   Napi::Function::New(env, SetColorScheme));
-  exports.Set("claimFocus",       Napi::Function::New(env, ClaimFocus));
-  exports.Set("setEventCallback", Napi::Function::New(env, SetEventCallback));
+  exports.Set("setColorScheme",    Napi::Function::New(env, SetColorScheme));
+  exports.Set("claimFocus",        Napi::Function::New(env, ClaimFocus));
+  exports.Set("setEventCallback",  Napi::Function::New(env, SetEventCallback));
+  exports.Set("completeNewWindow", Napi::Function::New(env, CompleteNewWindow));
+  exports.Set("attachChildWindow",   Napi::Function::New(env, AttachChildWindow));
+  exports.Set("setChildWindowBounds", Napi::Function::New(env, SetChildWindowBounds));
   return exports;
 }
 

@@ -56,9 +56,19 @@ interface NativeAddon {
   setMuted(tabId: number, muted: boolean): void
   /** Set prefers-color-scheme for the shared Edge profile. 0=auto, 1=light, 2=dark. */
   setColorScheme(scheme: number): void
-  /** Restore OS keyboard focus to the first non-WebView2 child HWND (Chromium render widget). */
-  claimFocus(overlayHwnd: Buffer): void
+  /** Restore OS keyboard focus to the overlay's render widget, skipping WebView2 + any embedded child windows. */
+  claimFocus(overlayHwnd: Buffer, ...excludeHwnds: Buffer[]): void
   setEventCallback(cb: (tabId: number, type: string, dataJson: string) => void): void
+  /**
+   * Complete a deferred NewWindowRequested — provides the new ICoreWebView2
+   * so window.opener is set in the popup page (required for OAuth postMessage flows).
+   * Pass newTabId <= 0 to block the popup (window.open returns null).
+   */
+  completeNewWindow(reqId: number, newTabId: number): void
+  /** Re-parent an Electron window's HWND as a WS_CHILD of `parentHwnd`. */
+  attachChildWindow(childHwnd: Buffer, parentHwnd: Buffer): boolean
+  /** Position+size an embedded child in parent-client coords and toggle visibility. */
+  setChildWindowBounds(childHwnd: Buffer, x: number, y: number, w: number, h: number, visible: boolean): void
 }
 
 let _addon: NativeAddon | null = null
@@ -90,7 +100,7 @@ export interface WV2EventMap {
   'navigation_completed': { url: string; success: boolean; canGoBack: boolean; canGoForward: boolean }
   'history_changed': { canGoBack: boolean; canGoForward: boolean }
   'title_changed': { title: string }
-  'new_window': { url: string }
+  'new_window': { url: string; reqId: number }
   'zoom_changed': { factor: number }
   'audio_changed': { playing: boolean }
   'muted_changed': { muted: boolean }
@@ -157,7 +167,7 @@ export class WebView2View extends EventEmitter {
           this.emit('page-favicon-updated', [data['faviconUrl']])
           break
         case 'new_window':
-          this.emit('new-window', data['url'])
+          this.emit('new-window', data['url'], data['reqId'])
           break
         case 'zoom_changed':
           this.emit('zoom-updated', data['factor'])
@@ -184,12 +194,35 @@ export class WebView2View extends EventEmitter {
   }
 
   /**
+   * Complete a deferred NewWindowRequested event by providing this tab's
+   * ICoreWebView2 as the NewWindow.  Must be called after init() so the
+   * native controller exists.  Pass nativeTabId <= 0 to block the popup.
+   */
+  static completeNewWindow(reqId: number, nativeTabId: number): void {
+    try { getAddon().completeNewWindow(reqId, nativeTabId) } catch { /* addon not loaded yet */ }
+  }
+
+  /**
+   * Re-parent an Electron window (by its native HWND) as a WS_CHILD of the
+   * overlay's HWND, so it is clipped to / moves with the overlay instead of being
+   * a separate top-level window. Returns false if the addon/HWNDs are unavailable.
+   */
+  static attachChildWindow(childHwnd: Buffer, parentHwnd: Buffer): boolean {
+    try { return getAddon().attachChildWindow(childHwnd, parentHwnd) } catch { return false }
+  }
+
+  /** Position+size an embedded child (parent-client coords) and show/hide it. */
+  static setChildWindowBounds(childHwnd: Buffer, x: number, y: number, w: number, h: number, visible: boolean): void {
+    try { getAddon().setChildWindowBounds(childHwnd, x, y, w, h, visible) } catch { /* addon not loaded yet */ }
+  }
+
+  /**
    * Restore OS keyboard focus to the Electron/Chromium render widget.
    * Calls ::SetFocus() on the first non-WebView2 child HWND of the overlay window.
    * Must be called from the main process with the overlay window HWND.
    */
-  static claimFocus(overlayHwnd: Buffer): void {
-    try { getAddon().claimFocus(overlayHwnd) } catch { /* addon not loaded yet */ }
+  static claimFocus(overlayHwnd: Buffer, ...excludeHwnds: Buffer[]): void {
+    try { getAddon().claimFocus(overlayHwnd, ...excludeHwnds) } catch { /* addon not loaded yet */ }
   }
 
   destroy(): void {
@@ -258,6 +291,7 @@ export class WebView2View extends EventEmitter {
     return this._canGoForward
   }
   isDestroyed(): boolean  { return this._destroyed }
+  get nativeId(): number | null { return this._nativeId }
 }
 
 // ── Dev: log addon load path ───────────────────────────────────────────────────
