@@ -47,14 +47,20 @@ export class TabManager {
   private _dark = true
 
   private viewBoundsCache: { x: number; y: number; w: number; h: number } | null = null
+  private _fullscreenTabId: string | null = null
+  private _unsubBeforeHide: (() => void) | null = null
 
   constructor(private overlay: OverlayWindow) {
     this.overlay.onLayoutChange = () => this.relayoutActive()
+    this._unsubBeforeHide = this.overlay.onBeforeHide(() => {
+      if (this._fullscreenTabId) this._exitFullscreen()
+    })
   }
 
   /** Called from renderer with exact CSS-computed bounds of the WebView2 host div. */
   setActiveViewBounds(x: number, y: number, w: number, h: number): void {
     this.viewBoundsCache = { x, y, w, h }
+    if (this._fullscreenTabId) return // fullscreen manages its own bounds
     const tab = this.activeTabId ? this.tabs.get(this.activeTabId) : null
     if (!tab || tab.view.isDestroyed()) return
     tab.view.setBounds(x, y, w, h)
@@ -200,18 +206,25 @@ export class TabManager {
         )
       }
 
-      // Start SPA poller after each full page load
+      // Start SPA poller after each full page load.
+      // Also checks document.fullscreenElement to drive the overlay fullscreen mode,
+      // since ContainsFullScreenElementChanged can be unreliable across Edge versions.
       clearSpaPoller()
       let pollPending = false
       spaPoller = setInterval(() => {
         if (view.isDestroyed()) { clearSpaPoller(); return }
         if (pollPending) return
         pollPending = true
-        void view.executeJavaScript('window.location.href').then((raw) => {
+        void view.executeJavaScript('[window.location.href, !!document.fullscreenElement]').then((raw) => {
           pollPending = false
-          const current = JSON.parse(raw) as string
+          const [current, isFullscreen] = JSON.parse(raw) as [string, boolean]
           if (current && current !== tab.state.url) {
             update({ url: current, favicon: faviconUrl(current) })
+          }
+          if (isFullscreen && this._fullscreenTabId !== tab.id) {
+            this._enterFullscreen(tab.id)
+          } else if (!isFullscreen && this._fullscreenTabId === tab.id) {
+            this._exitFullscreen()
           }
         }).catch(() => { pollPending = false })
       }, 300)
@@ -263,6 +276,14 @@ export class TabManager {
     view.on('download', (event: unknown) => {
       this.emit({ type: 'download', event: event as DownloadEvent })
     })
+
+    view.on('fullscreen-changed', (active: unknown) => {
+      if (active === true) {
+        this._enterFullscreen(tab.id)
+      } else if (this._fullscreenTabId === tab.id) {
+        this._exitFullscreen()
+      }
+    })
   }
 
 
@@ -272,6 +293,7 @@ export class TabManager {
     const tab = this.tabs.get(id)
     if (!tab) return
 
+    if (this._fullscreenTabId === id) this._exitFullscreen()
     tab.view.setVisible(false)
     tab.view.destroy()
 
@@ -345,6 +367,7 @@ export class TabManager {
   }
 
   relayoutActive(): void {
+    if (this._fullscreenTabId) return // fullscreen manages its own bounds
     const tab = this.activeTabId ? this.tabs.get(this.activeTabId) : null
     if (!tab || tab.view.isDestroyed()) return
     const { x, y, width, height } = this.overlay.getTabContentBounds()
@@ -509,6 +532,23 @@ export class TabManager {
     }
   }
 
+  // ── Fullscreen ────────────────────────────────────────────────────────────────
+
+  private _enterFullscreen(tabId: string): void {
+    if (this._fullscreenTabId) return
+    const tab = this.tabs.get(tabId)
+    if (!tab || tab.view.isDestroyed()) return
+    this._fullscreenTabId = tabId
+    const { width, height } = this.overlay.win.getContentBounds()
+    tab.view.setBounds(0, 0, width, height)
+  }
+
+  private _exitFullscreen(): void {
+    if (!this._fullscreenTabId) return
+    this._fullscreenTabId = null
+    this.relayoutActive()
+  }
+
   // ── Dev eval ──────────────────────────────────────────────────────────────────
 
   async devEval(js: string): Promise<unknown> {
@@ -521,6 +561,8 @@ export class TabManager {
 
   dispose(): void {
     this.overlay.onLayoutChange = null
+    this._unsubBeforeHide?.()
+    this._unsubBeforeHide = null
     this.closeAll()
   }
 }

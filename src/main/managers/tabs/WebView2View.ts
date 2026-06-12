@@ -114,6 +114,7 @@ export interface WV2EventMap {
   'muted_changed': { muted: boolean }
   'download': { id: string; filename: string; url: string; receivedBytes: number; totalBytes: number; state: string }
   'got_focus': Record<string, never>
+  'fullscreen_changed': { active: boolean }
 }
 
 export class WebView2View extends EventEmitter {
@@ -191,6 +192,9 @@ export class WebView2View extends EventEmitter {
           break
         case 'got_focus':
           this.emit('focus')
+          break
+        case 'fullscreen_changed':
+          this.emit('fullscreen-changed', (data['active'] as boolean) === true)
           break
       }
     })

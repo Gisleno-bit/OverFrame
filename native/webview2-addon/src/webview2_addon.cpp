@@ -30,6 +30,7 @@
  *   { type: 'audio_changed',        playing }
  *   { type: 'muted_changed',        muted }
  *   { type: 'download',             id, filename, url, receivedBytes, totalBytes, state }
+ *   { type: 'fullscreen_changed',   active }
  *
  * Security: navigations to non-http(s)/about schemes are cancelled in
  * NavigationStarting (mirrors the old will-navigate protocol guard).
@@ -158,6 +159,7 @@ struct TabEntry {
   EventRegistrationToken tokMutedChanged{};
   EventRegistrationToken tokDownloadStarting{};
   EventRegistrationToken tokGotFocus{};
+  EventRegistrationToken tokFullscreen{};
 };
 
 static ComPtr<ICoreWebView2Environment> g_env;
@@ -422,6 +424,19 @@ Napi::Value CreateTab(const Napi::CallbackInfo& info) {
                 CallJS(tabId, "got_focus", "{}");
                 return S_OK;
               }).Get(), &tab.tokGotFocus);
+
+          // Hook ContainsFullScreenElementChanged — fires when a page element enters
+          // or exits fullscreen (e.g. a video player pressing its fullscreen button).
+          // We relay this to JS so the overlay window can expand to cover the whole screen.
+          tab.webview->add_ContainsFullScreenElementChanged(
+            Callback<ICoreWebView2ContainsFullScreenElementChangedEventHandler>(
+              [tabId](ICoreWebView2* wv, IUnknown*) -> HRESULT {
+                BOOL active = FALSE;
+                wv->get_ContainsFullScreenElement(&active);
+                CallJS(tabId, "fullscreen_changed",
+                  std::string("{\"active\":") + (active ? "true" : "false") + "}");
+                return S_OK;
+              }).Get(), &tab.tokFullscreen);
 
           // Hook NavigationStarting
           tab.webview->add_NavigationStarting(
@@ -805,6 +820,7 @@ Napi::Value DestroyTab(const Napi::CallbackInfo& info) {
       it->second.webview->remove_DocumentTitleChanged(it->second.tokTitleChanged);
       it->second.webview->remove_NewWindowRequested(it->second.tokNewWindow);
       it->second.webview->remove_HistoryChanged(it->second.tokHistoryChanged);
+      it->second.webview->remove_ContainsFullScreenElementChanged(it->second.tokFullscreen);
     }
     if (it->second.webview8) {
       it->second.webview8->remove_IsDocumentPlayingAudioChanged(it->second.tokAudioPlaying);
