@@ -26,6 +26,59 @@ Le hook `SessionStart` injecte automatiquement la **dernière** entrée (titre +
 
 ---
 
+## [2026-06-05] [REFACTOR] IG affiliate — coup de balais + nouvelle architecture
+
+**Contexte :** Pivot depuis l'approche catalogue produits hardcodé (IDs, prix, images — impasse de maintenance) vers une architecture simple : popup contextuel + bannière WelcomePage + IGStorePage browse-only.
+
+**Fichiers supprimés :**
+- `IGQuickBuy.tsx`, `IGStorePopup.tsx` (jamais câblé)
+- Types `IGStoreProduct`, `IGStorePopupPayload`, IPC `PopupOpenIGStore`
+
+**Fichiers créés :**
+- `IGGamePromo.tsx` — popup bottom-right contextuel, par profil jeu, 1.5s de délai, reset sur changement de jeu, disparaît en click-through
+- `localizeIGUrl()` dans `ig-affiliate.ts` — remplace `/en/` par la locale navigateur (fr/de/es/it/pt/nl/pl)
+
+**Fichiers simplifiés :**
+- `ig-affiliate.ts` — catalogue réduit : exe + purchaseHint + description + browseUrl uniquement
+- `IGStorePage.tsx` — landing hero Overframe × IG + badge Affiliate + contexte jeu + CTA unique
+- `WelcomePage.tsx` — bannière IG en haut du tab Home
+
+**Résultat :** typecheck ✅ lint ✅ build ✅
+
+**Prochaine étape :** Validation humaine (`pnpm dev`) puis commit `feat/ig-affiliate`
+
+---
+
+## [2026-06-05] [FEAT] IG affiliate — refonte UX/UI IGStorePage + catalogue
+
+**Contexte :** Reprise de la session "Design IG affiliate feature with overlay and nudge UI". Le catalogue et les composants existaient déjà ; l'UX de la page store était mauvaise (bannière trop petite, bouton Browse orange qui concurrençait les boutons d'achat, affiliation peu visible).
+
+**Fichiers modifiés :**
+- `src/shared/ig-affiliate.ts` — LoL passe en "browse-only" (`products: []`), `displayName` ajouté
+- `src/shared/types.ts` — `IGStorePopupPayload` reçoit `browseUrl: string`
+- `src/renderer/components/IGStorePage.tsx` — refonte complète :
+  - Hero 190px, `object-top`, gradient bottom-up (image IG lisible + texte en bas)
+  - Badge "Official Partner" en haut-droite de la bannière
+  - `AffiliateDisclosure` déplacé immédiatement sous le hero (toujours visible)
+  - Bouton "Browse" → lien secondaire subtil en bas du grid (plus de gros bouton orange concurrent)
+  - Pour les jeux "browse-only" (aucun produit) : composant `BrowseCTA` avec un seul bouton orange centré
+- `src/renderer/components/IGStorePopup.tsx` — "Browse all" renommé "Browse on Instant Gaming", utilise `browseUrl` de l'entrée (avec referral) au lieu de `IG_HOME`
+- `src/renderer/components/AddressBar.tsx` — suppression des imports `IGBadge` et `getCatalogForProfile` inutilisés (+ `igEntry`)
+- `src/renderer/components/IGNudge.tsx` — suppression import `OverframeIcon` inutilisé
+- `src/renderer/App.tsx` — suppression directive `eslint-disable` devenue caduque
+
+**Résultat :** typecheck ✅ lint ✅ (0 erreur, 0 warning)
+
+**Questions ouvertes :**
+- La `IGStorePopup` existe (popup secondaire) mais n'est pas encore câblée dans `popup.tsx` — à brancher si on veut le popup flottant en plus de la page pleine.
+- LoL est maintenant "browse-only" : quand les produits Riot Points spécifiques seront connus, il suffit d'ajouter `products: [...]` dans l'entrée `leagueoflegends.exe`.
+
+**Prochaine étape :**
+- Validation humaine : lancer l'app, ouvrir IGStorePage depuis la barre d'adresse (bouton IG), vérifier le rendu de la bannière sur les jeux détectés (Valorant, Steam).
+- Si validation OK → commit sur une branche `feat/ig-affiliate`.
+
+---
+
 ## [2026-06-03] [FEAT] Onglets WebView2 (Edge natif) + nettoyage chirurgical
 
 **Contexte :** L'approche « stealth » (spoofing UA + `tabStealth` sur `WebContentsView`) ne passait pas le Turnstile Cloudflare. Bascule des onglets sur un addon natif **WebView2** (vrai Edge) qui passe Google sign-in / Cloudflare nativement. Cette session : fiabiliser le working tree, sécuriser, et faire passer toutes les pipelines.

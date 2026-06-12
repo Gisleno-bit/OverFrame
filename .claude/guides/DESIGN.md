@@ -107,11 +107,42 @@ Règles :
 L'UI est **volontairement compacte**. Échelle observée dans le code, à respecter :
 
 - Hauteurs interactives : `h-6` (24px) / `h-7` (28px) — pas plus pour les contrôles de la chrome
-- Texte : `text-[11px]` (dense) / `text-xs` (12px) standard
+- Texte : `text-[11px]` (dense) / `text-xs` (12px) standard — **minimum absolu `text-[11px]`, jamais en dessous**
 - Padding bouton : `px-2` à `px-2.5`
-- Icônes : Lucide React, taille `14`–`16px` (`h-4 w-4`)
+- Icônes : Lucide React, taille `14`–`16px` (`h-4 w-4`), `11px` dans le footer et les labels denses
 
 Ne pas introduire de `text-base`, `h-10`, `p-4` dans la chrome de l'overlay — ce serait hors échelle. Les exceptions : pages plein écran (WelcomePage, onboarding) où plus d'air est acceptable.
+
+---
+
+## Accessibilité texte — règles obligatoires
+
+Retours utilisateurs sur écrans larges (1920p / 2K) : textes illisibles. Causes identifiées et règles à respecter :
+
+### Tailles minimales
+| Contexte | Classe minimum |
+|---|---|
+| Tout texte UI | `text-[11px]` |
+| Corps de texte, descriptions | `text-xs` (12px) |
+| Labels de section (`QUICK ACCESS`, etc.) | `text-[11px] uppercase tracking-[0.08em] font-semibold` |
+| **Interdit** | `text-[9px]`, `text-[10px]` |
+
+### Opacité sur les tokens couleur
+`text-muted-foreground` vaut déjà `#757575` (contraste réduit). **Appliquer une opacité dessus (`/60`, `/50`, `/40`, `/30`, `/25`) fait chuter le ratio WCAG sous le minimum.**
+
+```tsx
+// ❌ Interdit — double réduction de contraste
+<p className="text-muted-foreground/60">…</p>
+<p className="text-muted-foreground/40">…</p>
+
+// ✓ Correct — token plein, contraste garanti
+<p className="text-muted-foreground">…</p>
+
+// ✓ Correct — opacité uniquement sur foreground (déjà à contraste max)
+<p className="text-foreground/80">…</p>
+```
+
+L'opacité sur `text-foreground` est acceptable (`/80`, `/60`) car le token de base est blanc (`#EBEBEB`). Sur `text-muted-foreground`, **jamais**.
 
 ---
 
