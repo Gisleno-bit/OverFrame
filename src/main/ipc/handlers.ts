@@ -126,6 +126,7 @@ const SETTINGS_ALLOWLIST: ReadonlySet<keyof Settings> = new Set([
   'showIGPromo',
   'protectedDomains',
   'quickLinks',
+  'adBlockEnabled',
 ])
 
 /** User-configurable string list caps — prevents storing pathological lists. */
@@ -490,6 +491,14 @@ export function registerIpcHandlers(deps: Deps): void {
       nativeTheme.themeSource = dark ? 'dark' : 'light'
       WebView2View.setColorScheme(dark ? 2 : 1)
       tabs.setDarkMode(dark)
+    }
+    if (key === 'adBlockEnabled') {
+      const extPath = path.join(app.getAppPath(), 'public', 'extensions', 'ublock')
+      if (fs.existsSync(extPath)) {
+        WebView2View.addExtension(extPath, value === true).catch((e: unknown) => {
+          console.error('[AdBlock] addExtension failed:', e)
+        })
+      }
     }
     return next
   })

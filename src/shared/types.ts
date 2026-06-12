@@ -100,6 +100,14 @@ export interface Settings {
   /** When false, Overframe will never auto-switch to a matching profile when a game is detected. */
   autoSwitchProfile?: boolean
 
+  // ── Privacy ──────────────────────────────────────────────────────────────────
+  /**
+   * When true, loads uBlock Origin (MV2) as a browser extension into the Edge profile.
+   * Blocks ads and cookie banners at the network level.
+   * Off by default to stay compatible with ad-supported partner sites.
+   */
+  adBlockEnabled?: boolean
+
   // ── Instant Gaming affiliate ─────────────────────────────────────────
   /** When true, automatically adds the affiliate tag when navigating to Instant Gaming. */
   igAutoAffiliate?: boolean

@@ -305,6 +305,22 @@ export function SettingsPanel(): JSX.Element {
                 </Check>
               </Section>
 
+              {/* ── Privacy — ad & cookie blocking ──────────────── */}
+              <Section
+                title="Privacy"
+                description="Block ads and cookie consent banners using uBlock Origin. Disable this if a site breaks or if you want to support ad-supported partners."
+              >
+                <Check
+                  label="Block ads & cookie banners (uBlock Origin)"
+                >
+                  <input
+                    type="checkbox"
+                    checked={settings.adBlockEnabled ?? false}
+                    onChange={(e) => void updateSetting('adBlockEnabled', e.target.checked)}
+                  />
+                </Check>
+              </Section>
+
               {/* ── Protected tabs ───────────────────────────────── */}
               <Section
                 title="Protected tabs"

@@ -26,6 +26,7 @@
     "test": "cross-env VITE_CJS_IGNORE_WARNING=1 vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "download:ublock": "node scripts/download-ublock.mjs",
     "gen-assets": "node scripts/gen-assets.mjs",
     "gen-loading-gif": "node scripts/gen-loading-gif.mjs",
     "check:deps": "node scripts/check-dangerous-deps.mjs",

@@ -69,6 +69,14 @@ interface NativeAddon {
   attachChildWindow(childHwnd: Buffer, parentHwnd: Buffer): boolean
   /** Position+size an embedded child in parent-client coords and toggle visibility. */
   setChildWindowBounds(childHwnd: Buffer, x: number, y: number, w: number, h: number, visible: boolean): void
+  /**
+   * Install an unpacked browser extension into the shared Edge profile and set its
+   * initial enabled state. If no tab exists yet, the call is deferred until the
+   * first tab is created (the Promise resolves immediately in that case).
+   */
+  addExtension(folderPath: string, enabled: boolean): Promise<void>
+  /** Runtime toggle for the extension loaded via addExtension(). No-op if not loaded. */
+  setExtensionEnabled(enabled: boolean): Promise<void>
 }
 
 let _addon: NativeAddon | null = null
@@ -214,6 +222,20 @@ export class WebView2View extends EventEmitter {
   /** Position+size an embedded child (parent-client coords) and show/hide it. */
   static setChildWindowBounds(childHwnd: Buffer, x: number, y: number, w: number, h: number, visible: boolean): void {
     try { getAddon().setChildWindowBounds(childHwnd, x, y, w, h, visible) } catch { /* addon not loaded yet */ }
+  }
+
+  /**
+   * Install an unpacked extension (e.g. uBlock Origin) into the shared Edge profile.
+   * Call this before or after tab creation — if no tab exists yet the C++ layer defers
+   * the actual install until the first tab is created.
+   */
+  static addExtension(folderPath: string, enabled: boolean): Promise<void> {
+    try { return getAddon().addExtension(folderPath, enabled) } catch { return Promise.resolve() }
+  }
+
+  /** Enable or disable the extension that was loaded via addExtension(). */
+  static setExtensionEnabled(enabled: boolean): Promise<void> {
+    try { return getAddon().setExtensionEnabled(enabled) } catch { return Promise.resolve() }
   }
 
   /**

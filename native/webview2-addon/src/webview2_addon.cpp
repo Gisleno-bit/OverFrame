@@ -42,7 +42,9 @@
 #include <windows.h>
 #include <wrl/client.h>
 #include <wrl/event.h>
+#include <wrl/implements.h>
 #include "WebView2.h"
+#include "WebView2EnvironmentOptions.h"
 #include <napi.h>
 #include <atomic>
 #include <map>
@@ -61,6 +63,11 @@
 
 using Microsoft::WRL::Callback;
 using Microsoft::WRL::ComPtr;
+
+// CoreWebView2EnvironmentOptions is provided by WebView2EnvironmentOptions.h.
+// It correctly initialises TargetCompatibleBrowserVersion to the SDK version
+// string and ReleaseChannels to kAllChannels — both of which are required for
+// CreateCoreWebView2EnvironmentWithOptions to succeed.
 
 // ── Utilities ──────────────────────────────────────────────────────────────────
 
@@ -161,7 +168,13 @@ static std::atomic<int>                 g_nextDownloadId{1};
 // 0=auto, 1=light, 2=dark — applied to the shared profile so prefers-color-scheme works correctly
 static std::atomic<int>                 g_colorScheme{0};
 
-// Pending NewWindowRequested deferrals — keyed by request ID.
+// ── Browser extension state ────────────────────────────────────────────────────
+
+static std::string g_pendingExtensionPath;             // extension folder path before first tab
+static bool        g_pendingExtensionEnabled = false;  // desired enabled state for deferred load
+static ComPtr<ICoreWebView2BrowserExtension> g_activeExtension; // retained for runtime enable/disable
+
+// ── Pending NewWindowRequested deferrals — keyed by request ID.
 // When NewWindowRequested fires we take a deferral and emit the request ID to JS.
 // JS creates a new tab and calls completeNewWindow(reqId, newTabId) to provide the
 // ICoreWebView2 as NewWindow, establishing window.opener in the popup page.
@@ -238,38 +251,61 @@ static bool EnsureEnvironment(Napi::Env env) {
     }
   }
 
-  HRESULT hr = E_FAIL;
-  HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  // Create the official Microsoft environment options object and enable
+  // browser extensions.  CoreWebView2EnvironmentOptions initialises
+  // TargetCompatibleBrowserVersion to the SDK version string and
+  // ReleaseChannels to kAllChannels — both required for a successful call.
+  auto optsMake = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
+  optsMake->put_AreBrowserExtensionsEnabled(TRUE);
+  ComPtr<ICoreWebView2EnvironmentOptions> opts = optsMake;
 
-  hr = CreateCoreWebView2EnvironmentWithOptions(
-    nullptr,
-    dataDir.empty() ? nullptr : dataDir.c_str(),
-    nullptr,
-    Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-      [&hr, ready](HRESULT res, ICoreWebView2Environment* envPtr) -> HRESULT {
-        hr = res;
-        if (SUCCEEDED(res) && envPtr) g_env = envPtr;
-        SetEvent(ready);
-        return S_OK;
-      }).Get());
+  // Helper: one synchronous attempt.  Pumps the message queue if the call
+  // succeeds (async completion); returns the final HRESULT.
+  auto tryCreate = [&](ICoreWebView2EnvironmentOptions* options) -> HRESULT {
+    HRESULT hr = E_FAIL;
+    HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HRESULT callHr = CreateCoreWebView2EnvironmentWithOptions(
+      nullptr,
+      dataDir.empty() ? nullptr : dataDir.c_str(),
+      options,
+      Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+        [&hr, ready](HRESULT res, ICoreWebView2Environment* envPtr) -> HRESULT {
+          hr = res;
+          if (SUCCEEDED(res) && envPtr) g_env = envPtr;
+          SetEvent(ready);
+          return S_OK;
+        }).Get());
+    if (SUCCEEDED(callHr)) {
+      MSG msg;
+      while (WaitForSingleObject(ready, 0) == WAIT_TIMEOUT) {
+        if (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+          TranslateMessage(&msg);
+          DispatchMessageW(&msg);
+        }
+      }
+    } else {
+      hr = callHr; // synchronous failure — callback never fired
+    }
+    CloseHandle(ready);
+    return hr;
+  };
+
+  HRESULT hr = tryCreate(opts.Get());
+
+  // If the existing profile was created before AreBrowserExtensionsEnabled was
+  // set, WebView2 returns E_INVALIDARG.  Build a unique backup name so we
+  // never collide with a leftover backup from a previous migration.
+  if (hr == E_INVALIDARG && !dataDir.empty()) {
+    std::wstring backup = dataDir + L"_bak" + std::to_wstring(GetTickCount64());
+    MoveFileExW(dataDir.c_str(), backup.c_str(), 0);
+    hr = tryCreate(opts.Get());
+  }
 
   if (FAILED(hr)) {
-    CloseHandle(ready);
     Napi::TypeError::New(env, "CreateCoreWebView2EnvironmentWithOptions failed: " +
       std::to_string(hr)).ThrowAsJavaScriptException();
     return false;
   }
-
-  // Pump messages until the environment is ready
-  MSG msg;
-  while (WaitForSingleObject(ready, 0) == WAIT_TIMEOUT) {
-    if (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-      TranslateMessage(&msg);
-      DispatchMessageW(&msg);
-    }
-  }
-  CloseHandle(ready);
-
   if (!g_env) {
     Napi::TypeError::New(env, "WebView2 environment creation failed (hr=" +
       std::to_string(hr) + "). Is the WebView2 runtime installed?")
@@ -322,6 +358,40 @@ Napi::Value CreateTab(const Napi::CallbackInfo& info) {
           TabEntry& tab = g_tabs[tabId];
           tab.controller = ctrl;
           ctrl->get_CoreWebView2(&tab.webview);
+
+          // If addExtension() was called before any tab existed, load it now
+          // (fire-and-forget — no Promise since we're inside an internal callback).
+          if (tab.webview && !g_pendingExtensionPath.empty()) {
+            std::string extPath = std::exchange(g_pendingExtensionPath, {});
+            bool extEnable = g_pendingExtensionEnabled;
+            ComPtr<ICoreWebView2>         wvForReload = tab.webview;
+            ComPtr<ICoreWebView2_13>      wv13ext;
+            ComPtr<ICoreWebView2Profile>  profileExt;
+            ComPtr<ICoreWebView2Profile7> profile7ext;
+            if (SUCCEEDED(tab.webview.As(&wv13ext)) &&
+                SUCCEEDED(wv13ext->get_Profile(&profileExt)) &&
+                SUCCEEDED(profileExt.As(&profile7ext))) {
+              std::wstring wPath = Utf8ToWide(extPath);
+              profile7ext->AddBrowserExtension(wPath.c_str(),
+                Callback<ICoreWebView2ProfileAddBrowserExtensionCompletedHandler>(
+                  [extEnable, wvForReload](HRESULT hr, ICoreWebView2BrowserExtension* ext) mutable -> HRESULT {
+                    if (SUCCEEDED(hr) && ext) {
+                      g_activeExtension = ext;
+                      // Always explicitly enable/disable. Edge marks side-loaded extensions
+                      // with DISABLE_NOT_VERIFIED (disable_reasons=8192) — Enable() overrides it.
+                      ext->Enable(extEnable ? TRUE : FALSE,
+                        Callback<ICoreWebView2BrowserExtensionEnableCompletedHandler>(
+                          [wvForReload, extEnable](HRESULT hr2) mutable -> HRESULT {
+                            // Reload so content scripts inject into any page that had already
+                            // started loading before the extension was enabled.
+                            if (SUCCEEDED(hr2) && extEnable && wvForReload) wvForReload->Reload();
+                            return S_OK;
+                          }).Get());
+                    }
+                    return S_OK;
+                  }).Get());
+            }
+          }
 
           // Apply stored color scheme to the shared profile (prefers-color-scheme).
           // All tabs share one Edge profile so this only needs to be applied once,
@@ -1062,6 +1132,143 @@ Napi::Value SetColorScheme(const Napi::CallbackInfo& info) {
   return info.Env().Undefined();
 }
 
+// ── AddExtension (async) ──────────────────────────────────────────────────────
+// Installs a browser extension from an unpacked folder into the shared Edge profile,
+// then explicitly enables or disables it per `enabled`.
+// If the extension is already installed (ERROR_FILE_EXISTS), the call is idempotent:
+// it falls back to Enable/Disable on the existing handle rather than rejecting.
+// If no tab exists yet the call is deferred: the path+state are stored and applied
+// when the first tab is created. The returned Promise resolves immediately in that
+// case; it resolves after AddBrowserExtension+Enable complete when tabs already exist.
+
+Napi::Value AddExtension(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 2 || !info[0].IsString() || !info[1].IsBoolean()) {
+    Napi::TypeError::New(env, "addExtension(path, enabled)").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  std::string extPath = info[0].As<Napi::String>().Utf8Value();
+  bool enable = info[1].As<Napi::Boolean>().Value();
+
+  auto deferred = Napi::Promise::Deferred::New(env);
+
+  ComPtr<ICoreWebView2> wv;
+  {
+    std::lock_guard<std::mutex> lk(g_tabsMutex);
+    if (!g_tabs.empty()) wv = g_tabs.begin()->second.webview;
+  }
+
+  if (!wv) {
+    // No tabs yet — store for deferred loading on first CreateTab
+    g_pendingExtensionPath    = extPath;
+    g_pendingExtensionEnabled = enable;
+    deferred.Resolve(env.Undefined());
+    return deferred.Promise();
+  }
+
+  ComPtr<ICoreWebView2_13>      wv13;
+  ComPtr<ICoreWebView2Profile>  profile;
+  ComPtr<ICoreWebView2Profile7> profile7;
+  if (FAILED(wv.As(&wv13)) ||
+      FAILED(wv13->get_Profile(&profile)) ||
+      FAILED(profile.As(&profile7))) {
+    deferred.Reject(Napi::String::New(env, "addExtension: failed to get WebView2 profile"));
+    return deferred.Promise();
+  }
+
+  auto* def  = new Napi::Promise::Deferred(deferred);
+  auto  tsfn = Napi::ThreadSafeFunction::New(
+    env, Napi::Function::New(env, [](const Napi::CallbackInfo&){}),
+    "addExtension", 0, 1);
+
+  std::wstring wPath = Utf8ToWide(extPath);
+  profile7->AddBrowserExtension(wPath.c_str(),
+    Callback<ICoreWebView2ProfileAddBrowserExtensionCompletedHandler>(
+      [tsfn, def, enable](HRESULT hr, ICoreWebView2BrowserExtension* ext) mutable -> HRESULT {
+        // Resolve the extension handle: newly installed, or existing (ERROR_FILE_EXISTS).
+        ICoreWebView2BrowserExtension* target = nullptr;
+        if (SUCCEEDED(hr) && ext) {
+          g_activeExtension = ext;
+          target = ext;
+        } else if (hr == HRESULT_FROM_WIN32(ERROR_FILE_EXISTS) && g_activeExtension) {
+          target = g_activeExtension.Get();
+        }
+
+        if (!target) {
+          tsfn.NonBlockingCall([hr, def](Napi::Env e, Napi::Function) {
+            def->Reject(Napi::String::New(e, "AddBrowserExtension failed hr=" + std::to_string(hr)));
+            delete def;
+          });
+          tsfn.Release();
+          return S_OK;
+        }
+
+        // Always explicitly enable/disable. Edge marks side-loaded extensions with
+        // DISABLE_NOT_VERIFIED (disable_reasons=8192); Enable(TRUE) overrides this.
+        target->Enable(enable ? TRUE : FALSE,
+          Callback<ICoreWebView2BrowserExtensionEnableCompletedHandler>(
+            [tsfn, def](HRESULT hr2) mutable -> HRESULT {
+              tsfn.NonBlockingCall([hr2, def](Napi::Env e, Napi::Function) {
+                if (SUCCEEDED(hr2)) def->Resolve(e.Undefined());
+                else def->Reject(Napi::String::New(e, "Enable failed hr=" + std::to_string(hr2)));
+                delete def;
+              });
+              tsfn.Release();
+              return S_OK;
+            }).Get());
+        return S_OK;
+      }).Get());
+
+  return deferred.Promise();
+}
+
+// ── SetExtensionEnabled (async) ───────────────────────────────────────────────
+// Runtime toggle for the extension loaded via addExtension().
+// If the extension hasn't been installed yet (pending deferred), only the
+// desired state is updated (applied at first CreateTab time).
+
+Napi::Value SetExtensionEnabled(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  if (info.Length() < 1 || !info[0].IsBoolean()) {
+    Napi::TypeError::New(env, "setExtensionEnabled(enabled)").ThrowAsJavaScriptException();
+    return env.Undefined();
+  }
+  bool enable = info[0].As<Napi::Boolean>().Value();
+
+  auto deferred = Napi::Promise::Deferred::New(env);
+
+  if (!g_pendingExtensionPath.empty()) {
+    // Extension deferred — just update desired state
+    g_pendingExtensionEnabled = enable;
+    deferred.Resolve(env.Undefined());
+    return deferred.Promise();
+  }
+
+  if (!g_activeExtension) {
+    deferred.Resolve(env.Undefined()); // no extension — no-op
+    return deferred.Promise();
+  }
+
+  auto* def  = new Napi::Promise::Deferred(deferred);
+  auto  tsfn = Napi::ThreadSafeFunction::New(
+    env, Napi::Function::New(env, [](const Napi::CallbackInfo&){}),
+    "setExtensionEnabled", 0, 1);
+
+  g_activeExtension->Enable(enable ? TRUE : FALSE,
+    Callback<ICoreWebView2BrowserExtensionEnableCompletedHandler>(
+      [tsfn, def](HRESULT hr) mutable -> HRESULT {
+        tsfn.NonBlockingCall([hr, def](Napi::Env e, Napi::Function) {
+          if (SUCCEEDED(hr)) def->Resolve(e.Undefined());
+          else def->Reject(Napi::String::New(e, "Enable failed hr=" + std::to_string(hr)));
+          delete def;
+        });
+        tsfn.Release();
+        return S_OK;
+      }).Get());
+
+  return deferred.Promise();
+}
+
 // ── Module init ───────────────────────────────────────────────────────────────
 
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
@@ -1089,8 +1296,10 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("claimFocus",        Napi::Function::New(env, ClaimFocus));
   exports.Set("setEventCallback",  Napi::Function::New(env, SetEventCallback));
   exports.Set("completeNewWindow", Napi::Function::New(env, CompleteNewWindow));
-  exports.Set("attachChildWindow",   Napi::Function::New(env, AttachChildWindow));
+  exports.Set("attachChildWindow",    Napi::Function::New(env, AttachChildWindow));
   exports.Set("setChildWindowBounds", Napi::Function::New(env, SetChildWindowBounds));
+  exports.Set("addExtension",         Napi::Function::New(env, AddExtension));
+  exports.Set("setExtensionEnabled",  Napi::Function::New(env, SetExtensionEnabled));
   return exports;
 }
 

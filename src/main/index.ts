@@ -27,6 +27,8 @@ import { IPC } from '@shared/ipc'
 import { DEFAULT_SHORTCUTS, DEFAULT_PROFILE_ID, DEFAULT_PROTECTED_DOMAINS, type Shortcuts } from '@shared/types'
 import { logCrash } from './utils/crashLogger'
 import { startDevServer } from './utils/devServer'
+import { existsSync } from 'node:fs'
+import path from 'node:path'
 
 /** Single-instance lock — a second launch focuses the existing instance. */
 const gotLock = isSquirrelEvent ? true : app.requestSingleInstanceLock()
@@ -81,6 +83,21 @@ app.whenReady().then(() => {
   // Store the preference so newly created WebView2 tabs inherit the correct color scheme.
   // The static call has no effect at boot (no tabs exist yet); createTab picks up g_colorScheme.
   WebView2View.setColorScheme(initialDark ? 2 : 1)
+
+  // Sync uBlock Origin state with the setting on every startup.
+  // addExtension() is idempotent: it installs if not present and sets the enabled
+  // state. Called unconditionally so a disabled-then-reenabled extension is
+  // properly synced without requiring manual profile cleanup.
+  // The C++ layer defers AddBrowserExtension until the first CreateTab call.
+  {
+    const extPath = path.join(app.getAppPath(), 'public', 'extensions', 'ublock')
+    if (existsSync(extPath)) {
+      WebView2View.addExtension(extPath, initialSettings.adBlockEnabled ?? false).catch((e: unknown) => {
+        console.error('[AdBlock] startup addExtension failed:', e)
+      })
+    }
+  }
+
   // Enable standard edit shortcuts (Ctrl+Z/Y/X/C/V/A) in the BrowserWindow renderer.
   Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: 'editMenu' }]))
 
