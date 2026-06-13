@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
 import type { TabState, MemorySnapshot, DownloadEvent } from '@shared/types'
-import { DEFAULT_HOMEPAGE } from '@shared/types'
+import { RESIZE_BORDER } from '@shared/types'
 import { IPC } from '@shared/ipc'
 import type { OverlayWindow } from '../windows/OverlayWindow'
 import { WebView2View } from './tabs/WebView2View'
@@ -36,6 +36,7 @@ function faviconUrl(url: string): string | null {
   }
 }
 
+
 export class TabManager {
   private tabs = new Map<string, ManagedTab>()
   private displayOrder: string[] = []
@@ -49,12 +50,25 @@ export class TabManager {
   private viewBoundsCache: { x: number; y: number; w: number; h: number } | null = null
   private _fullscreenTabId: string | null = null
   private _unsubBeforeHide: (() => void) | null = null
+  private _unsubResize: (() => void) | null = null
+  /** Auto-reload retry counter per tab — reset on successful navigation, max MAX_AUTO_RETRIES. */
+  private _autoRetries = new Map<string, number>()
+  /** Tabs whose media was paused by the overlay hide — used to resume on show. */
+  private _mediaPausedTabIds = new Set<string>()
+  /** Lazy tabs: created from session but not yet loaded — URL loaded on first setActive(). */
+  private _lazyTabUrls = new Map<string, string>()
 
   constructor(private overlay: OverlayWindow) {
-    this.overlay.onLayoutChange = () => this.relayoutActive()
+    this.overlay.onLayoutChange = () => {
+      this._relayoutFullscreen()
+      this.relayoutActive()
+    }
     this._unsubBeforeHide = this.overlay.onBeforeHide(() => {
       if (this._fullscreenTabId) this._exitFullscreen()
     })
+    const onResize = () => this._relayoutFullscreen()
+    this.overlay.win.on('resize', onResize)
+    this._unsubResize = () => this.overlay.win.removeListener('resize', onResize)
   }
 
   /** Called from renderer with exact CSS-computed bounds of the WebView2 host div. */
@@ -118,11 +132,10 @@ export class TabManager {
     view.init(bounds.x, bounds.y, bounds.width, bounds.height)
     view.setVisible(false) // hidden until setActive()
 
-    const isHomepage = url === DEFAULT_HOMEPAGE || url === DEFAULT_HOMEPAGE + '/'
     const initialState: TabState = {
       id,
       url,
-      title: isHomepage ? 'New tab' : '',
+      title: '',
       favicon: null,
       isLoading: true,
       canGoBack: false,
@@ -138,6 +151,42 @@ export class TabManager {
     this.wireWebView2(tab)
     view.loadURL(url)
     this.setActive(id)
+
+    return initialState
+  }
+
+  /**
+   * Create a tab that will not load until the user switches to it (lazy restore).
+   * The tab appears in the tab bar immediately with the provided title and favicon
+   * from the saved session, but its WebView2 stays at about:blank until setActive().
+   */
+  createLazy(url: string, title: string, favicon: string | null): TabState {
+    const id = randomUUID()
+
+    const bounds = this.overlay.getTabContentBounds()
+    const view = new WebView2View(this.overlay.win)
+    view.init(bounds.x, bounds.y, bounds.width, bounds.height)
+    view.setVisible(false)
+
+    const initialState: TabState = {
+      id,
+      url,
+      title,
+      favicon: favicon ?? faviconUrl(url),
+      isLoading: false,
+      canGoBack: false,
+      canGoForward: false,
+      zoomFactor: 1,
+      isAudioPlaying: false,
+      isMuted: false,
+    }
+    const tab: ManagedTab = { id, view, state: initialState }
+    this.tabs.set(id, tab)
+    this.displayOrder.push(id)
+    this._lazyTabUrls.set(id, url)
+
+    this.wireWebView2(tab)
+    this.emit({ type: 'updated', tab: initialState })
 
     return initialState
   }
@@ -159,12 +208,48 @@ export class TabManager {
       if (spaPoller !== null) { clearInterval(spaPoller); spaPoller = null }
     }
 
+    // Navigation watchdog + auto-retry constants
+    const NAV_TIMEOUT_MS = 45_000
+    const MAX_AUTO_RETRIES = 2
+    let navWatchdog: ReturnType<typeof setTimeout> | null = null
+    const clearWatchdog = (): void => {
+      if (navWatchdog !== null) { clearTimeout(navWatchdog); navWatchdog = null }
+    }
+
+    // Trigger an auto-reload if retry budget allows.
+    // For timeouts: always Navigate() fresh — the page never finished loading so
+    // there is no user state to preserve, and Reload() may hit the same stuck state.
+    // For crashes: wait 1s for Edge to restart its renderer before navigating.
+    const autoReload = (reason: 'timeout' | 'crash'): void => {
+      if (view.isDestroyed() || !this.tabs.has(tab.id)) return
+      const retries = this._autoRetries.get(tab.id) ?? 0
+      if (retries >= MAX_AUTO_RETRIES) return
+      this._autoRetries.set(tab.id, retries + 1)
+      const target = tab.state.url
+      if (!target.startsWith('http')) return
+      const doReload = (): void => {
+        if (view.isDestroyed() || !this.tabs.has(tab.id)) return
+        view.loadURL(target)
+      }
+      if (reason === 'crash') setTimeout(doReload, 1000)
+      else doReload()
+    }
+
     view.on('did-start-loading', () => {
+      clearWatchdog()
       clearSpaPoller()
+      // Watchdog: if the page is still loading after NAV_TIMEOUT_MS, navigate fresh.
+      // The URL check is intentionally omitted — even if a redirect committed an http
+      // URL, the page can still be stuck (e.g. YouTube SW or heavy media pages).
+      navWatchdog = setTimeout(() => {
+        navWatchdog = null
+        if (view.isLoading()) autoReload('timeout')
+      }, NAV_TIMEOUT_MS)
       update({ isLoading: true })
     })
 
     view.on('did-finish-load', () => {
+      clearWatchdog()
       update({ isLoading: false, canGoBack: view.canGoBack(), canGoForward: view.canGoForward() })
       const url = view.getURL()
       if (!url.startsWith('http://') && !url.startsWith('https://')) return
@@ -236,14 +321,22 @@ export class TabManager {
 
     view.on('did-navigate', (url: unknown) => {
       if (typeof url !== 'string') return
+      // Ignore non-http(s) destinations (about:blank from lazy tab creation,
+      // unloadAll(), cancelled/failed navigations) so tab.state.url never drifts
+      // to about:blank and the session stays saveable.
+      if (!url.startsWith('http://') && !url.startsWith('https://')) return
+      // Successful navigation — reset the auto-retry budget for this tab.
+      this._autoRetries.delete(tab.id)
       update({ url, favicon: faviconUrl(url) })
     })
 
+    // Edge renderer/browser process crashed — auto-reload after a short delay
+    // so the user doesn't have to manually intervene.
+    view.on('process-failed', () => { autoReload('crash') })
+
     view.on('page-title-updated', (title: unknown) => {
       if (typeof title !== 'string') return
-      const currentUrl = tab.state.url
-      const isHomepage = currentUrl === DEFAULT_HOMEPAGE || currentUrl === DEFAULT_HOMEPAGE + '/'
-      update({ title: isHomepage ? 'New tab' : title })
+      update({ title })
     })
 
     view.on('page-favicon-updated', (favicons: unknown) => {
@@ -305,6 +398,9 @@ export class TabManager {
     }
 
     this.tabs.delete(id)
+    this._autoRetries.delete(id)
+    this._lazyTabUrls.delete(id)
+    this._mediaPausedTabIds.delete(id)
     this.displayOrder = this.displayOrder.filter((x) => x !== id)
     this.emit({ type: 'removed', id })
 
@@ -329,6 +425,9 @@ export class TabManager {
     this.activeTabId = null
     this.stoppedDuringHide.clear()
     this.unloadedUrls.clear()
+    this._autoRetries.clear()
+    this._mediaPausedTabIds.clear()
+    this._lazyTabUrls.clear()
     this.emit({ type: 'activeChanged', id: null })
   }
 
@@ -341,6 +440,13 @@ export class TabManager {
     // Hide every other tab
     for (const other of this.tabs.values()) {
       if (other.id !== id) other.view.setVisible(false)
+    }
+
+    // Lazy tab: first time the user switches to it — trigger loading now.
+    const lazyUrl = this._lazyTabUrls.get(id)
+    if (lazyUrl) {
+      this._lazyTabUrls.delete(id)
+      tab.view.loadURL(lazyUrl)
     }
 
     // Position + show the active tab — prefer the renderer-provided bounds (accurate)
@@ -408,7 +514,25 @@ export class TabManager {
   }
 
   reload(id: string): void {
-    this.tabs.get(id)?.view.reload()
+    const tab = this.tabs.get(id)
+    if (tab) this._smartReload(tab)
+  }
+
+  /**
+   * Reload a tab intelligently: if WebView2's committed URL drifted to about:blank
+   * (navigation was stopped before any document committed, or the Edge renderer crashed),
+   * Navigate() to tab.state.url instead of Reload()-ing the blank page.
+   * Copy/paste URL in the address bar works because it calls Navigate() fresh — this
+   * makes the Reload button behave the same way.
+   */
+  private _smartReload(tab: ManagedTab): void {
+    const committed = tab.view.getURL()
+    const target = tab.state.url
+    if (!committed.startsWith('http') && target.startsWith('http')) {
+      tab.view.loadURL(target)
+    } else {
+      tab.view.reload()
+    }
   }
 
   stop(id: string): void {
@@ -438,6 +562,8 @@ export class TabManager {
     this.unloadedUrls.clear()
     for (const tab of this.tabs.values()) {
       try {
+        // Skip lazy tabs — they're already at about:blank and must only load on setActive().
+        if (this._lazyTabUrls.has(tab.id)) continue
         const url = tab.state.url
         if (url && url !== 'about:blank' && !isProtectedUrl(url, protectedDomains)) {
           this.unloadedUrls.set(tab.id, url)
@@ -465,11 +591,35 @@ export class TabManager {
           tab.view.loadURL(unloadedUrl)
           this.unloadedUrls.delete(tab.id)
         } else if (this.stoppedDuringHide.has(tab.id)) {
-          tab.view.reload()
+          this._smartReload(tab)
         }
       } catch { /* destroyed */ }
     }
     this.stoppedDuringHide.clear()
+  }
+
+  /** Pause all playing <video>/<audio> elements in loaded tabs and remember which were affected. */
+  pauseAllMedia(): void {
+    this._mediaPausedTabIds.clear()
+    const js = `document.querySelectorAll('video,audio').forEach(function(m){if(!m.paused){m._ovfPaused=true;m.pause()}})`
+    for (const tab of this.tabs.values()) {
+      if (tab.view.isDestroyed()) continue
+      // Lazy tabs are at about:blank — no media elements, skip the JS call.
+      if (this._lazyTabUrls.has(tab.id)) continue
+      this._mediaPausedTabIds.add(tab.id)
+      void tab.view.executeJavaScript(js).catch(() => { /* page not ready */ })
+    }
+  }
+
+  /** Resume media that was paused by pauseAllMedia(). No-op for tabs that had nothing playing. */
+  resumePausedMedia(): void {
+    const js = `document.querySelectorAll('video,audio').forEach(function(m){if(m._ovfPaused){delete m._ovfPaused;m.play().catch(function(){})}})`
+    for (const id of this._mediaPausedTabIds) {
+      const tab = this.tabs.get(id)
+      if (!tab || tab.view.isDestroyed()) continue
+      void tab.view.executeJavaScript(js).catch(() => { /* page not ready */ })
+    }
+    this._mediaPausedTabIds.clear()
   }
 
   // ── Zoom / audio ──────────────────────────────────────────────────────────────
@@ -534,13 +684,23 @@ export class TabManager {
 
   // ── Fullscreen ────────────────────────────────────────────────────────────────
 
+  private _relayoutFullscreen(): void {
+    if (!this._fullscreenTabId) return
+    const tab = this.tabs.get(this._fullscreenTabId)
+    if (!tab || tab.view.isDestroyed()) return
+    const { width, height } = this.overlay.win.getContentBounds()
+    // Fill the inner content div (RESIZE_BORDER outer ring + 1px border on each side),
+    // leaving the transparent outer ring free for the resize handles.
+    const R = RESIZE_BORDER + 1
+    tab.view.setBounds(R, R, width - R * 2, height - R * 2)
+  }
+
   private _enterFullscreen(tabId: string): void {
     if (this._fullscreenTabId) return
     const tab = this.tabs.get(tabId)
     if (!tab || tab.view.isDestroyed()) return
     this._fullscreenTabId = tabId
-    const { width, height } = this.overlay.win.getContentBounds()
-    tab.view.setBounds(0, 0, width, height)
+    this._relayoutFullscreen()
   }
 
   private _exitFullscreen(): void {

@@ -123,12 +123,54 @@ export function WelcomePage(): JSX.Element | null {
   const checkTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const { releases, error: releasesError } = useGitHubReleases()
 
+  const bannerRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
     const link = document.createElement('link')
     link.rel = 'stylesheet'
     link.href = 'https://www.instant-gaming.com/api/banner/partner/style.css'
     document.head.appendChild(link)
-    return () => { try { document.head.removeChild(link) } catch { /* already removed */ } }
+    // IG's ::before/::after don't set left/right — on a flex div the static-position
+    // can drift. Pin them explicitly so the gradient always spans the full width.
+    const fix = document.createElement('style')
+    fix.textContent = '.ig-dynamic-banner::before,.ig-dynamic-banner::after{left:0!important;right:0!important}'
+    document.head.appendChild(fix)
+    return () => {
+      try { document.head.removeChild(link) } catch { /* already removed */ }
+      try { document.head.removeChild(fix) } catch { /* already removed */ }
+    }
+  }, [])
+
+  // Replicate IG's own JS: apply ig-size-XXX class based on rendered banner width
+  // so their CSS responsive breakpoints (column layout, gradients, etc.) kick in correctly.
+  useEffect(() => {
+    const el = bannerRef.current
+    if (!el) return
+    const SIZE_CLASSES = ['ig-size-500','ig-size-650','ig-size-800','ig-size-900','ig-size-1000','ig-size-1100'] as const
+    // Thresholds use offsetWidth (border-box) to stay IG-CSS-load-order independent.
+    // Small (column/Y): 500, 650, 800. Large (row/X): 900, 1000, 1100.
+    const getSizeClass = (w: number): typeof SIZE_CLASSES[number] => {
+      if (w >= 1090) return 'ig-size-1100'
+      if (w >= 990)  return 'ig-size-1000'
+      if (w >= 890)  return 'ig-size-900'
+      if (w >= 765)  return 'ig-size-800'
+      if (w >= 615)  return 'ig-size-650'
+      return 'ig-size-500'  // never ig-size-400 (it hides the CTA button)
+    }
+    const apply = (w: number) => {
+      const cls = getSizeClass(w)
+      SIZE_CLASSES.forEach((c) => el.classList.remove(c))
+      el.classList.add(cls)
+    }
+    // Apply immediately so the class is set before the async ResizeObserver fires.
+    apply(el.offsetWidth)
+    const ro = new ResizeObserver(([entry]) => {
+      // Use borderBoxSize when available (always border-box, independent of CSS padding).
+      const w = entry.borderBoxSize?.[0]?.inlineSize ?? el.offsetWidth
+      apply(w)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
   }, [])
 
   useEffect(() => {
@@ -247,17 +289,25 @@ export function WelcomePage(): JSX.Element | null {
 
           {/* ── IG partner banner ────────────────────────────────────────────── */}
           <section aria-label="Instant Gaming — affiliate partner" className="flex justify-center px-5">
-            <button
-              type="button"
+            <div
+              ref={bannerRef}
+              role="button"
+              tabIndex={0}
               onClick={() => void window.aether.tabs.create(
                 `https://www.instant-gaming.com/${igLang}/?igr=overframe&utm_source=dynamic_banner&utm_campaign=19535FORZA`
               )}
-              className="ig-dynamic-banner w-full max-w-[1200px] border-none cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/50 transition-opacity hover:opacity-90 active:opacity-80"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') void window.aether.tabs.create(
+                  `https://www.instant-gaming.com/${igLang}/?igr=overframe&utm_source=dynamic_banner&utm_campaign=19535FORZA`
+                )
+              }}
+              className="ig-dynamic-banner w-full cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/50 transition-opacity hover:opacity-90 active:opacity-80"
               style={{
                 backgroundImage: `url('https://www.instant-gaming.com/images/bp/16/16-${igLang}.jpg?v=${IG_BANNER_IMG_V}')`,
-                backgroundSize: '100% auto',
-                backgroundPosition: 'center',
+                backgroundSize: 'cover',
+                backgroundPosition: 'center center',
                 height: '220px',
+                maxWidth: '1200px',
                 minHeight: 'unset',
               }}
               aria-label={`Instant Gaming — ${IG_PROMO[igLang]?.text ?? ''}`}
@@ -267,7 +317,7 @@ export function WelcomePage(): JSX.Element | null {
                 <div className="ig-dynamic-banner-title">{IG_PROMO[igLang]?.text}</div>
                 <div className="ig-dynamic-banner-cta">{IG_PROMO[igLang]?.cta}</div>
               </div>
-            </button>
+            </div>
           </section>
 
           {/* ── Contenu centré à 1200px max ──────────────────────────────────── */}

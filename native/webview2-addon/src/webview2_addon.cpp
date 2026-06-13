@@ -151,6 +151,7 @@ struct TabEntry {
   // Event registration tokens
   EventRegistrationToken tokNavStarting{};
   EventRegistrationToken tokNavCompleted{};
+  EventRegistrationToken tokProcessFailed{};
   EventRegistrationToken tokTitleChanged{};
   EventRegistrationToken tokNewWindow{};
   EventRegistrationToken tokHistoryChanged{};
@@ -376,19 +377,16 @@ Napi::Value CreateTab(const Napi::CallbackInfo& info) {
               std::wstring wPath = Utf8ToWide(extPath);
               profile7ext->AddBrowserExtension(wPath.c_str(),
                 Callback<ICoreWebView2ProfileAddBrowserExtensionCompletedHandler>(
-                  [extEnable, wvForReload](HRESULT hr, ICoreWebView2BrowserExtension* ext) mutable -> HRESULT {
+                  [extEnable](HRESULT hr, ICoreWebView2BrowserExtension* ext) mutable -> HRESULT {
                     if (SUCCEEDED(hr) && ext) {
                       g_activeExtension = ext;
                       // Always explicitly enable/disable. Edge marks side-loaded extensions
                       // with DISABLE_NOT_VERIFIED (disable_reasons=8192) — Enable() overrides it.
-                      ext->Enable(extEnable ? TRUE : FALSE,
-                        Callback<ICoreWebView2BrowserExtensionEnableCompletedHandler>(
-                          [wvForReload, extEnable](HRESULT hr2) mutable -> HRESULT {
-                            // Reload so content scripts inject into any page that had already
-                            // started loading before the extension was enabled.
-                            if (SUCCEEDED(hr2) && extEnable && wvForReload) wvForReload->Reload();
-                            return S_OK;
-                          }).Get());
+                      // No Reload() here: this path fires during first-tab creation, before any
+                      // URL has been navigated to. Calling Reload() would cancel the pending
+                      // Navigate() and leave the tab at about:blank. Content scripts inject
+                      // normally on the first real page load.
+                      ext->Enable(extEnable ? TRUE : FALSE, nullptr);
                     }
                     return S_OK;
                   }).Get());
@@ -488,6 +486,18 @@ Napi::Value CreateTab(const Napi::CallbackInfo& info) {
                 CallJS(tabId, "navigation_completed", data);
                 return S_OK;
               }).Get(), &tab.tokNavCompleted);
+
+          // Hook ProcessFailed — fires when the Edge renderer or browser process crashes.
+          // NavigationCompleted won't fire in this case, leaving the tab stuck at isLoading=true.
+          // Emitting process_failed lets JS clear that state so the user can reload.
+          tab.webview->add_ProcessFailed(
+            Callback<ICoreWebView2ProcessFailedEventHandler>(
+              [tabId](ICoreWebView2* wv, ICoreWebView2ProcessFailedEventArgs* args) -> HRESULT {
+                COREWEBVIEW2_PROCESS_FAILED_KIND kind = COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED;
+                args->get_ProcessFailedKind(&kind);
+                CallJS(tabId, "process_failed", "{\"kind\":" + std::to_string(static_cast<int>(kind)) + "}");
+                return S_OK;
+              }).Get(), &tab.tokProcessFailed);
 
           // Hook TitleChanged
           tab.webview->add_DocumentTitleChanged(
@@ -767,13 +777,19 @@ Napi::Value SetBounds(const Napi::CallbackInfo& info) {
   if (it != g_tabs.end() && it->second.controller) {
     RECT bounds = {x, y, x + w, y + h};
     it->second.controller->put_Bounds(bounds);
-    // NOTE: do NOT call SetWindowPos(HWND_TOP) here. SetBounds is driven by the
-    // renderer's ResizeObserver, which fires very early during initial layout —
-    // before the WebView2 child HWND is fully parented. Re-ordering the Z-order
-    // at that point triggers a WM_WINDOWPOSCHANGED/focus cascade that makes
-    // Electron's Chromium call GetWindowClassName on a half-initialised sibling
-    // HWND → hwnd_util PLOG(FATAL) 1400 at startup. Z-order is asserted in Show()
-    // instead, which only runs once a tab is explicitly activated (HWND ready).
+    // NOTE: do NOT call SetWindowPos(HWND_TOP) here during initial layout —
+    // before the WebView2 child HWND is fully parented, re-ordering Z-order
+    // triggers a WM_WINDOWPOSCHANGED/focus cascade that makes Electron's Chromium
+    // call GetWindowClassName on a half-initialised sibling HWND →
+    // hwnd_util PLOG(FATAL) 1400 at startup.
+    // BUT: after a native window resize, Electron's compositor may reorder its
+    // internal HWNDs, pushing WebView2 below the transparent Electron renderer
+    // HWND so clicks no longer reach it. Re-assert Z-order here, guarded by
+    // visible==true (set in Show()) which guarantees the HWND is fully parented.
+    if (it->second.visible && it->second.hwnd) {
+      SetWindowPos(it->second.hwnd, HWND_TOP, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
   }
   return info.Env().Undefined();
 }
@@ -817,6 +833,7 @@ Napi::Value DestroyTab(const Napi::CallbackInfo& info) {
     if (it->second.webview) {
       it->second.webview->remove_NavigationStarting(it->second.tokNavStarting);
       it->second.webview->remove_NavigationCompleted(it->second.tokNavCompleted);
+      it->second.webview->remove_ProcessFailed(it->second.tokProcessFailed);
       it->second.webview->remove_DocumentTitleChanged(it->second.tokTitleChanged);
       it->second.webview->remove_NewWindowRequested(it->second.tokNewWindow);
       it->second.webview->remove_HistoryChanged(it->second.tokHistoryChanged);

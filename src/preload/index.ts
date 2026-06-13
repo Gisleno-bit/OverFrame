@@ -65,6 +65,8 @@ const api = {
     unmaximize: (): Promise<WindowBounds | null> => ipcRenderer.invoke(IPC.OverlayUnmaximize),
     setPosition: (x: number, y: number): void => ipcRenderer.send(IPC.OverlaySetPosition, x, y),
     moveByDelta: (dx: number, dy: number): void => ipcRenderer.send(IPC.OverlayMoveByDelta, dx, dy),
+    setBounds: (b: { x: number; y: number; width: number; height: number }): void =>
+      ipcRenderer.send(IPC.OverlaySetBounds, b),
     setWebViewBounds: (x: number, y: number, w: number, h: number): void =>
       ipcRenderer.send(IPC.OverlaySetWebViewBounds, x, y, w, h),
   },
@@ -240,6 +242,11 @@ const api = {
       const listener = (_e: unknown, v: number): void => cb(v)
       ipcRenderer.on(IPC.EventOpacityChanged, listener)
       return (): void => { ipcRenderer.removeListener(IPC.EventOpacityChanged, listener) }
+    },
+    maximizedChanged: (cb: (isMaximized: boolean) => void): (() => void) => {
+      const listener = (_e: unknown, v: boolean): void => cb(v)
+      ipcRenderer.on(IPC.EventMaximizedChanged, listener)
+      return (): void => { ipcRenderer.removeListener(IPC.EventMaximizedChanged, listener) }
     },
     settingsChanged: (cb: (s: Settings) => void): (() => void) => {
       const listener = (_e: unknown, s: Settings): void => cb(s)

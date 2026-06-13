@@ -161,6 +161,13 @@ export class WebView2View extends EventEmitter {
           this.emit('did-finish-load')
           this.emit('did-navigate', data['url'])
           break
+        case 'process_failed':
+          // Edge renderer/browser process crashed — NavigationCompleted won't fire.
+          // Clear loading state and signal a process failure for auto-recovery.
+          this._isLoading = false
+          this.emit('did-finish-load')
+          this.emit('process-failed')
+          break
         case 'history_changed':
           // Fires after NavigationCompleted with the CORRECT canGoBack/canGoForward state.
           // (get_CanGoBack inside NavigationCompleted is stale — history is updated after.)

@@ -9,6 +9,7 @@ import { WelcomePage } from './components/WelcomePage'
 import { MissionsTracker } from './components/MissionsTracker'
 import { MissionsPanel } from './components/MissionsPanel'
 import { IGNudge } from './components/IGNudge'
+import { ResizeHandles } from './components/ResizeHandles'
 import { getCatalogForProfile, localizeIGUrl } from '@shared/ig-affiliate'
 import { DEFAULT_PROFILE_ID } from '@shared/types'
 import { notify } from './lib/notify'
@@ -29,6 +30,8 @@ export function App(): JSX.Element {
     setOverlayState,
     isFocusMode,
     setFocusMode,
+    isMaximized,
+    setIsMaximized,
     missionsPanelOpen,
   } = useAppStore()
 
@@ -80,6 +83,7 @@ export function App(): JSX.Element {
       else if (ev.state === 'interrupted') notify.error(`Download failed: ${ev.filename}`)
     })
     const offSettings = window.aether.on.settingsChanged(setSettings)
+    const offMaximized = window.aether.on.maximizedChanged(setIsMaximized)
 
     return () => {
       offTab()
@@ -90,6 +94,7 @@ export function App(): JSX.Element {
       offPopup()
       offDownload()
       offSettings()
+      offMaximized()
     }
   }, [
     upsertTab,
@@ -100,6 +105,7 @@ export function App(): JSX.Element {
     setCollections,
     setOverlayState,
     setSettings,
+    setIsMaximized,
   ])
 
   // IG promo: show once per game-profile change, restore when user returns to a web tab.
@@ -256,34 +262,49 @@ export function App(): JSX.Element {
   }, [isFocusMode])
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-background/90 backdrop-blur-md rounded-md overflow-hidden border border-border">
-      {/* pointer-events-none in click-through: suppresses all hover/tooltip artefacts.
-           Interactive elements (exit badge, hide button) override with pointer-events-auto
-           and call setMouseInteractive so OS-level clicks reach them too. */}
-      <div ref={chromeRef} className={overlayState === 'CLICK_THROUGH' ? 'pointer-events-none' : undefined}>
-        <TabBar />
-        <AddressBar />
-        <CollectionBar />
-        <PinnedBar />
-        <IGNudge />
-      </div>
-
-      {/* Achievement notifications — rendered here so they appear above the WebContentsView */}
-      <MissionsTracker />
-
-      {/* Main area */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
-        <div ref={webViewRef} className="flex-1 relative min-w-0">
-          <OnboardingOverlay />
-          <WelcomePage />
+    <div className="relative w-screen h-screen">
+      {/* Outer shell: fills the full window but has no background.
+          The 6px gap between this shell and the inner content div is transparent
+          (shows the game/desktop behind the overlay) and acts as the invisible
+          resize zone — no visual inset on the content itself. */}
+      {/* Visible content: inset 6px from the window edge on all sides */}
+      <div className={`absolute flex flex-col bg-background/90 backdrop-blur-md overflow-hidden ${isMaximized ? 'inset-0' : 'inset-[6px] rounded-md border border-border'}`}>
+        {/* pointer-events-none in click-through: suppresses all hover/tooltip artefacts.
+            Interactive elements (exit badge, hide button) override with pointer-events-auto
+            and call setMouseInteractive so OS-level clicks reach them too. */}
+        <div
+          ref={chromeRef}
+          className={[
+            overlayState === 'CLICK_THROUGH' && 'pointer-events-none',
+            isFocusMode && 'h-0 overflow-hidden',
+          ].filter(Boolean).join(' ') || undefined}
+        >
+          <TabBar />
+          <AddressBar />
+          <CollectionBar />
+          <PinnedBar />
+          <IGNudge />
         </div>
-        {missionsPanelOpen && (
-          <div className="w-[320px] flex-shrink-0 border-l border-border bg-background overflow-y-auto">
-            <MissionsPanel />
+
+        {/* Achievement notifications — rendered here so they appear above the WebContentsView */}
+        <MissionsTracker />
+
+        {/* Main area */}
+        <div className="flex-1 flex overflow-hidden min-h-0">
+          <div ref={webViewRef} className="flex-1 relative min-w-0">
+            <OnboardingOverlay />
+            <WelcomePage />
           </div>
-        )}
+          {missionsPanelOpen && (
+            <div className="w-[320px] flex-shrink-0 border-l border-border bg-background overflow-y-auto">
+              <MissionsPanel />
+            </div>
+          )}
+        </div>
       </div>
 
+      {/* Resize handles sit in the outer shell, not the inner content */}
+      <ResizeHandles />
     </div>
   )
 }

@@ -23,7 +23,7 @@ export class SessionManager {
     const activeIndex = Math.max(0, httpTabs.findIndex((t) => t.id === activeId))
 
     const session: ProfileSession = {
-      tabs: httpTabs.map((t) => ({ url: t.url, title: t.title })),
+      tabs: httpTabs.map((t) => ({ url: t.url, title: t.title, favicon: t.favicon })),
       activeTabIndex: Math.max(0, activeIndex),
       savedAt: Date.now(),
     }
@@ -36,12 +36,13 @@ export class SessionManager {
   restoreOrCreate(profileId: string): void {
     const session = store.get('sessions')[profileId]
     if (!session || session.tabs.length === 0) return
+    const targetIndex = Math.min(session.activeTabIndex, session.tabs.length - 1)
     const createdIds: string[] = []
     for (const t of session.tabs) {
-      const tab = this.tabs.create(t.url)
+      // All tabs start lazy — setActive() below will trigger loading for the active one only.
+      const tab = this.tabs.createLazy(t.url, t.title, t.favicon ?? null)
       createdIds.push(tab.id)
     }
-    const targetIndex = Math.min(session.activeTabIndex, createdIds.length - 1)
     this.tabs.setActive(createdIds[targetIndex])
   }
 
@@ -84,16 +85,18 @@ export class SessionManager {
     // All saved tabs were protected-domain duplicates → home page, don't open a redundant tab.
     if (tabsToRestore.length === 0) return
 
-    const createdIds: string[] = []
-    for (const t of tabsToRestore) {
-      const tab = this.tabs.create(t.url)
-      createdIds.push(tab.id)
-    }
-
     // Preserve the originally active tab if it wasn't filtered out; otherwise use the first.
     const savedActive = session.tabs[session.activeTabIndex]
     const filteredIndex = savedActive ? tabsToRestore.findIndex((t) => t.url === savedActive.url) : -1
-    this.tabs.setActive(createdIds[filteredIndex !== -1 ? filteredIndex : 0])
+    const activeRestoreIndex = filteredIndex !== -1 ? filteredIndex : 0
+
+    const createdIds: string[] = []
+    for (const t of tabsToRestore) {
+      // All tabs start lazy — setActive() below triggers loading for the active one only.
+      const tab = this.tabs.createLazy(t.url, t.title, t.favicon ?? null)
+      createdIds.push(tab.id)
+    }
+    this.tabs.setActive(createdIds[activeRestoreIndex])
   }
 
   startAutoSave(getProfileId: () => string): void {

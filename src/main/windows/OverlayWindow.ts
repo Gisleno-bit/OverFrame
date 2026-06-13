@@ -9,7 +9,9 @@ import {
   WindowBounds,
   DRAG_ZONE_HEIGHT,
   CHROME_HEIGHT,
+  RESIZE_BORDER,
 } from '@shared/types'
+import { IPC } from '@shared/ipc'
 
 const isDev = !app.isPackaged
 
@@ -41,7 +43,7 @@ export class OverlayWindow {
     this.win = new BrowserWindow({
       ...safeBounds,
       minWidth: 500,
-      minHeight: 120,
+      minHeight: CHROME_HEIGHT + RESIZE_BORDER * 2 + 1,
       icon: resolveIcon(),
       frame: false,
       transparent: true,
@@ -72,6 +74,11 @@ export class OverlayWindow {
     } else {
       void this.win.loadFile(path.join(__dirname, '../renderer/index.html'))
     }
+
+    // setMinimumSize() is required in addition to the constructor option —
+    // frameless transparent windows on Windows can ignore minWidth/minHeight
+    // from the constructor when the OS native resize handles are used.
+    this.win.setMinimumSize(500, CHROME_HEIGHT + RESIZE_BORDER * 2 + 1)
 
     this.win.on('closed', () => {
       this.listeners.clear()
@@ -253,13 +260,16 @@ export class OverlayWindow {
 
   toggleMaximize(): void {
     if (this.savedBounds) {
-      this.win.setBounds(this.savedBounds)
+      this.win.setResizable(true)
+      this.win.setBounds(this.clampToDisplay(this.savedBounds))
       this.savedBounds = null
+      this.win.webContents.send(IPC.EventMaximizedChanged, false)
     } else {
       this.savedBounds = this.getBounds()
       const display = screen.getDisplayMatching(this.win.getBounds())
-      const wa = display.workArea
-      this.win.setBounds({ x: wa.x, y: wa.y, width: wa.width, height: wa.height })
+      this.win.setBounds(display.bounds)
+      this.win.setResizable(false)
+      this.win.webContents.send(IPC.EventMaximizedChanged, true)
     }
   }
 
@@ -271,8 +281,10 @@ export class OverlayWindow {
   unmaximize(): WindowBounds | null {
     if (!this.savedBounds) return null
     const bounds = { ...this.savedBounds }
-    this.win.setBounds(this.savedBounds)
+    this.win.setResizable(true)
+    this.win.setBounds(this.clampToDisplay(this.savedBounds))
     this.savedBounds = null
+    this.win.webContents.send(IPC.EventMaximizedChanged, false)
     return bounds
   }
 
@@ -302,8 +314,9 @@ export class OverlayWindow {
   private clampToDisplay(bounds: WindowBounds): WindowBounds {
     const display = screen.getDisplayMatching(bounds) ?? screen.getPrimaryDisplay()
     const wa = display.workArea
-    const width = Math.min(Math.max(bounds.width, 400), wa.width)
-    const height = Math.min(Math.max(bounds.height, 300), wa.height)
+    const minH = CHROME_HEIGHT + RESIZE_BORDER * 2 + 1
+    const width = Math.min(Math.max(bounds.width, 500), wa.width)
+    const height = Math.min(Math.max(bounds.height, minH), wa.height)
     const x = Math.min(Math.max(bounds.x, wa.x), wa.x + wa.width - width)
     const y = Math.min(Math.max(bounds.y, wa.y), wa.y + wa.height - height)
     return { x, y, width, height }
@@ -316,12 +329,14 @@ export class OverlayWindow {
   /** Returns the tab content area bounds (relative to the overlay's client area). */
   getTabContentBounds(): { x: number; y: number; width: number; height: number } {
     const { width, height } = this.win.getContentBounds()
-    const SIDE = 1, TOP = 1, BOTTOM = 1
+    // In maximized mode the inner div is inset-0 (no transparent resize ring, no 1px border).
+    // In normal mode it is inset-[6px] + a 1px border = 7px offset on every side.
+    const inset = this.savedBounds !== null ? 0 : RESIZE_BORDER + 1
     return {
-      x: SIDE,
-      y: this.chromeHeight + TOP,
-      width: Math.max(0, width - this.panelWidth - SIDE * 2),
-      height: Math.max(0, height - this.chromeHeight - TOP - BOTTOM),
+      x: inset,
+      y: this.chromeHeight + inset,
+      width: Math.max(0, width - this.panelWidth - inset * 2),
+      height: Math.max(0, height - this.chromeHeight - inset * 2),
     }
   }
 

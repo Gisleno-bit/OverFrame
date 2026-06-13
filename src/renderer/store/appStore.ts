@@ -44,6 +44,9 @@ interface AppState {
 
   missionsPanelOpen: boolean
   toggleMissionsPanel: () => void
+
+  isMaximized: boolean
+  setIsMaximized: (v: boolean) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -84,4 +87,7 @@ export const useAppStore = create<AppState>((set) => ({
 
   missionsPanelOpen: false,
   toggleMissionsPanel: () => set((s) => ({ missionsPanelOpen: !s.missionsPanelOpen })),
+
+  isMaximized: false,
+  setIsMaximized: (v) => set({ isMaximized: v }),
 }))

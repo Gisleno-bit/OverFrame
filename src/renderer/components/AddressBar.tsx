@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { DiscordIcon } from './icons/DiscordIcon'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { DEFAULT_PROFILE_ID, SEARCH_ENGINES } from '@shared/types'
+import { DEFAULT_PROFILE_ID, DEFAULT_HOMEPAGE, SEARCH_ENGINES } from '@shared/types'
 import { IGLogoIcon } from './icons/IGLogoIcon'
 import { localizeIGUrl, IG_HOME } from '@shared/ig-affiliate'
 import { useAppStore } from '../store/appStore'
@@ -72,15 +72,46 @@ export function AddressBar(): JSX.Element {
   // Set by onFocus, consumed by onMouseDown: detects the Windows "activation click"
   // where focus fires before mousedown (Electron window wasn't the foreground window).
   const focusPrecededMousedownRef = useRef(false)
+  // Set of tab IDs seen so far — used to detect brand-new tabs (not tab switches).
+  const knownTabIdsRef = useRef(new Set<string>())
 
   // Mirror CollectionBar visibility condition to add border-b when it's hidden
   const collectionBarVisible = activeProfile != null && collections.some(
     (c) => c.profileId === activeProfile.id || c.profileId === 'shared'
   )
 
+  const homepageUrl = activeProfile?.homepageUrl ?? DEFAULT_HOMEPAGE
+
   useEffect(() => {
-    setValue(activeTab?.url ?? '')
-  }, [activeTab?.url, activeTab?.id])
+    // Empty address bar when the tab is at the homepage so the user can type directly.
+    const isAtHomepage = !!activeTab && (activeTab.url === homepageUrl || activeTab.url === homepageUrl + '/')
+    setValue(isAtHomepage ? '' : (activeTab?.url ?? ''))
+  // activeTab?.url and activeTab?.id cover all properties we actually read
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab?.url, activeTab?.id, homepageUrl])
+
+  // Auto-focus the address bar when a brand-new empty tab is opened (like browsers do).
+  // Fires only when the active tab is one that wasn't previously known (not a tab switch)
+  // and has the 'New tab' title (set exclusively by create() for homepage tabs).
+  useEffect(() => {
+    const known = knownTabIdsRef.current
+    const currentIds = new Set(tabs.map((t) => t.id))
+    const isNewTab = !!activeTabId && !known.has(activeTabId) && currentIds.has(activeTabId)
+    knownTabIdsRef.current = currentIds
+    if (!isNewTab) return
+    const isAtHomepage = !!activeTab && (activeTab.url === homepageUrl || activeTab.url === homepageUrl + '/')
+    if (!isAtHomepage) return
+    const t = setTimeout(() => {
+      const input = document.querySelector<HTMLInputElement>('[data-address-input]')
+      if (!input) return
+      inputFocusedRef.current = true
+      input.focus()
+      input.select()
+    }, 0)
+    return () => clearTimeout(t)
+  // activeTab?.url covers the property we read from activeTab
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabs, activeTabId, activeTab?.url, homepageUrl])
 
   // Blur + deselect the address bar when the user clicks in the WebView2.
   // Skip if the address bar was clicked within the last 200 ms — that means the

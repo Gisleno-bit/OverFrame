@@ -28,6 +28,7 @@ export const IPC = {
   OverlayUnmaximize: 'overlay:unmaximize',
   OverlaySetPosition: 'overlay:setPosition',
   OverlayMoveByDelta: 'overlay:moveByDelta',
+  OverlaySetBounds: 'overlay:setBounds',
   OverlaySetWebViewBounds: 'overlay:setWebViewBounds',
   OverlaySetMouseInteractive: 'overlay:setMouseInteractive',
   OverlayRequestClickThrough: 'overlay:requestClickThrough',
@@ -120,6 +121,8 @@ export const IPC = {
   EventToggleFocusMode: 'event:toggleFocusMode',
   /** Fired by main when the overlay opacity changes via shortcut — lets the renderer sync the slider. */
   EventOpacityChanged: 'event:opacity:changed',
+  /** Fired by main when the overlay window enters/exits its maximized (fullscreen) state. */
+  EventMaximizedChanged: 'event:maximized:changed',
   /** Fired by main when settings are saved from any window — lets all renderers sync their store. */
   EventSettingsChanged: 'event:settings:changed',
   /** Fired by main when a WebView2 tab receives focus — renderer uses this to deselect the address bar. */

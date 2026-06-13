@@ -13,10 +13,8 @@ const GAP = 4
 const GAP_AFTER = 4
 
 export function TabBar(): JSX.Element {
-  const { tabs, activeTabId, activeProfile, overlayState } = useAppStore()
+  const { tabs, activeTabId, activeProfile, overlayState, isMaximized } = useAppStore()
   const TAB_MAX_W = Math.round(window.screen.width * 180 / 1920)
-  const [maximized, setMaximized] = useState(false)
-  useEffect(() => { void window.aether.overlay.isMaximized().then(setMaximized) }, [])
 
   // ── Tab order ─────────────────────────────────────────────────────────────────
 
@@ -311,7 +309,7 @@ export function TabBar(): JSX.Element {
       if (Math.abs(e.screenX - pointerDownScreenX.current) < 4) return
       windowDragging.current = true
 
-      if (maximized) {
+      if (isMaximized) {
         unmaximizing.current = true
         windowDragAborted.current = false
         const sx = e.screenX
@@ -321,7 +319,6 @@ export function TabBar(): JSX.Element {
         void (async () => {
           const bounds = await window.aether.overlay.unmaximize()
           if (windowDragAborted.current) return
-          setMaximized(false)
           if (bounds) {
             const newCaptureX = Math.round(clickX * bounds.width / maxW)
             captureX.current = newCaptureX
@@ -658,11 +655,11 @@ export function TabBar(): JSX.Element {
 
         <button
           type="button"
-          aria-label={maximized ? 'Restore window' : 'Maximize window'}
-          onClick={() => void window.aether.overlay.toggleMaximize().then(() => setMaximized((v) => !v))}
+          aria-label={isMaximized ? 'Restore window' : 'Maximize window'}
+          onClick={() => void window.aether.overlay.toggleMaximize()}
           className="flex items-center justify-center h-8 w-8 rounded text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors cursor-default"
         >
-          {maximized ? <Minimize2 size={16} strokeWidth={1.5} /> : <Maximize2 size={16} strokeWidth={1.5} />}
+          {isMaximized ? <Minimize2 size={16} strokeWidth={1.5} /> : <Maximize2 size={16} strokeWidth={1.5} />}
         </button>
 
         <button

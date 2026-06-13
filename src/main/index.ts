@@ -271,6 +271,9 @@ app.whenReady().then(() => {
     if (state === 'HIDDEN') {
       // Dismiss any floating achievement notification so it never appears above the game.
       popup?.dismissAchievements()
+      // Pause media before suspending/unloading so pages receive the pause event
+      // while they still have their content (unloadAll navigates to about:blank).
+      tabs?.pauseAllMedia()
       const { performanceMode, protectedDomains: pd } = store.get('settings')
       if (performanceMode) tabs?.unloadAll(pd ?? DEFAULT_PROTECTED_DOMAINS)
       else tabs?.suspendAll()
@@ -289,6 +292,7 @@ app.whenReady().then(() => {
         sessionManager?.restore(p.profileId, store.get('settings').protectedDomains ?? DEFAULT_PROTECTED_DOMAINS)
       }
       tabs?.resumeAll()
+      tabs?.resumePausedMedia()
       // Overlay is visible again → bring back the IG promo if it was only
       // retracted by the hide (not dismissed by the user). Deferred a tick so it
       // re-reveals after the overlay's show() window churn has settled.

@@ -293,6 +293,7 @@ export interface LinkOverflowPayload {
 export interface TabSession {
   url: string
   title: string
+  favicon?: string | null
 }
 
 export interface ProfileSession {
@@ -341,6 +342,7 @@ export const MIN_OPACITY = 0.2
 export const MAX_OPACITY = 1.0
 export const MAX_PINNED_LINKS = 8
 export const DRAG_ZONE_HEIGHT = 10 // px, top strip always intercepts mouse
+export const RESIZE_BORDER = 6   // px, inset reserved for window resize handles (sides + bottom)
 export const CHROME_HEIGHT = 120 // tabbar(40) + addressbar(40) + collectionbar(40) — default without PinnedBar
 export const PANEL_WIDTH = 340 // side panel width when open
 export const DEFAULT_PROFILE_ID = 'default'

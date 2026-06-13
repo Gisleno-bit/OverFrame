@@ -291,6 +291,9 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle(IPC.OverlayUnmaximize, () => overlay.unmaximize())
   ipcMain.on(IPC.OverlaySetPosition, (_e, x: number, y: number) => overlay.setPositionXY(x, y))
   ipcMain.on(IPC.OverlayMoveByDelta, (_e, dx: number, dy: number) => overlay.moveByDelta(dx, dy))
+  ipcMain.on(IPC.OverlaySetBounds, (_e, b: { x: number; y: number; width: number; height: number }) => {
+    if ([b?.x, b?.y, b?.width, b?.height].every(Number.isFinite)) overlay.setBounds(b)
+  })
   ipcMain.on(IPC.OverlaySetWebViewBounds, (_e, x: number, y: number, w: number, h: number) =>
     tabs.setActiveViewBounds(x, y, w, h)
   )
