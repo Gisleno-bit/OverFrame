@@ -77,10 +77,11 @@ export function IGNudge(): JSX.Element | null {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url])
 
-  // Edge case: user enables igAutoAffiliate *while already on IG*
-  // (e.g. they activated in a previous tab that was still on IG)
+  // Edge case: igAutoAffiliate becomes true while already on IG without the tag.
+  // Covers: user clicks "Activate" while browsing IG, or app starts with the flag
+  // already set and the banner was never shown (settings loaded before URL effect).
   useEffect(() => {
-    if (settings?.igAutoAffiliate && showBanner && onIG && !affiliated && activeTab) {
+    if (settings?.igAutoAffiliate && onIG && !affiliated && !dismissed && activeTab) {
       void window.aether.tabs.navigate(activeTab.id, addIGAffiliate(url))
       setShowBanner(false)
     }
