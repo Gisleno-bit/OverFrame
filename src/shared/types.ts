@@ -281,7 +281,7 @@ export interface IGPromoPayload {
 /** Fired when a visible game was seen but could not be auto-profiled. */
 export interface GameUndetectedPayload {
   /** Candidates that passed blocklist/excluded checks but failed the game-path filter. */
-  candidates: Array<{ processName: string; displayName: string; exePath: string }>
+  candidates: Array<{ processName: string; displayName: string; exePath: string; iconDataUrl: string }>
 }
 
 export interface LinkOverflowPayload {

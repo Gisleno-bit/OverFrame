@@ -178,8 +178,8 @@ export const IG_CATALOG: IGGameEntry[] = [
   {
     exes: ['warframe.exe', 'warframe.x64.exe'],
     keywords: ['warframe'],
-    purchaseHint: 'Warframe Platinum',
-    browseUrl: `${IG_BASE_URL}/en/search/?query=warframe+platinum${PREPAID}`,
+    purchaseHint: 'Steam Gift Cards',
+    browseUrl: `${IG_BASE_URL}/en/search/?query=steam+gift+card${PREPAID}`,
   },
   {
     exes: ['cs2.exe'],

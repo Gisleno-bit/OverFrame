@@ -106,18 +106,26 @@ export class OverlayWindow {
       this.win.setOpacity(this.currentOpacity)
       this.win.setIgnoreMouseEvents(false)
     }
-    if (!this.everShown) {
-      this.everShown = true
-      // Fire one-shot "first show" callbacks and release them
-      for (const cb of this.firstShowListeners) cb()
-      this.firstShowListeners.clear()
-    }
+    const isFirstShow = !this.everShown
+    if (isFirstShow) this.everShown = true
     // Re-assert always-on-top in case the OS demoted us while hidden,
     // then bring the window to foreground and steal keyboard focus.
     this.win.setAlwaysOnTop(true, 'screen-saver')
     this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
     this.win.show()
     this.win.moveTop()
+    // Fire one-shot "first show" callbacks only AFTER the window is actually
+    // visible on screen. Session restore (the sole listener) navigates the active
+    // tab here; doing it before win.show() means the active tab begins loading
+    // while its WebView2 host window is still hidden. Visibility-gated media pages
+    // (e.g. a YouTube watch page) then stall indefinitely — they wait for
+    // document.visibilityState to become 'visible' before initialising the player.
+    // A background tab opened later by a user click never hits this because the
+    // window is already visible by then.
+    if (isFirstShow) {
+      for (const cb of this.firstShowListeners) cb()
+      this.firstShowListeners.clear()
+    }
     if (restoreClickThrough) {
       // Restore click-through without stealing keyboard focus from the game.
       this.applyClickThrough(true)

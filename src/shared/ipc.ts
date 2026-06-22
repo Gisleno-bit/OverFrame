@@ -54,6 +54,7 @@ export const IPC = {
   ProfilesGetAll: 'profiles:getAll',
   ProfilesGetCurrent: 'profiles:getCurrent',
   ProfilesCreate: 'profiles:create',
+  ProfilesCreateDetected: 'profiles:createDetected',
   ProfilesRemove: 'profiles:remove',
   ProfilesUpdate: 'profiles:update',
   ProfilesSetActive: 'profiles:setActive',

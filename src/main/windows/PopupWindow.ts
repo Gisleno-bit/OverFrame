@@ -256,6 +256,20 @@ export class PopupWindow {
     return this.win && !this.win.isDestroyed() ? this.win.webContents : null
   }
 
+  /**
+   * True if `wc` belongs to one of this popup's own windows — the main panel
+   * OR the standalone notification window. Used to authorise popup-originated
+   * IPC: the game-detection notification (e.g. "Create profile" on an
+   * unrecognised game) lives in `notifWin`, not `win`.
+   */
+  ownsWebContents(wc: Electron.WebContents | null): boolean {
+    if (!wc) return false
+    return (
+      (this.win != null && !this.win.isDestroyed() && this.win.webContents === wc) ||
+      (this.notifWin != null && !this.notifWin.isDestroyed() && this.notifWin.webContents === wc)
+    )
+  }
+
   // ─── Game detection notification ─────────────────────────────────────────
 
   /**
@@ -390,8 +404,8 @@ export class PopupWindow {
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     const wa = display.workArea
 
-    const NOTIF_W = 300
-    const NOTIF_H = 68
+    const NOTIF_W = 340
+    const NOTIF_H = 82
     const MARGIN = 12
 
     const x = Math.round(wa.x + (wa.width - NOTIF_W) / 2)
@@ -623,7 +637,14 @@ export class PopupWindow {
   private hideIGPromoWindow(): void {
     const win = this.igPromoWin
     if (!win || win.isDestroyed()) { this.igPromoVisible = false; return }
-    win.setIgnoreMouseEvents(true)
+    // Do NOT call setIgnoreMouseEvents(true) here. The window was embedded as a
+    // WS_CHILD with WS_EX_LAYERED (kept from Electron's focusable:false setup).
+    // Cycling setIgnoreMouseEvents(true → false) on a WS_CHILD leaves WS_EX_TRANSPARENT
+    // in a partially-restored state: Chromium's TrackMouseEvent still delivers
+    // WM_MOUSEMOVE (→ CSS hover works) but WM_NCHITTEST returns HTTRANSPARENT so
+    // WM_LBUTTONDOWN routes to the game instead — clicks silently miss the buttons.
+    // SW_HIDE (from setChildWindowBounds visible=false) is sufficient: a hidden
+    // HWND receives no mouse messages regardless of its WS_EX_TRANSPARENT flag.
     if (this.igPromoAttached) {
       const r = this.igPromoRect()
       if (r) WebView2View.setChildWindowBounds(win.getNativeWindowHandle(), r.x, r.y, r.w, r.h, false)
@@ -781,7 +802,9 @@ export class PopupWindow {
     const win = this.achievementWin
     this.achievementVisible = false
     if (!win || win.isDestroyed()) return
-    win.setIgnoreMouseEvents(true)
+    // Same reasoning as hideIGPromoWindow: setIgnoreMouseEvents(true) on a WS_CHILD
+    // with WS_EX_LAYERED can leave WS_EX_TRANSPARENT partially restored, causing
+    // hover to work but clicks to silently miss. SW_HIDE is sufficient.
     if (this.achievementAttached) {
       const r = this.achievementRect()
       if (r) WebView2View.setChildWindowBounds(win.getNativeWindowHandle(), r.x, r.y, r.w, r.h, false)

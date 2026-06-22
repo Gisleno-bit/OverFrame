@@ -691,7 +691,10 @@ export class TabManager {
     const { width, height } = this.overlay.win.getContentBounds()
     // Fill the inner content div (RESIZE_BORDER outer ring + 1px border on each side),
     // leaving the transparent outer ring free for the resize handles.
-    const R = RESIZE_BORDER + 1
+    // In maximized ("fullapp") mode there is no resize ring — the content is inset-0
+    // and the handles are hidden — so the fullscreen video must fill the whole window,
+    // otherwise an empty margin shows around it.
+    const R = this.overlay.isMaximized() ? 0 : RESIZE_BORDER + 1
     tab.view.setBounds(R, R, width - R * 2, height - R * 2)
   }
 

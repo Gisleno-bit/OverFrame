@@ -99,6 +99,9 @@ const api = {
     getAll: (): Promise<Profile[]> => ipcRenderer.invoke(IPC.ProfilesGetAll),
     getCurrent: (): Promise<Profile> => ipcRenderer.invoke(IPC.ProfilesGetCurrent),
     create: (input: NewProfile): Promise<Profile> => ipcRenderer.invoke(IPC.ProfilesCreate, input),
+    /** Create a profile straight from a detected game (no form) — mirrors auto-creation. */
+    createFromCandidate: (input: { processName: string; exePath: string; displayName?: string }): Promise<Profile | null> =>
+      ipcRenderer.invoke(IPC.ProfilesCreateDetected, input),
     remove: (id: string, mode: 'delete' | 'exclude' = 'exclude') => ipcRenderer.invoke(IPC.ProfilesRemove, id, mode),
     update: (id: string, patch: Partial<Profile>) =>
       ipcRenderer.invoke(IPC.ProfilesUpdate, id, patch),

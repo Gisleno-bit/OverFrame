@@ -188,7 +188,9 @@ export function registerIpcHandlers(deps: Deps): void {
   })
 
   ipcMain.handle(IPC.OpenPanelFromPopup, (e, panelId?: string, collectionId?: string, prefillNewProfile?: { name: string; processName: string }) => {
-    if (e.sender === popup.getWebContents()) {
+    // Accept both the main popup AND the game-detection notification window —
+    // "Create profile" on an unrecognised game is fired from the notification.
+    if (popup.ownsWebContents(e.sender)) {
       popup.close()
       const b = overlay.win.getBounds()
       const anchorX = Math.round(b.width / 2)
@@ -406,6 +408,14 @@ export function registerIpcHandlers(deps: Deps): void {
     if (input.homepageUrl !== undefined && !isSafeBoundedUrl(input.homepageUrl)) return null
     if (input.priority !== undefined && (typeof input.priority !== 'number' || !Number.isFinite(input.priority))) return null
     return profiles.create(input)
+  })
+  ipcMain.handle(IPC.ProfilesCreateDetected, (_e, input) => {
+    if (!input || typeof input !== 'object') return null
+    if (!isBoundedString(input.processName, MAX_PROCESS_NAME_LENGTH)) return null
+    if (!isBoundedString(input.exePath, MAX_EXE_PATH_LENGTH)) return null
+    if (input.displayName !== undefined &&
+        (typeof input.displayName !== 'string' || input.displayName.length > MAX_NAME_LENGTH)) return null
+    return profiles.createDetectedProfile(input)
   })
   ipcMain.handle(IPC.ProfilesRemove, (_e, id: string, mode: 'delete' | 'exclude' = 'exclude') => profiles.remove(id, mode))
   ipcMain.handle(IPC.ProfilesUpdate, (_e, id: string, patch) => {
