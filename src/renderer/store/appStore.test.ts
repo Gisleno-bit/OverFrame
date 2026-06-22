@@ -44,6 +44,7 @@ beforeEach(() => {
     settings: null,
     isFocusMode: false,
     missionsPanelOpen: false,
+    isMaximized: false,
   })
 })
 
@@ -123,5 +124,11 @@ describe('appStore — UI flags', () => {
     expect(useAppStore.getState().missionsPanelOpen).toBe(true)
     pristine.toggleMissionsPanel()
     expect(useAppStore.getState().missionsPanelOpen).toBe(false)
+  })
+
+  it('setIsMaximized sets the maximized flag', () => {
+    expect(useAppStore.getState().isMaximized).toBe(false)
+    pristine.setIsMaximized(true)
+    expect(useAppStore.getState().isMaximized).toBe(true)
   })
 })
