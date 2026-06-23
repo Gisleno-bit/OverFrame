@@ -13,7 +13,7 @@ import {
   X as XIcon,
 } from 'lucide-react'
 import { DEFAULT_PROFILE_ID } from '@shared/types'
-import type { Profile } from '@shared/types'
+import type { CollectionExport, Profile } from '@shared/types'
 import { cn } from '../lib/cn'
 import { sanitizeIconUrl } from '../lib/url'
 import { useAppStore } from '../store/appStore'
@@ -62,6 +62,10 @@ export function CollectionsPanel({
   const [newCollIconUrl, setNewCollIconUrl] = useState('')
   const [showImport, setShowImport] = useState(false)
   const [importValue, setImportValue] = useState('')
+  const [importPreview, setImportPreview] = useState<CollectionExport | null>(null)
+  const [importError, setImportError] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const importAddRef = useRef<HTMLButtonElement>(null)
   const [deleteCollConfirmId, setDeleteCollConfirmId] = useState<string | null>(null)
   const [exportCopiedPos, setExportCopiedPos] = useState<{ id: string; x: number; y: number } | null>(null)
   const mousePos = useRef({ x: 0, y: 0 })
@@ -112,6 +116,11 @@ export function CollectionsPanel({
     setEditingProfileId(null)
     setEditingCollectionId(null)
   }, [level])
+
+  // Move focus onto the preview's primary action when it appears (a11y focus management).
+  useEffect(() => {
+    if (importPreview) importAddRef.current?.focus()
+  }, [importPreview])
 
   const refresh = useCallback(async (): Promise<void> => {
     setCollections(await window.aether.collections.getAll())
@@ -223,14 +232,35 @@ export function CollectionsPanel({
     try { await navigator.clipboard.writeText(textToCopy) } catch { /* clipboard may fail if window loses focus */ }
   }
 
-  const handleImport = async (): Promise<void> => {
-    if (!importValue.trim() || !selectedProfileId) return
-    const profileId = selectedProfileId
-    await window.aether.collections.import(importValue.trim(), profileId)
-    complete('export-collection')
-    setImportValue('')
+  const resetImport = (): void => {
     setShowImport(false)
-    await refresh()
+    setImportValue('')
+    setImportPreview(null)
+    setImportError(false)
+  }
+
+  /** Decode + sanitize the pasted code into a preview (no persistence yet). */
+  const handlePreviewImport = async (): Promise<void> => {
+    const code = importValue.trim()
+    if (!code) return
+    setImportError(false)
+    const preview = await window.aether.collections.previewImport(code)
+    if (preview) setImportPreview(preview)
+    else setImportError(true)
+  }
+
+  /** Confirm: actually import the previewed payload into the selected profile. */
+  const handleConfirmImport = async (): Promise<void> => {
+    if (!importValue.trim() || !selectedProfileId || importing) return
+    setImporting(true)
+    try {
+      await window.aether.collections.import(importValue.trim(), selectedProfileId)
+      complete('export-collection')
+      resetImport()
+      await refresh()
+    } finally {
+      setImporting(false)
+    }
   }
 
   // ── Link actions ─────────────────────────────────────────────────────────
@@ -559,7 +589,11 @@ export function CollectionsPanel({
                       }
                       <div className="flex-1 min-w-0">
                         <span className={cn('text-[12px] truncate block', isSelected && 'text-primary font-medium')}>{c.name}</span>
-                        <div className="text-[11px] text-muted-foreground">{c.links.length} link{c.links.length !== 1 ? 's' : ''}</div>
+                        {c.description && <span className="text-[11px] text-muted-foreground truncate block">{c.description}</span>}
+                        <div className="text-[11px] text-muted-foreground truncate">
+                          {c.links.length} link{c.links.length !== 1 ? 's' : ''}
+                          {c.author?.handle ? ` · by @${c.author.handle}` : ''}
+                        </div>
                       </div>
                       {isSelected && <Check size={12} className="text-primary shrink-0" aria-hidden="true" />}
                       <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
@@ -619,12 +653,57 @@ export function CollectionsPanel({
           )}
 
           {showImport && !showNewColl && (
-            <div className="flex items-center gap-1.5 px-3 py-2 border-t border-border/40 shrink-0" role="form" aria-label="Import collection">
-              <Input autoFocus aria-label="Collection Base64 code" value={importValue} onChange={(e) => setImportValue(e.target.value)}
-                placeholder="Paste code…" className="h-7 text-xs flex-1"
-                onKeyDown={(e) => { if (e.key === 'Enter') void handleImport(); if (e.key === 'Escape') { setShowImport(false); setImportValue('') } }} />
-              <Button size="icon" variant="ghost" aria-label="Import" className="h-7 w-7" onClick={() => void handleImport()}><Check size={11} /></Button>
-              <Button size="icon" variant="ghost" aria-label="Cancel" className="h-7 w-7" onClick={() => { setShowImport(false); setImportValue('') }}><XIcon size={11} /></Button>
+            <div className="flex flex-col gap-2 px-3 py-2 border-t border-border/40 shrink-0" role="form" aria-label="Import collection"
+              onKeyDown={(e) => { if (e.key === 'Escape') resetImport() }}>
+              {!importPreview ? (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <Input autoFocus aria-label="Collection share code" value={importValue}
+                      onChange={(e) => { setImportValue(e.target.value); setImportError(false) }}
+                      placeholder="Paste a share code…" className="h-7 text-xs flex-1"
+                      onKeyDown={(e) => { if (e.key === 'Enter') void handlePreviewImport() }} />
+                    <Button size="icon" variant="ghost" aria-label="Preview" className="h-7 w-7" onClick={() => void handlePreviewImport()}><Search size={11} /></Button>
+                    <Button size="icon" variant="ghost" aria-label="Cancel" className="h-7 w-7" onClick={resetImport}><XIcon size={11} /></Button>
+                  </div>
+                  {importError && <p className="text-[11px] text-destructive" role="alert">Invalid or unreadable code.</p>}
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    {importPreview.iconUrl
+                      ? <img src={importPreview.iconUrl} alt="" className="h-6 w-6 shrink-0 rounded-sm object-contain" onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                      : <div className="h-6 w-6 shrink-0 rounded-sm bg-muted/60 flex items-center justify-center"><Globe size={11} className="text-muted-foreground" aria-hidden="true" /></div>
+                    }
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12px] font-medium truncate">{importPreview.name || 'Untitled collection'}</div>
+                      <div className="text-[11px] text-muted-foreground truncate">
+                        {importPreview.author?.handle ? `by @${importPreview.author.handle} · ` : ''}
+                        {importPreview.links.length} link{importPreview.links.length !== 1 ? 's' : ''}
+                      </div>
+                    </div>
+                  </div>
+                  {importPreview.description && <p className="text-[11px] text-muted-foreground">{importPreview.description}</p>}
+                  <ul className="max-h-40 overflow-y-auto rounded-md border border-border/50 divide-y divide-border/30" role="list" aria-label="Links in this collection">
+                    {importPreview.links.map((l, i) => (
+                      <li key={`${i}-${l.url}`} className="flex items-start gap-2 px-2 py-1.5">
+                        <Favicon url={l.url} favicon={l.favicon} />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[11px] truncate">{l.title || l.url}</div>
+                          {l.note && <div className="text-[10px] text-muted-foreground truncate">{l.note}</div>}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex gap-2">
+                    <button type="button" ref={importAddRef} disabled={importing} onClick={() => void handleConfirmImport()}
+                      className="flex-1 h-7 rounded text-[12px] bg-primary/15 text-primary hover:bg-primary/25 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                      Add to {selectedProfile?.name ?? 'profile'}
+                    </button>
+                    <button type="button" onClick={resetImport}
+                      className="flex-1 h-7 rounded text-[12px] text-muted-foreground hover:bg-muted/50 transition-colors">Cancel</button>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
