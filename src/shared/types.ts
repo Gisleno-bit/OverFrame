@@ -111,6 +111,12 @@ export interface Settings {
   // ── Instant Gaming affiliate ─────────────────────────────────────────
   /** When true, automatically adds the affiliate tag when navigating to Instant Gaming. */
   igAutoAffiliate?: boolean
+
+  // ── Creator identity (collection signatures) ─────────────────────────
+  /** Local creator handle stamped on collections you author and share. No account, no PII. */
+  creatorHandle?: string
+  /** Optional accent colour (#rrggbb) for the creator signature. */
+  creatorColor?: string
 }
 
 export interface WindowBounds {
@@ -138,6 +144,14 @@ export interface Profile {
 
 export type CollectionSource = 'user' | 'publisher' | 'community'
 
+/** Local creator identity — no account, no PII. Travels with a shared collection. */
+export interface CollectionAuthor {
+  /** Creator's chosen display handle. */
+  handle: string
+  /** Optional accent colour as a #rrggbb hex string. */
+  color?: string
+}
+
 export interface Link {
   id: string
   title: string
@@ -151,8 +165,12 @@ export interface Link {
 export interface Collection {
   id: string
   name: string
+  /** Optional short description shown on the collection card and shared preview. */
+  description?: string
   profileId: string | 'shared'
   source: CollectionSource
+  /** Creator signature — travels with the collection when it is shared. */
+  author?: CollectionAuthor
   links: Link[]
   iconUrl?: string
   createdAt: number
@@ -162,7 +180,9 @@ export interface Collection {
 export interface CollectionExport {
   version: 1
   name: string
+  description?: string
   source: CollectionSource
+  author?: CollectionAuthor
   iconUrl?: string
   links: Array<Pick<Link, 'title' | 'url' | 'note' | 'pinned' | 'favicon'>>
 }
@@ -200,8 +220,10 @@ export interface NewLink {
 
 export interface NewCollection {
   name: string
+  description?: string
   profileId: string | 'shared'
   source?: CollectionSource
+  author?: CollectionAuthor
   iconUrl?: string
 }
 

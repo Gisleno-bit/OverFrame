@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import type { Collection, CollectionExport } from '@shared/types'
+import type { Collection, CollectionAuthor, CollectionExport } from '@shared/types'
 import { MAX_PINNED_LINKS } from '@shared/types'
 
 // In-memory replacement for the electron-store-backed `store` module.
@@ -272,5 +272,120 @@ describe('CollectionsManager — import', () => {
     expect(c.name).toBe('')
     expect(c.links).toHaveLength(1)
     expect(c.links[0]).toMatchObject({ title: '', url: 'https://ok', favicon: undefined })
+  })
+})
+
+describe('CollectionsManager — author & description', () => {
+  it('create stores a sanitized description and author', () => {
+    const c = mgr.create({
+      name: 'X',
+      profileId: 'p1',
+      description: '  My league-start setup  ',
+      author: { handle: ' roirr ', color: '#AABBCC' },
+    })
+    expect(c.description).toBe('My league-start setup')
+    expect(c.author).toEqual({ handle: 'roirr', color: '#aabbcc' })
+  })
+
+  it('create strips control characters (incl. DEL) from text fields', () => {
+    const description = 'a' + String.fromCharCode(1) + 'b' + String.fromCharCode(127) + 'c'
+    const c = mgr.create({ name: 'X', profileId: 'p1', description })
+    expect(c.description).toBe('a b c')
+  })
+
+  it('create drops an empty handle / invalid colour, and accepts a handle without colour', () => {
+    expect(mgr.create({ name: 'X', profileId: 'p1', author: { handle: '   ' } as CollectionAuthor }).author).toBeUndefined()
+    expect(mgr.create({ name: 'X', profileId: 'p1', author: { handle: 'h', color: 'red' } as CollectionAuthor }).author).toEqual({ handle: 'h' })
+    expect(mgr.create({ name: 'X', profileId: 'p1', author: { handle: 'solo' } }).author).toEqual({ handle: 'solo' })
+  })
+
+  it('create leaves description and author absent when not provided', () => {
+    const c = mgr.create({ name: 'X', profileId: 'p1' })
+    expect(c.description).toBeUndefined()
+    expect(c.author).toBeUndefined()
+  })
+
+  it('export includes description and author when present, omits them otherwise', () => {
+    const c = mgr.create({ name: 'B', profileId: 'p1', description: 'desc', author: { handle: 'roirr', color: '#aabbcc' } })
+    const decoded = JSON.parse(Buffer.from(mgr.export(c.id)!, 'base64').toString('utf8')) as CollectionExport
+    expect(decoded.description).toBe('desc')
+    expect(decoded.author).toEqual({ handle: 'roirr', color: '#aabbcc' })
+
+    const plain = mgr.create({ name: 'P', profileId: 'p1' })
+    const d2 = JSON.parse(Buffer.from(mgr.export(plain.id)!, 'base64').toString('utf8')) as CollectionExport
+    expect(d2.description).toBeUndefined()
+    expect(d2.author).toBeUndefined()
+  })
+
+  it('import clamps the description and sanitizes the author', () => {
+    const payload: CollectionExport = {
+      version: 1,
+      name: 'x',
+      source: 'community',
+      description: 'd'.repeat(500),
+      author: { handle: 'a'.repeat(50), color: '#abcdef' },
+      links: [],
+    }
+    const c = mgr.import(b64(payload), 'p1')!
+    expect(c.description).toHaveLength(280)
+    expect(c.author!.handle).toHaveLength(30)
+    expect(c.author!.color).toBe('#abcdef')
+  })
+
+  it('import drops an invalid author (bad colour, non-object, empty handle) and missing fields', () => {
+    const badColor = mgr.import(b64({ version: 1, name: 'x', source: 'user', author: { handle: 'h', color: 'nope' } as CollectionAuthor, links: [] }), 'p1')!
+    expect(badColor.author).toEqual({ handle: 'h' })
+
+    const notObject = mgr.import(b64({ version: 1, name: 'x', source: 'user', author: 'evil' as unknown as CollectionAuthor, links: [] }), 'p1')!
+    expect(notObject.author).toBeUndefined()
+
+    const emptyHandle = mgr.import(b64({ version: 1, name: 'x', source: 'user', author: { handle: '  ' } as CollectionAuthor, links: [] }), 'p1')!
+    expect(emptyHandle.author).toBeUndefined()
+
+    const missing = mgr.import(b64({ version: 1, name: 'x', source: 'user', links: [] }), 'p1')!
+    expect(missing.description).toBeUndefined()
+    expect(missing.author).toBeUndefined()
+  })
+})
+
+describe('CollectionsManager — previewImport', () => {
+  it('returns the sanitized payload without persisting it', () => {
+    const payload: CollectionExport = {
+      version: 1,
+      name: 'Preview',
+      source: 'community',
+      description: 'd',
+      author: { handle: 'roirr' },
+      links: [{ title: 'a', url: 'https://a', pinned: false }],
+    }
+    const preview = mgr.previewImport(b64(payload))!
+    expect(preview.name).toBe('Preview')
+    expect(preview.source).toBe('community')
+    expect(preview.description).toBe('d')
+    expect(preview.author).toEqual({ handle: 'roirr' })
+    expect(preview.links).toHaveLength(1)
+    expect(mgr.getAll()).toHaveLength(0) // preview never persists
+  })
+
+  it('returns null for an invalid payload', () => {
+    expect(mgr.previewImport(Buffer.from('not json', 'utf8').toString('base64'))).toBeNull()
+  })
+})
+
+describe('CollectionsManager — setDescription / setAuthor', () => {
+  it('setDescription sets, sanitizes, clears, and returns null for an unknown id', () => {
+    const c = mgr.create({ name: 'X', profileId: 'p1' })
+    expect(mgr.setDescription(c.id, '  hi  ')?.description).toBe('hi')
+    expect(mgr.setDescription(c.id, '   ')?.description).toBeUndefined() // empty after sanitize → cleared
+    expect(mgr.setDescription(c.id, null)?.description).toBeUndefined()
+    expect(mgr.setDescription('nope', 'x')).toBeNull()
+  })
+
+  it('setAuthor sets, sanitizes, clears, and returns null for an unknown id', () => {
+    const c = mgr.create({ name: 'X', profileId: 'p1' })
+    expect(mgr.setAuthor(c.id, { handle: 'roirr', color: '#aabbcc' })?.author).toEqual({ handle: 'roirr', color: '#aabbcc' })
+    expect(mgr.setAuthor(c.id, { handle: '  ' } as CollectionAuthor)?.author).toBeUndefined() // invalid → cleared
+    expect(mgr.setAuthor(c.id, null)?.author).toBeUndefined()
+    expect(mgr.setAuthor('nope', null)).toBeNull()
   })
 })

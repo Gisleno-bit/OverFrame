@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { store } from '../store'
 import type {
   Collection,
+  CollectionAuthor,
   CollectionExport,
   CollectionSource,
   Link,
@@ -9,6 +10,70 @@ import type {
   NewLink
 } from '@shared/types'
 import { MAX_PINNED_LINKS } from '@shared/types'
+
+// ── Sanitization ────────────────────────────────────────────────────────────────
+// Shared by create() and decode(). Import payloads come from untrusted sources
+// (Discord/Reddit/landing pages), so everything is validated and length-capped.
+
+const MAX_HANDLE_LEN = 30
+const MAX_DESCRIPTION_LEN = 280
+const MAX_NOTE_LEN = 500
+const MAX_NAME_LEN = 200
+const MAX_TITLE_LEN = 500
+const MAX_ICON_URL_LEN = 65536
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
+
+/** Strip control chars, collapse whitespace, trim, cap length. Returns undefined when empty. */
+function sanitizeText(raw: unknown, max: number): string | undefined {
+  if (typeof raw !== 'string') return undefined
+  let out = ''
+  for (const ch of raw) {
+    // Replace C0 control chars + DEL with a space (collapsed below); keep everything else.
+    const code = ch.charCodeAt(0)
+    out += code < 0x20 || code === 0x7f ? ' ' : ch
+  }
+  const cleaned = out.replace(/\s+/g, ' ').trim().slice(0, max)
+  return cleaned.length > 0 ? cleaned : undefined
+}
+
+/** Accept only a #rrggbb hex colour — prevents CSS injection via the accent colour. */
+function sanitizeColor(raw: unknown): string | undefined {
+  return typeof raw === 'string' && HEX_COLOR_RE.test(raw) ? raw.toLowerCase() : undefined
+}
+
+/** A creator signature is valid only with a non-empty handle; the colour is optional. */
+function sanitizeAuthor(raw: unknown): CollectionAuthor | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const handle = sanitizeText((raw as { handle?: unknown }).handle, MAX_HANDLE_LEN)
+  if (!handle) return undefined
+  const color = sanitizeColor((raw as { color?: unknown }).color)
+  return color ? { handle, color } : { handle }
+}
+
+/** Keep only http(s) URLs (used for favicons). */
+function sanitizeHttpUrl(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined
+  try {
+    const proto = new URL(raw).protocol
+    return proto === 'http:' || proto === 'https:' ? raw : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Accept a data:image URL or an http(s) URL within the size cap; reject anything else. */
+function sanitizeIconUrl(raw: unknown): string | undefined {
+  if (typeof raw === 'string' && raw.length > 0 && raw.length <= MAX_ICON_URL_LEN) {
+    if (/^data:image\/[a-z+.-]+;base64,/.test(raw)) return raw
+    try {
+      const proto = new URL(raw).protocol
+      if (proto === 'http:' || proto === 'https:') return raw
+    } catch {
+      /* ignore */
+    }
+  }
+  return undefined
+}
 
 export class CollectionsManager {
   getAll(): Collection[] {
@@ -39,12 +104,16 @@ export class CollectionsManager {
 
   create(input: NewCollection): Collection {
     const now = Date.now()
+    const description = sanitizeText(input.description, MAX_DESCRIPTION_LEN)
+    const author = sanitizeAuthor(input.author)
     const collection: Collection = {
       id: randomUUID(),
       name: input.name,
       profileId: input.profileId,
       source: input.source ?? 'user',
       ...(input.iconUrl ? { iconUrl: input.iconUrl } : {}),
+      ...(description ? { description } : {}),
+      ...(author ? { author } : {}),
       links: [],
       createdAt: now,
       updatedAt: now
@@ -59,6 +128,27 @@ export class CollectionsManager {
 
   rename(id: string, name: string): Collection | null {
     return this.mutate(id, (c) => ({ ...c, name }))
+  }
+
+  setDescription(id: string, description: string | null): Collection | null {
+    return this.mutate(id, (c) => {
+      const updated = { ...c }
+      const clean = description ? sanitizeText(description, MAX_DESCRIPTION_LEN) : undefined
+      if (clean) updated.description = clean
+      else delete updated.description
+      return updated
+    })
+  }
+
+  /** Stamp (or clear) the creator signature that travels with the collection when shared. */
+  setAuthor(id: string, author: CollectionAuthor | null): Collection | null {
+    return this.mutate(id, (c) => {
+      const updated = { ...c }
+      const clean = author ? sanitizeAuthor(author) : undefined
+      if (clean) updated.author = clean
+      else delete updated.author
+      return updated
+    })
   }
 
   setIconUrl(id: string, iconUrl: string | null): Collection | null {
@@ -120,6 +210,8 @@ export class CollectionsManager {
       version: 1,
       name: c.name,
       source: c.source,
+      ...(c.description ? { description: c.description } : {}),
+      ...(c.author ? { author: c.author } : {}),
       ...(c.iconUrl ? { iconUrl: c.iconUrl } : {}),
       links: c.links.map((l) => ({
         title: l.title,
@@ -133,8 +225,12 @@ export class CollectionsManager {
     return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')
   }
 
-  /** Import a Base64 string into a new collection assigned to the given profile. */
-  import(base64: string, profileId: string | 'shared'): Collection | null {
+  /**
+   * Decode + validate + sanitize a Base64 export payload, WITHOUT persisting.
+   * Returns the cleaned CollectionExport, or null when the payload is invalid.
+   * Shared by previewImport() (preview UI) and import() (persist).
+   */
+  private decode(base64: string): CollectionExport | null {
     let json: string
     try {
       json = Buffer.from(base64, 'base64').toString('utf8')
@@ -155,50 +251,71 @@ export class CollectionsManager {
       ? (parsed.source as CollectionSource)
       : 'user'
 
+    const iconUrl = sanitizeIconUrl(parsed.iconUrl)
+    const description = sanitizeText(parsed.description, MAX_DESCRIPTION_LEN)
+    const author = sanitizeAuthor(parsed.author)
+
+    const links = parsed.links
+      .map((l) => {
+        const url = String(l.url ?? '')
+        // Reject any non-http(s) URL to prevent javascript:/file:// injection
+        try {
+          const proto = new URL(url).protocol
+          if (proto !== 'http:' && proto !== 'https:') return null
+        } catch {
+          return null
+        }
+        const favicon = sanitizeHttpUrl(l.favicon)
+        const link: Pick<Link, 'title' | 'url' | 'note' | 'pinned' | 'favicon'> = {
+          title: String(l.title ?? '').slice(0, MAX_TITLE_LEN),
+          url,
+          note: sanitizeText(l.note, MAX_NOTE_LEN),
+          pinned: Boolean(l.pinned),
+          ...(favicon ? { favicon } : {})
+        }
+        return link
+      })
+      .filter((l): l is NonNullable<typeof l> => l !== null)
+
+    return {
+      version: 1,
+      name: String(parsed.name ?? '').slice(0, MAX_NAME_LEN),
+      source,
+      ...(description ? { description } : {}),
+      ...(author ? { author } : {}),
+      ...(iconUrl ? { iconUrl } : {}),
+      links
+    }
+  }
+
+  /** Decode + sanitize a shared payload for preview, WITHOUT importing it. */
+  previewImport(base64: string): CollectionExport | null {
+    return this.decode(base64)
+  }
+
+  /** Import a Base64 string into a new collection assigned to the given profile. */
+  import(base64: string, profileId: string | 'shared'): Collection | null {
+    const parsed = this.decode(base64)
+    if (!parsed) return null
+
     const now = Date.now()
     const collection: Collection = {
       id: randomUUID(),
-      name: String(parsed.name ?? '').slice(0, 200),
+      name: parsed.name,
       profileId,
-      source,
-      ...(() => {
-        if (typeof parsed.iconUrl === 'string' && parsed.iconUrl.length > 0 && parsed.iconUrl.length <= 65536) {
-          const isDataImage = /^data:image\/[a-z+.-]+;base64,/.test(parsed.iconUrl)
-          if (isDataImage) return { iconUrl: parsed.iconUrl }
-          try {
-            const proto = new URL(parsed.iconUrl).protocol
-            if (proto === 'http:' || proto === 'https:') return { iconUrl: parsed.iconUrl }
-          } catch { /* ignore */ }
-        }
-        return {}
-      })(),
-      links: parsed.links
-        .map((l, i) => {
-          const url = String(l.url ?? '')
-          // Reject any non-http(s) URL to prevent javascript:/file:// injection
-          try {
-            const proto = new URL(url).protocol
-            if (proto !== 'http:' && proto !== 'https:') return null
-          } catch {
-            return null
-          }
-          return {
-            id: randomUUID(),
-            title: String(l.title ?? '').slice(0, 500),
-            url,
-            note: l.note,
-            favicon: (() => {
-              if (typeof l.favicon !== 'string') return undefined
-              try {
-                const proto = new URL(l.favicon).protocol
-                return (proto === 'http:' || proto === 'https:') ? l.favicon : undefined
-              } catch { return undefined }
-            })(),
-            pinned: Boolean(l.pinned),
-            order: i
-          }
-        })
-        .filter((l): l is NonNullable<typeof l> => l !== null),
+      source: parsed.source,
+      ...(parsed.description ? { description: parsed.description } : {}),
+      ...(parsed.author ? { author: parsed.author } : {}),
+      ...(parsed.iconUrl ? { iconUrl: parsed.iconUrl } : {}),
+      links: parsed.links.map((l, i) => ({
+        id: randomUUID(),
+        title: l.title,
+        url: l.url,
+        note: l.note,
+        favicon: l.favicon,
+        pinned: l.pinned,
+        order: i
+      })),
       createdAt: now,
       updatedAt: now
     }
