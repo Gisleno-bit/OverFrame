@@ -46,7 +46,10 @@ export const IPC = {
   CollectionsExport: 'collections:export',
   CollectionsShare: 'collections:share',
   CollectionsImport: 'collections:import',
+  CollectionsPreviewImport: 'collections:previewImport',
   CollectionsSetIconUrl: 'collections:setIconUrl',
+  CollectionsSetDescription: 'collections:setDescription',
+  CollectionsSetAuthor: 'collections:setAuthor',
   CollectionsReorderLinks: 'collections:reorderLinks',
   CollectionsReorder: 'collections:reorder',
 

@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/ipc'
 import type {
   Collection,
+  CollectionAuthor,
+  CollectionExport,
   NewCollection,
   NewLink,
   NewProfile,
@@ -88,8 +90,15 @@ const api = {
     share: (id: string): Promise<string | null> => ipcRenderer.invoke(IPC.CollectionsShare, id),
     import: (base64: string, profileId: string): Promise<Collection | null> =>
       ipcRenderer.invoke(IPC.CollectionsImport, base64, profileId),
+    /** Decode + sanitize a shared payload (raw base64 or 8-char code) for preview, without importing. */
+    previewImport: (input: string): Promise<CollectionExport | null> =>
+      ipcRenderer.invoke(IPC.CollectionsPreviewImport, input),
     setIconUrl: (id: string, iconUrl: string | null): Promise<Collection | null> =>
       ipcRenderer.invoke(IPC.CollectionsSetIconUrl, id, iconUrl),
+    setDescription: (id: string, description: string | null): Promise<Collection | null> =>
+      ipcRenderer.invoke(IPC.CollectionsSetDescription, id, description),
+    setAuthor: (id: string, author: CollectionAuthor | null): Promise<Collection | null> =>
+      ipcRenderer.invoke(IPC.CollectionsSetAuthor, id, author),
     reorderLinks: (collectionId: string, linkIds: string[]): Promise<Collection | null> =>
       ipcRenderer.invoke(IPC.CollectionsReorderLinks, collectionId, linkIds),
     reorder: (collectionIds: string[]): Promise<void> =>

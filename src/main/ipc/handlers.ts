@@ -12,7 +12,7 @@ import type { ShortcutManager } from '../managers/ShortcutManager'
 import type { OverlayWindow } from '../windows/OverlayWindow'
 import { DEFAULT_HOMEPAGE, DEFAULT_SHORTCUTS } from '@shared/types'
 import { WebView2View } from '../managers/tabs/WebView2View'
-import type { BookmarkPopupPayload, AchievementPayload, CollectionsPopupPayload, LinkOverflowPayload, MemoryPopupPayload, Settings, Shortcuts, IGPromoPayload } from '@shared/types'
+import type { BookmarkPopupPayload, AchievementPayload, CollectionAuthor, CollectionsPopupPayload, LinkOverflowPayload, MemoryPopupPayload, Settings, Shortcuts, IGPromoPayload } from '@shared/types'
 import { getVisibleGames } from '../utils/getVisibleGames'
 import { crashLogPath, ensureLogsDir, logCrash } from '../utils/crashLogger'
 import { logConsole, readLog } from '../utils/devLogger'
@@ -85,6 +85,23 @@ function isSafeBoundedUrl(url: unknown): url is string {
   return typeof url === 'string' && url.length <= MAX_URL_LENGTH && isSafeUrl(url)
 }
 
+/** Resolve a share input (raw base64 export, or an 8-char short code) to a base64 payload, or null. */
+async function resolveShareInput(input: unknown): Promise<string | null> {
+  if (typeof input !== 'string' || input.length === 0) return null
+  let base64 = input
+  // Short code (8 lowercase alphanumeric chars) — resolve via the share worker.
+  if (/^[a-z0-9]{8}$/.test(input)) {
+    try {
+      const res = await fetch(`${SHARE_API_URL}/${input}`)
+      if (!res.ok) return null
+      base64 = Buffer.from(await res.text(), 'utf8').toString('base64')
+    } catch {
+      return null
+    }
+  }
+  return base64.length > MAX_IMPORT_BASE64_LENGTH ? null : base64
+}
+
 // Profile-specific limits — well above any legitimate UX scenario.
 const MAX_PROCESS_NAMES = 50
 const MAX_PROCESS_NAME_LENGTH = 128
@@ -127,6 +144,8 @@ const SETTINGS_ALLOWLIST: ReadonlySet<keyof Settings> = new Set([
   'protectedDomains',
   'quickLinks',
   'adBlockEnabled',
+  'creatorHandle',
+  'creatorColor',
 ])
 
 /** User-configurable string list caps — prevents storing pathological lists. */
@@ -364,21 +383,15 @@ export function registerIpcHandlers(deps: Deps): void {
   })
 
   ipcMain.handle(IPC.CollectionsImport, async (_e, input: string, profileId: string) => {
-    if (typeof input !== 'string' || input.length === 0) return null
-    let base64 = input
-    // Short code (8 lowercase alphanumeric chars) — resolve via share worker
-    if (/^[a-z0-9]{8}$/.test(input)) {
-      try {
-        const res = await fetch(`${SHARE_API_URL}/${input}`)
-        if (!res.ok) return null
-        const json = await res.text()
-        base64 = Buffer.from(json, 'utf8').toString('base64')
-      } catch {
-        return null
-      }
-    }
-    if (base64.length > MAX_IMPORT_BASE64_LENGTH) return null
+    const base64 = await resolveShareInput(input)
+    if (!base64) return null
     return collections.import(base64, profileId)
+  })
+  // Decode + sanitize a shared payload for a trustworthy preview, WITHOUT persisting it.
+  ipcMain.handle(IPC.CollectionsPreviewImport, async (_e, input: string) => {
+    const base64 = await resolveShareInput(input)
+    if (!base64) return null
+    return collections.previewImport(base64)
   })
   ipcMain.handle(IPC.CollectionsSetIconUrl, (_e, id: string, iconUrl: string | null) => {
     if (iconUrl !== null && iconUrl !== undefined) {
@@ -387,6 +400,20 @@ export function registerIpcHandlers(deps: Deps): void {
       if (!u.startsWith('data:image/') && !isSafeUrl(u)) return null
     }
     return collections.setIconUrl(id, iconUrl ?? null)
+  })
+  ipcMain.handle(IPC.CollectionsSetDescription, (_e, id: string, description: unknown) => {
+    if (description !== null && description !== undefined
+      && (typeof description !== 'string' || description.length > MAX_NOTE_LENGTH)) return null
+    return collections.setDescription(id, (description as string | null) ?? null)
+  })
+  ipcMain.handle(IPC.CollectionsSetAuthor, (_e, id: string, author: unknown) => {
+    if (author !== null && author !== undefined) {
+      if (typeof author !== 'object') return null
+      const a = author as { handle?: unknown; color?: unknown }
+      if (!isBoundedString(a.handle, MAX_NAME_LENGTH)) return null
+      if (a.color !== undefined && (typeof a.color !== 'string' || a.color.length > 32)) return null
+    }
+    return collections.setAuthor(id, (author as CollectionAuthor | null) ?? null)
   })
   ipcMain.handle(IPC.CollectionsReorderLinks, (_e, collectionId: string, linkIds: unknown) => {
     if (!Array.isArray(linkIds) || !linkIds.every((x) => typeof x === 'string')) return null
