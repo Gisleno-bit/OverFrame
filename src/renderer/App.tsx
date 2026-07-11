@@ -33,6 +33,7 @@ export function App(): JSX.Element {
     isMaximized,
     setIsMaximized,
     missionsPanelOpen,
+    setHomeTab,
   } = useAppStore()
 
 
@@ -62,6 +63,14 @@ export function App(): JSX.Element {
     setTabs,
     setOverlayState
   ])
+
+  // Navigate to a Home tab when triggered from a popup (popup → main → here)
+  useEffect(() => {
+    return window.aether.on.navigateHome((tab) => {
+      setHomeTab(tab as Parameters<typeof setHomeTab>[0])
+      if (useAppStore.getState().activeTabId !== null) void window.aether.tabs.deactivate()
+    })
+  }, [setHomeTab])
 
   // Subscribe to events
   useEffect(() => {
@@ -119,7 +128,7 @@ export function App(): JSX.Element {
     igPromoState.reset()
 
     const entry = activeProfile && id !== DEFAULT_PROFILE_ID
-      ? getCatalogForProfile(activeProfile.processNames, id, DEFAULT_PROFILE_ID, activeProfile.name)
+      ? getCatalogForProfile(activeProfile.processNames, activeProfile.id, DEFAULT_PROFILE_ID, activeProfile.name)
       : null
 
     if (entry && useAppStore.getState().settings?.showIGPromo !== false) {

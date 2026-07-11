@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react'
-import { Heart, Palette, Keyboard, Gamepad2, Globe, Cpu, Info, ExternalLink, Mail, Trash2, FolderOpen } from 'lucide-react'
+import { Palette, Keyboard, Gamepad2, Globe, Cpu, Info, Terminal, ExternalLink, Mail, Trash2, FolderOpen, TriangleAlert } from 'lucide-react'
 import { DiscordIcon } from './icons/DiscordIcon'
+import { IGLogoIcon } from './icons/IGLogoIcon'
+import { KoFiIcon } from './icons/PlatformIcons'
 import type { Settings } from '@shared/types'
 import { DEFAULT_SHORTCUTS, MIN_OPACITY, DEFAULT_HOMEPAGE, DEFAULT_PROTECTED_DOMAINS, HOMEPAGE_PRESETS, SEARCH_ENGINES } from '@shared/types'
 import type { SearchEngineId } from '@shared/types'
 import type { ShortcutId, Shortcuts } from '@shared/types'
+import { localizeIGUrl, IG_HOME } from '@shared/ig-affiliate'
 import { useAppStore } from '../store/appStore'
+import { useMissionsStore } from '../store/missionsStore'
 import { useDiscordUrl } from '../hooks/useDiscordUrl'
 import { Button } from './ui/Button'
 import { Slider } from './ui/Slider'
@@ -18,7 +22,7 @@ function isValidDomain(domain: string): boolean {
   return /^[^\s/]+\.[a-z]{2,}/i.test(domain.trim())
 }
 
-type TabId = 'appearance' | 'browser' | 'shortcuts' | 'detection' | 'system' | 'about'
+type TabId = 'appearance' | 'browser' | 'shortcuts' | 'detection' | 'system' | 'about' | 'developer'
 
 const HOMEPAGE_TO_ENGINE: Partial<Record<string, SearchEngineId>> = {
   'https://www.google.com':   'google',
@@ -33,17 +37,24 @@ interface TabDef {
   Icon: typeof Palette
 }
 
-const TABS: readonly TabDef[] = [
+const ALL_TABS: readonly TabDef[] = [
   { id: 'appearance', label: 'Appearance',     Icon: Palette },
   { id: 'browser',    label: 'Browser',        Icon: Globe },
   { id: 'shortcuts',  label: 'Shortcuts',      Icon: Keyboard },
   { id: 'detection',  label: 'Game detection', Icon: Gamepad2 },
   { id: 'system',     label: 'System',         Icon: Cpu },
   { id: 'about',      label: 'About',          Icon: Info },
+  { id: 'developer',  label: 'Developer',      Icon: Terminal },
 ] as const
+
+// Dev-only tab, computed once at module load (import.meta.env.DEV is a build-time
+// constant) so the sidebar list and the roving-tabindex keyboard nav never disagree
+// about which tabs exist.
+const TABS: readonly TabDef[] = import.meta.env.DEV ? ALL_TABS : ALL_TABS.filter((t) => t.id !== 'developer')
 
 export function SettingsPanel(): JSX.Element {
   const { settings, setSettings, activeProfile, setActiveProfile } = useAppStore()
+  const resetMissions = useMissionsStore((s) => s.reset)
   const discordUrl = useDiscordUrl()
   const [active, setActive] = useState<TabId>('appearance')
   const [version, setVersion] = useState('')
@@ -168,24 +179,23 @@ export function SettingsPanel(): JSX.Element {
           role="tabpanel"
           id={`panel-${active}`}
           aria-labelledby={`tab-${active}`}
-          className="p-4 space-y-4"
+          className="px-6 py-5 space-y-6 max-w-[640px] mx-auto"
         >
           {active === 'appearance' && (
-            <Section
-              title="Appearance"
-              description="How the overlay looks."
-            >
+            <Section title="Appearance">
               <Field
-                label={`Opacity — ${Math.round(liveOpacity * 100)}%`}
+                label={`Opacity: ${Math.round(liveOpacity * 100)}%`}
                 hint="How see-through the overlay is. You can also use Ctrl+Shift+↑ and Ctrl+Shift+↓ while in-game."
               >
-                <Slider
-                  value={[liveOpacity]}
-                  min={MIN_OPACITY}
-                  max={1}
-                  step={0.05}
-                  onValueChange={(v) => void setOpacity(v[0])}
-                />
+                <div className="max-w-[280px]">
+                  <Slider
+                    value={[liveOpacity]}
+                    min={MIN_OPACITY}
+                    max={1}
+                    step={0.05}
+                    onValueChange={(v) => void setOpacity(v[0])}
+                  />
+                </div>
               </Field>
               <Check
                 label="Show memory usage in the tab bar"
@@ -217,7 +227,7 @@ export function SettingsPanel(): JSX.Element {
                           type="button"
                           onClick={() => void selectHomepagePreset(url)}
                           className={cn(
-                            'flex items-center justify-center h-8 rounded-lg border text-xs font-medium transition-colors',
+                            'flex items-center justify-center h-8 rounded border text-xs font-medium transition-colors',
                             checked
                               ? 'border-primary/60 bg-primary/10 text-primary'
                               : 'border-border text-muted-foreground hover:border-border/80 hover:text-foreground',
@@ -255,7 +265,7 @@ export function SettingsPanel(): JSX.Element {
                         </div>
                         {homepageError && (
                           <p id="homepage-url-error" role="alert" className="text-[11px] text-destructive">
-                            Enter a valid domain — e.g. example.com
+                            Enter a valid domain, e.g. example.com
                           </p>
                         )}
                       </div>
@@ -273,13 +283,11 @@ export function SettingsPanel(): JSX.Element {
                 </div>
               </Section>
 
-              {/* ── Dark mode ────────────────────────────────── */}
-              <Section
-                title="Dark mode"
-                description="Makes websites use dark mode when they support it."
-              >
+              {/* ── Browsing toggles ─────────────────────────── */}
+              <Section title="Browsing">
                 <Check
                   label="Enable dark mode for websites"
+                  hint="Sites that support it follow the overlay's dark theme."
                 >
                   <input
                     type="checkbox"
@@ -287,15 +295,9 @@ export function SettingsPanel(): JSX.Element {
                     onChange={(e) => void updateSetting('applyDarkMode', e.target.checked)}
                   />
                 </Check>
-              </Section>
-
-              {/* ── Instant Gaming promo ─────────────────────── */}
-              <Section
-                title="Instant Gaming"
-                description="Overframe is affiliated with Instant Gaming. A small deal card may appear occasionally while browsing."
-              >
                 <Check
                   label="Show Instant Gaming deal cards"
+                  hint="Overframe is affiliated with Instant Gaming — a small deal card may appear occasionally while browsing."
                 >
                   <input
                     type="checkbox"
@@ -303,15 +305,9 @@ export function SettingsPanel(): JSX.Element {
                     onChange={(e) => void updateSetting('showIGPromo', e.target.checked)}
                   />
                 </Check>
-              </Section>
-
-              {/* ── Privacy — ad & cookie blocking ──────────────── */}
-              <Section
-                title="Privacy"
-                description="Block ads and cookie consent banners using uBlock Origin. Disable this if a site breaks or if you want to support ad-supported partners."
-              >
                 <Check
-                  label="Block ads & cookie banners (uBlock Origin)"
+                  label="Block ads &amp; cookie banners (uBlock Origin)"
+                  hint="Disable this if a site breaks."
                 >
                   <input
                     type="checkbox"
@@ -319,12 +315,19 @@ export function SettingsPanel(): JSX.Element {
                     onChange={(e) => void updateSetting('adBlockEnabled', e.target.checked)}
                   />
                 </Check>
+                <div className="flex items-start gap-2 rounded border border-amber-500/25 bg-amber-500/10 px-2.5 py-2">
+                  <TriangleAlert size={13} className="shrink-0 mt-0.5 text-amber-400" aria-hidden="true" />
+                  <p className="text-[11px] text-amber-400 leading-snug">
+                    Google is phasing out ad blockers everywhere, so some ads (e.g. on YouTube) may
+                    still get through.
+                  </p>
+                </div>
               </Section>
 
               {/* ── Protected tabs ───────────────────────────────── */}
               <Section
                 title="Protected tabs"
-                description="These sites stay open when you switch profiles or hide the overlay — so your calls are never interrupted."
+                description="These sites stay open when you switch profiles or hide the overlay."
               >
                 <StringListEditor
                   label="Protected domains"
@@ -333,7 +336,7 @@ export function SettingsPanel(): JSX.Element {
                   placeholder="example.com"
                   normalize={(v) => v.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')}
                   validate={(v) => v.includes('.') ? null : 'Enter a valid domain (e.g. discord.com)'}
-                  emptyText="No protected tabs — all tabs close on profile switch."
+                  emptyText="No protected tabs. All tabs close on profile switch."
                   onReset={() => void updateSetting('protectedDomains', DEFAULT_PROTECTED_DOMAINS)}
                   onChange={(next) => void updateSetting('protectedDomains', next)}
                 />
@@ -354,10 +357,7 @@ export function SettingsPanel(): JSX.Element {
 
           {active === 'system' && (
             <>
-              <Section
-                title="System"
-                description="System and performance options."
-              >
+              <Section title="System">
                 <Check
                   label="Launch at Windows startup"
                   hint="Starts Overframe in the tray when Windows boots."
@@ -380,10 +380,7 @@ export function SettingsPanel(): JSX.Element {
                 </Check>
               </Section>
 
-              <Section
-                title="Folders"
-                description="Open Overframe's folders in Explorer."
-              >
+              <Section title="Folders">
                 <div className="flex flex-col gap-1.5">
                   <Button
                     size="sm"
@@ -391,7 +388,7 @@ export function SettingsPanel(): JSX.Element {
                     onClick={() => void window.aether.system.openFolder('userData')}
                     className="justify-start gap-2"
                   >
-                    <FolderOpen size={11} /> User data — profiles, collections, settings
+                    <FolderOpen size={11} /> User data: profiles, collections, settings
                   </Button>
                   <Button
                     size="sm"
@@ -412,38 +409,31 @@ export function SettingsPanel(): JSX.Element {
                 </div>
               </Section>
 
-              <Section
-                title="Reset"
-                description="Delete all your data and start fresh."
-              >
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => void window.aether.system.resetData()}
-                  className="justify-start gap-2"
-                >
-                  <Trash2 size={11} /> Reset all data &amp; relaunch
-                </Button>
-              </Section>
-
-              <Section
-                title="Uninstall"
-                description="Permanently remove Overframe from your system."
-              >
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => void window.aether.system.uninstall()}
-                  className="justify-start gap-2"
-                >
-                  <Trash2 size={11} /> Uninstall Overframe
-                </Button>
+              <Section title="Danger zone">
+                <div className="flex gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => void window.aether.system.resetData()}
+                    className="justify-start gap-2"
+                  >
+                    <Trash2 size={11} /> Reset all data &amp; relaunch
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => void window.aether.system.uninstall()}
+                    className="justify-start gap-2"
+                  >
+                    <Trash2 size={11} /> Uninstall Overframe
+                  </Button>
+                </div>
               </Section>
             </>
           )}
 
           {active === 'about' && (
-            <div className="space-y-4">
+            <div className="space-y-6">
               <Section title="Overframe">
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
                   A lightweight overlay browser for gamers. Browse guides, wikis and streams without leaving your game.
@@ -487,10 +477,19 @@ export function SettingsPanel(): JSX.Element {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => void window.aether.tabs.create('https://ko-fi.com/overframe')}
-                    className="justify-start gap-2 hover:border-pink-500/50 hover:text-pink-400"
+                    onClick={() => void window.aether.tabs.create(localizeIGUrl(IG_HOME))}
+                    className="justify-start gap-2 hover:border-ig-orange/50 hover:text-ig-orange"
                   >
-                    <Heart size={11} /> Support development on Ko-fi
+                    <IGLogoIcon size={11} mono /> Instant Gaming &mdash; games at a discount
+                    <ExternalLink size={10} className="ml-auto text-muted-foreground" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void window.aether.tabs.create('https://ko-fi.com/overframe')}
+                    className="justify-start gap-2 hover:border-ko-fi-red/50 hover:text-ko-fi-red"
+                  >
+                    <KoFiIcon size={11} /> Support development on Ko-fi
                     <ExternalLink size={10} className="ml-auto text-muted-foreground" />
                   </Button>
                 </div>
@@ -500,6 +499,10 @@ export function SettingsPanel(): JSX.Element {
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
                   No analytics, no telemetry, no account required. All data stays on your machine.
                   Provided as-is under the MIT license.
+                </p>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Overframe is an Instant Gaming affiliate: game purchases made through links in
+                  the app earn us a small commission, at no extra cost to you.
                 </p>
                 <div className="flex gap-1">
                   <Button
@@ -520,33 +523,42 @@ export function SettingsPanel(): JSX.Element {
                   </Button>
                 </div>
               </Section>
-
-              {import.meta.env.DEV && (
-                <Section title="Developer">
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => void window.aether.system.devStoreReset()}
-                  >
-                    Reset store &amp; relaunch
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void window.aether.settings.set('hasCompletedOnboarding', false).then((s) => { if (s) useAppStore.getState().setSettings(s) })}
-                  >
-                    Show onboarding
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void window.aether.system.simulateCrash()}
-                  >
-                    Write test crash
-                  </Button>
-                </Section>
-              )}
             </div>
+          )}
+
+          {active === 'developer' && import.meta.env.DEV && (
+            <Section title="Developer" description="Dev-build tools — not present in production.">
+              <div className="flex flex-wrap gap-1.5">
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => void window.aether.system.devStoreReset()}
+                >
+                  Reset store &amp; relaunch
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={resetMissions}
+                >
+                  Reset missions
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void window.aether.settings.set('hasCompletedOnboarding', false).then((s) => { if (s) useAppStore.getState().setSettings(s) })}
+                >
+                  Show onboarding
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void window.aether.system.simulateCrash()}
+                >
+                  Write test crash
+                </Button>
+              </div>
+            </Section>
           )}
         </div>
       </div>

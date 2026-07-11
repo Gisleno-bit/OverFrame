@@ -8,6 +8,7 @@ import type {
 } from '@shared/types'
 
 export type PanelId = 'collections' | 'settings' | 'memory' | 'profiles' | null
+export type HomeTab = 'home' | 'missions' | 'news' | 'manage' | 'settings'
 
 interface AppState {
   // Tabs
@@ -47,6 +48,9 @@ interface AppState {
 
   isMaximized: boolean
   setIsMaximized: (v: boolean) => void
+
+  homeTab: HomeTab
+  setHomeTab: (tab: HomeTab) => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -90,4 +94,7 @@ export const useAppStore = create<AppState>((set) => ({
 
   isMaximized: false,
   setIsMaximized: (v) => set({ isMaximized: v }),
+
+  homeTab: 'home',
+  setHomeTab: (tab) => set({ homeTab: tab }),
 }))

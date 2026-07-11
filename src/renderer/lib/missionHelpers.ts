@@ -1,3 +1,19 @@
+import type { Mission } from './missions'
+import type { Shortcuts } from '@shared/types'
+
+/**
+ * Resolves a mission's description, substituting the "{shortcut}" token (if the
+ * mission has one) with the user's CURRENT accelerator for that action — never
+ * the hardcoded default baked into the mission's `desc` string, so a rebound
+ * shortcut is reflected immediately instead of showing a stale key combo.
+ */
+export function resolveMissionDesc(mission: Mission, shortcuts: Shortcuts | undefined): string {
+  if (!mission.shortcutId) return mission.desc
+  const accel = shortcuts?.[mission.shortcutId]
+  if (!accel) return mission.desc.replace('{shortcut}', 'a shortcut (set one in Settings → Shortcuts)')
+  return mission.desc.replace('{shortcut}', accel)
+}
+
 /** Hostnames of preset search-engine homepages — blocked from completing the
  *  "navigate to a website" mission since they open automatically as the new-tab page. */
 const PRESET_HOMEPAGE_HOSTNAMES = new Set([

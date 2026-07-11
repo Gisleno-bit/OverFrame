@@ -143,7 +143,7 @@ export function OnboardingOverlay(): JSX.Element | null {
               You're all set.
             </h2>
             <p className="text-[12px] text-muted-foreground leading-relaxed -mt-2">
-              Three more shortcuts — you'll use them every session.
+              Three more shortcuts you'll use every session.
             </p>
 
             <div className="flex flex-col gap-1.5 w-full text-left">
@@ -269,7 +269,7 @@ export function OnboardingOverlay(): JSX.Element | null {
                   </div>
                   {domainError && (
                     <p id="onboarding-url-error" role="alert" className="text-[11px] text-destructive text-left">
-                      Enter a valid domain — e.g. example.com
+                      Enter a valid domain, e.g. example.com
                     </p>
                   )}
                 </div>

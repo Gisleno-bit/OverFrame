@@ -6,17 +6,18 @@ import {
   X,
   Star,
   Library,
-  Heart,
   MemoryStick,
   Settings as SettingsIcon,
   Globe,
 } from 'lucide-react'
 import { DiscordIcon } from './icons/DiscordIcon'
+import { KoFiIcon } from './icons/PlatformIcons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DEFAULT_PROFILE_ID, DEFAULT_HOMEPAGE, SEARCH_ENGINES } from '@shared/types'
 import { IGLogoIcon } from './icons/IGLogoIcon'
 import { localizeIGUrl, IG_HOME } from '@shared/ig-affiliate'
 import { useAppStore } from '../store/appStore'
+import type { HomeTab } from '../store/appStore'
 import { useDiscordUrl } from '../hooks/useDiscordUrl'
 import { Input } from './ui/Input'
 import { cn } from '../lib/cn'
@@ -57,7 +58,12 @@ function MemoryWidget(): JSX.Element {
 }
 
 export function AddressBar(): JSX.Element {
-  const { tabs, activeTabId, activeProfile, collections, settings } = useAppStore()
+  const { tabs, activeTabId, activeProfile, collections, settings, setHomeTab } = useAppStore()
+
+  const goHome = (tab: HomeTab): void => {
+    setHomeTab(tab)
+    if (activeTabId) void window.aether.tabs.deactivate()
+  }
   const discordUrl = useDiscordUrl()
   const activeTab = tabs.find((t) => t.id === activeTabId)
   const [value, setValue] = useState('')
@@ -283,10 +289,7 @@ export function AddressBar(): JSX.Element {
       <button
         type="button"
         aria-label="Manage collections"
-        onClick={(e) => {
-          const r = e.currentTarget.getBoundingClientRect()
-          void window.aether.popup.openCollections({ anchorX: Math.round(r.right), anchorY: Math.round(r.bottom), initialLevel: 'collections' })
-        }}
+        onClick={() => goHome('manage')}
         className="flex items-center justify-center h-7 w-7 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-background/70"
         title="Manage collections"
       >
@@ -313,7 +316,7 @@ export function AddressBar(): JSX.Element {
         aria-label="Shop on Instant Gaming"
         onClick={() => void window.aether.tabs.create(localizeIGUrl(IG_HOME))}
         className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-ig-orange hover:bg-background/70 transition-colors"
-        title="Instant Gaming — save on games & top-ups"
+        title="Instant Gaming: save on games & top-ups"
       >
         <IGLogoIcon size={15} mono />
       </button>
@@ -330,18 +333,15 @@ export function AddressBar(): JSX.Element {
         type="button"
         aria-label="Support the developer on Ko-fi"
         onClick={() => void window.aether.tabs.create('https://ko-fi.com/overframe')}
-        className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-pink-400 hover:bg-background/70 transition-colors"
+        className="flex items-center justify-center h-7 w-7 rounded text-muted-foreground hover:text-ko-fi-red hover:bg-background/70 transition-colors"
         title="Support development"
       >
-        <Heart size={15} />
+        <KoFiIcon size={15} />
       </button>
       <button
         type="button"
         aria-label="Open settings"
-        onClick={(e) => {
-          const r = e.currentTarget.getBoundingClientRect()
-          void window.aether.popup.openSettings({ anchorX: Math.round(r.right), anchorY: Math.round(r.bottom) })
-        }}
+        onClick={() => goHome('settings')}
         className="flex items-center justify-center h-7 w-7 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-background/70"
         title="Settings"
       >

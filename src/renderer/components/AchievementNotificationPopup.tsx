@@ -33,8 +33,8 @@ export function AchievementNotificationPopup({ data }: Props): JSX.Element {
     el.style.transform = 'scaleX(0)'
   }, [title])
 
-  // Clicking takes the user to the missions/home screen.
-  const handleClick = (): void => { void window.aether.tabs.deactivate() }
+  // Clicking takes the user straight to the Missions tab.
+  const handleClick = (): void => { void window.aether.popup.navigateHome('missions') }
 
   return (
     <div

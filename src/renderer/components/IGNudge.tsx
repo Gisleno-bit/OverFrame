@@ -27,10 +27,14 @@ import { useAppStore } from '../store/appStore'
  *   • Explicit consent before any tag is injected
  *   • "No thanks" always available and respected
  */
+
+// Module-level: survives tab switches, resets on app restart (module re-evaluation).
+let sessionDismissed = false
+
 export function IGNudge(): JSX.Element | null {
   const { tabs, activeTabId, settings } = useAppStore()
   const [showBanner, setShowBanner] = useState(false)
-  const [dismissed, setDismissed] = useState(false)
+  const [dismissed, setDismissed] = useState(sessionDismissed)
 
   // Track the previous URL to detect IG *entry* (non-IG → IG transition)
   const prevUrlRef = useRef<string>('')
@@ -40,10 +44,9 @@ export function IGNudge(): JSX.Element | null {
   const onIG = isIGUrl(url)
   const affiliated = hasIGAffiliate(url)
 
-  // Reset everything on tab switch
+  // Reset banner and URL tracking on tab switch — dismissed persists for the whole session
   useEffect(() => {
     setShowBanner(false)
-    setDismissed(false)
     prevUrlRef.current = ''
   }, [activeTabId])
 
@@ -111,10 +114,10 @@ export function IGNudge(): JSX.Element | null {
         <OverframeIcon size={20} variant="orange" className="shrink-0" />
         <div className="flex flex-col justify-center gap-1 leading-none">
           <span className="text-[12px] font-semibold text-foreground tracking-tight">
-            Support Overframe — it's free
+            Support Overframe, it's free
           </span>
           <span className="text-[11px] text-muted-foreground">
-            3&nbsp;% of your Instant Gaming purchases come back to us — at no extra cost
+            3&nbsp;% of your Instant Gaming purchases, at no extra cost
           </span>
         </div>
       </div>
@@ -125,7 +128,7 @@ export function IGNudge(): JSX.Element | null {
       <button
         type="button"
         onClick={handleActivate}
-        aria-label="Activate Overframe support via Instant Gaming affiliate — free and permanent"
+        aria-label="Activate Overframe support via Instant Gaming affiliate, free and permanent"
         className="flex items-center h-7 px-5 rounded text-[11px] font-bold text-white bg-ig-orange hover:bg-ig-orange-dark active:brightness-90 transition-colors shrink-0 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ig-orange focus-visible:ring-offset-1 focus-visible:ring-offset-background"
       >
         Activate support
@@ -134,7 +137,7 @@ export function IGNudge(): JSX.Element | null {
       {/* Understated secondary action */}
       <button
         type="button"
-        onClick={() => setDismissed(true)}
+        onClick={() => { sessionDismissed = true; setDismissed(true) }}
         aria-label="Dismiss until next session"
         className="text-[11px] text-muted-foreground hover:text-foreground transition-colors shrink-0 whitespace-nowrap focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded px-1"
       >

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { isRealWebsite } from './missionHelpers'
+import { isRealWebsite, resolveMissionDesc } from './missionHelpers'
+import type { Mission } from './missions'
+import { DEFAULT_SHORTCUTS } from '@shared/types'
 
 describe('isRealWebsite', () => {
   // ── Blanks ─────────────────────────────────────────────────────────────────
@@ -40,4 +42,39 @@ describe('isRealWebsite', () => {
   it('accepts youtube.com with no custom homepage', () => expect(isRealWebsite('https://youtube.com')).toBe(true))
   it('accepts instant-gaming.com', () => expect(isRealWebsite('https://www.instant-gaming.com/fr/')).toBe(true))
   it('accepts twitch.tv', () => expect(isRealWebsite('https://www.twitch.tv')).toBe(true))
+})
+
+describe('resolveMissionDesc', () => {
+  const baseMission: Mission = {
+    id: 'test-mission',
+    icon: () => null as unknown as JSX.Element,
+    title: 'Test',
+    desc: 'Static description with no token.',
+  }
+
+  it('returns desc unchanged when the mission has no shortcutId', () => {
+    expect(resolveMissionDesc(baseMission, DEFAULT_SHORTCUTS)).toBe('Static description with no token.')
+  })
+
+  it('substitutes the current accelerator for the {shortcut} token', () => {
+    const mission: Mission = { ...baseMission, desc: 'Press {shortcut} to toggle.', shortcutId: 'toggleOverlay' }
+    expect(resolveMissionDesc(mission, DEFAULT_SHORTCUTS)).toBe('Press Alt+B to toggle.')
+  })
+
+  it('reflects a rebound shortcut instead of the default', () => {
+    const mission: Mission = { ...baseMission, desc: 'Press {shortcut} to toggle.', shortcutId: 'toggleOverlay' }
+    const rebound = { ...DEFAULT_SHORTCUTS, toggleOverlay: 'Ctrl+Shift+O' }
+    expect(resolveMissionDesc(mission, rebound)).toBe('Press Ctrl+Shift+O to toggle.')
+  })
+
+  it('falls back to a prompt when the shortcut is disabled (null)', () => {
+    const mission: Mission = { ...baseMission, desc: 'Press {shortcut} to toggle.', shortcutId: 'toggleOverlay' }
+    const disabled = { ...DEFAULT_SHORTCUTS, toggleOverlay: null }
+    expect(resolveMissionDesc(mission, disabled)).toBe('Press a shortcut (set one in Settings → Shortcuts) to toggle.')
+  })
+
+  it('falls back to a prompt when shortcuts is undefined', () => {
+    const mission: Mission = { ...baseMission, desc: 'Press {shortcut} to toggle.', shortcutId: 'toggleOverlay' }
+    expect(resolveMissionDesc(mission, undefined)).toBe('Press a shortcut (set one in Settings → Shortcuts) to toggle.')
+  })
 })

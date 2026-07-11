@@ -362,7 +362,7 @@ export function TabBar(): JSX.Element {
   return (
     <div className="flex items-stretch h-10 px-1 bg-background">
 
-      {/* Active profile */}
+      {/* Active profile — opens Electron popup (required to appear above WebView2) */}
       <button
         type="button"
         aria-label={activeProfile?.name ?? 'Overframe'}
