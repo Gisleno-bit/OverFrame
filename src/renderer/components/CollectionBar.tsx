@@ -109,7 +109,7 @@ export function CollectionBar(): JSX.Element | null {
         {selected?.iconUrl && (
           <img src={selected.iconUrl} alt="" aria-hidden="true" className="h-5 w-5 shrink-0 rounded-sm object-contain" />
         )}
-        <span className="max-w-[130px] truncate">{selected?.name ?? '—'}</span>
+        <span className="max-w-[130px] truncate">{selected?.name ?? ''}</span>
       </button>
 
       {/* Separator */}

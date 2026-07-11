@@ -106,7 +106,7 @@ export function CollectionPickerPopup({ payload }: Props): JSX.Element {
         <button
           type="button"
           aria-label="Manage links in this collection"
-          onClick={() => void window.aether.popup.openPanel('links', selectedId ?? undefined)}
+          onClick={() => void window.aether.popup.navigateHome('manage')}
           className="w-full flex items-center gap-2 h-6 px-2 rounded text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
         >
           <BookOpen size={12} aria-hidden="true" />

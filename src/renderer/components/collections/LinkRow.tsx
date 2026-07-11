@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { GripVertical, Pencil, Trash2 } from 'lucide-react'
+import { GripVertical, Pencil, Trash2, NotebookPen } from 'lucide-react'
 import type { Collection } from '@shared/types'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
@@ -10,7 +10,7 @@ interface LinkRowProps {
   link: Collection['links'][number]
   isDragging?: boolean
   onOpen: (url: string) => void
-  onEdit: (lid: string, title: string, url: string) => void
+  onEdit: (lid: string, title: string, url: string, note: string) => void
   onRemove: (lid: string) => void
 }
 
@@ -18,13 +18,14 @@ export function LinkRow({ link, isDragging, onOpen, onEdit, onRemove }: LinkRowP
   const [editing, setEditing] = useState(false)
   const [titleDraft, setTitleDraft] = useState(link.title)
   const [urlDraft, setUrlDraft] = useState(link.url)
+  const [noteDraft, setNoteDraft] = useState(link.note ?? '')
 
-  const openEdit = (): void => { setTitleDraft(link.title); setUrlDraft(link.url); setEditing(true) }
+  const openEdit = (): void => { setTitleDraft(link.title); setUrlDraft(link.url); setNoteDraft(link.note ?? ''); setEditing(true) }
 
   const commit = (): void => {
     const t = titleDraft.trim()
     const u = urlDraft.trim()
-    if (u) onEdit(link.id, t || link.title, u)
+    if (u) onEdit(link.id, t || link.title, u, noteDraft.trim())
     setEditing(false)
   }
 
@@ -37,6 +38,15 @@ export function LinkRow({ link, isDragging, onOpen, onEdit, onRemove }: LinkRowP
         <Input aria-label="URL" value={urlDraft} onChange={(e) => setUrlDraft(e.target.value)}
           placeholder="URL…" className="h-6 text-[11px]"
           onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }} />
+        <textarea
+          aria-label="Note (optional)"
+          value={noteDraft}
+          onChange={(e) => setNoteDraft(e.target.value)}
+          placeholder="Note (optional)…"
+          rows={2}
+          className="w-full rounded border bg-input px-2 py-1.5 text-[11px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 border-border focus:ring-ring resize-none"
+          onKeyDown={(e) => { if (e.key === 'Escape') setEditing(false) }}
+        />
         <div className="flex gap-2">
           <button type="button" onClick={commit}
             className="flex-1 h-7 rounded text-[12px] bg-primary/15 text-primary hover:bg-primary/25 transition-colors">Save</button>
@@ -60,6 +70,13 @@ export function LinkRow({ link, isDragging, onOpen, onEdit, onRemove }: LinkRowP
         </div>
       </button>
       <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+        {link.note && (
+          <Tooltip label={link.note} side="top" wrap>
+            <Button size="icon" variant="ghost" aria-label="View note" className="h-6 w-6 text-muted-foreground/40 hover:text-muted-foreground">
+              <NotebookPen size={10} aria-hidden="true" />
+            </Button>
+          </Tooltip>
+        )}
         <Tooltip label="Edit">
           <Button size="icon" variant="ghost" aria-label={`Edit ${link.title}`} className="h-6 w-6" onClick={openEdit}>
             <Pencil size={11} aria-hidden="true" />

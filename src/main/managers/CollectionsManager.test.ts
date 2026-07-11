@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { inflateSync } from 'node:zlib'
 import type { Collection, CollectionAuthor, CollectionExport } from '@shared/types'
 import { MAX_PINNED_LINKS } from '@shared/types'
 
@@ -152,14 +153,18 @@ describe('CollectionsManager — mutations', () => {
   })
 })
 
+function decodeExport(base64: string): CollectionExport {
+  return JSON.parse(inflateSync(Buffer.from(base64, 'base64')).toString('utf8')) as CollectionExport
+}
+
 describe('CollectionsManager — export', () => {
-  it('exports a collection as base64 JSON, keeping only http(s) favicons', () => {
+  it('exports a deflate-compressed payload, keeping only http(s) favicons', () => {
     const c = mgr.create({ name: 'Builds', profileId: 'p1' })
     mgr.addLink(c.id, { title: 'web', url: 'https://w', favicon: 'https://w/f.ico' })
     mgr.addLink(c.id, { title: 'data', url: 'https://d', favicon: 'data:image/png;base64,AAAA' })
     mgr.addLink(c.id, { title: 'plain', url: 'https://p' }) // no favicon at all
     const out = mgr.export(c.id)!
-    const decoded = JSON.parse(Buffer.from(out, 'base64').toString('utf8')) as CollectionExport
+    const decoded = decodeExport(out)
     expect(decoded.version).toBe(1)
     expect(decoded.name).toBe('Builds')
     expect(decoded.links[0].favicon).toBe('https://w/f.ico')
@@ -169,7 +174,7 @@ describe('CollectionsManager — export', () => {
 
   it('export includes iconUrl when present and returns null for unknown id', () => {
     const c = mgr.create({ name: 'X', profileId: 'p1', iconUrl: 'https://i/x.png' })
-    const decoded = JSON.parse(Buffer.from(mgr.export(c.id)!, 'base64').toString('utf8')) as CollectionExport
+    const decoded = decodeExport(mgr.export(c.id)!)
     expect(decoded.iconUrl).toBe('https://i/x.png')
     expect(mgr.export('nope')).toBeNull()
   })
@@ -307,12 +312,12 @@ describe('CollectionsManager — author & description', () => {
 
   it('export includes description and author when present, omits them otherwise', () => {
     const c = mgr.create({ name: 'B', profileId: 'p1', description: 'desc', author: { handle: 'roirr', color: '#aabbcc' } })
-    const decoded = JSON.parse(Buffer.from(mgr.export(c.id)!, 'base64').toString('utf8')) as CollectionExport
+    const decoded = decodeExport(mgr.export(c.id)!)
     expect(decoded.description).toBe('desc')
     expect(decoded.author).toEqual({ handle: 'roirr', color: '#aabbcc' })
 
     const plain = mgr.create({ name: 'P', profileId: 'p1' })
-    const d2 = JSON.parse(Buffer.from(mgr.export(plain.id)!, 'base64').toString('utf8')) as CollectionExport
+    const d2 = decodeExport(mgr.export(plain.id)!)
     expect(d2.description).toBeUndefined()
     expect(d2.author).toBeUndefined()
   })

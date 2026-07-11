@@ -1,15 +1,18 @@
 import { randomUUID } from 'node:crypto'
+import { deflateSync, inflateSync } from 'node:zlib'
 import { store } from '../store'
 import type {
   Collection,
   CollectionAuthor,
   CollectionExport,
   CollectionSource,
+  CreatorLink,
+  CreatorPlatform,
   Link,
   NewCollection,
   NewLink
 } from '@shared/types'
-import { MAX_PINNED_LINKS } from '@shared/types'
+import { MAX_PINNED_LINKS, MAX_CREATOR_LINKS, MAX_COLLECTION_SECTIONS, CREATOR_PLATFORMS } from '@shared/types'
 
 // ── Sanitization ────────────────────────────────────────────────────────────────
 // Shared by create() and decode(). Import payloads come from untrusted sources
@@ -41,13 +44,37 @@ function sanitizeColor(raw: unknown): string | undefined {
   return typeof raw === 'string' && HEX_COLOR_RE.test(raw) ? raw.toLowerCase() : undefined
 }
 
-/** A creator signature is valid only with a non-empty handle; the colour is optional. */
+const VALID_CREATOR_PLATFORMS = new Set<CreatorPlatform>(CREATOR_PLATFORMS)
+
+function sanitizeCreatorLinks(raw: unknown): CreatorLink[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const links = (raw as unknown[])
+    .filter((l): l is Record<string, unknown> => !!l && typeof l === 'object')
+    .map((l) => {
+      const platform = l.platform as CreatorPlatform
+      if (!VALID_CREATOR_PLATFORMS.has(platform)) return null
+      const url = sanitizeHttpUrl(l.url)
+      if (!url) return null
+      return { platform, url } satisfies CreatorLink
+    })
+    .filter((l): l is CreatorLink => l !== null)
+    .slice(0, MAX_CREATOR_LINKS)
+  return links.length > 0 ? links : undefined
+}
+
+/** A creator signature: handle is optional (may be empty), links are the main payload. */
 function sanitizeAuthor(raw: unknown): CollectionAuthor | undefined {
   if (!raw || typeof raw !== 'object') return undefined
-  const handle = sanitizeText((raw as { handle?: unknown }).handle, MAX_HANDLE_LEN)
-  if (!handle) return undefined
+  const rawHandle = (raw as { handle?: unknown }).handle
+  const handle = typeof rawHandle === 'string' ? rawHandle.trim().slice(0, MAX_HANDLE_LEN) : ''
   const color = sanitizeColor((raw as { color?: unknown }).color)
-  return color ? { handle, color } : { handle }
+  const links = sanitizeCreatorLinks((raw as { links?: unknown }).links)
+  if (handle === '' && !color && !links) return undefined
+  return {
+    handle,
+    ...(color ? { color } : {}),
+    ...(links ? { links } : {}),
+  }
 }
 
 /** Keep only http(s) URLs (used for favicons). */
@@ -160,8 +187,19 @@ export class CollectionsManager {
     })
   }
 
+  setBannerUrl(id: string, bannerUrl: string | null): Collection | null {
+    return this.mutate(id, (c) => {
+      const updated = { ...c }
+      const clean = bannerUrl ? sanitizeIconUrl(bannerUrl) : undefined
+      if (clean) updated.bannerUrl = clean
+      else delete updated.bannerUrl
+      return updated
+    })
+  }
+
   addLink(collectionId: string, input: NewLink): Collection | null {
     return this.mutate(collectionId, (c) => {
+      const section = sanitizeText(input.section, MAX_NAME_LEN)
       const link: Link = {
         id: randomUUID(),
         title: input.title,
@@ -169,7 +207,8 @@ export class CollectionsManager {
         note: input.note,
         favicon: input.favicon,
         pinned: input.pinned ?? false,
-        order: c.links.length
+        order: c.links.length,
+        ...(section ? { section } : {})
       }
       return { ...c, links: [...c.links, link] }
     })
@@ -187,11 +226,20 @@ export class CollectionsManager {
   updateLink(
     collectionId: string,
     linkId: string,
-    patch: Partial<Pick<Link, 'title' | 'url' | 'note' | 'pinned' | 'favicon' | 'order'>>
+    patch: Partial<Pick<Link, 'title' | 'url' | 'note' | 'pinned' | 'favicon' | 'order' | 'section'>> & { section?: string | null }
   ): Collection | null {
     return this.mutate(collectionId, (c) => ({
       ...c,
-      links: c.links.map((l) => (l.id === linkId ? { ...l, ...patch } : l))
+      links: c.links.map((l) => {
+        if (l.id !== linkId) return l
+        const updated = { ...l, ...patch, id: l.id }
+        if ('section' in patch) {
+          const section = sanitizeText(patch.section, MAX_NAME_LEN)
+          if (section) updated.section = section
+          else delete updated.section
+        }
+        return updated
+      })
     }))
   }
 
@@ -202,8 +250,12 @@ export class CollectionsManager {
     }))
   }
 
-  /** Export a collection as a Base64-encoded JSON string. */
-  export(id: string): string | null {
+  /**
+   * The plain JSON share payload for a collection — the single place that knows
+   * its shape. export() wraps it in the wire encoding (deflate+base64); the share
+   * handler POSTs it as-is. Keep all format knowledge inside this class.
+   */
+  exportJson(id: string): string | null {
     const c = this.getById(id)
     if (!c) return null
     const payload: CollectionExport = {
@@ -213,16 +265,25 @@ export class CollectionsManager {
       ...(c.description ? { description: c.description } : {}),
       ...(c.author ? { author: c.author } : {}),
       ...(c.iconUrl ? { iconUrl: c.iconUrl } : {}),
+      ...(c.sections ? { sections: c.sections } : {}),
       links: c.links.map((l) => ({
         title: l.title,
         url: l.url,
         note: l.note,
         pinned: l.pinned,
         // Only export http/https favicons — data: URLs are non-portable and large
-        ...(l.favicon && /^https?:\/\//.test(l.favicon) ? { favicon: l.favicon } : {})
+        ...(l.favicon && /^https?:\/\//.test(l.favicon) ? { favicon: l.favicon } : {}),
+        ...(l.section ? { section: l.section } : {})
       }))
     }
-    return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')
+    return JSON.stringify(payload)
+  }
+
+  /** Export a collection as a deflate-compressed Base64 string (the share-code wire format). */
+  export(id: string): string | null {
+    const json = this.exportJson(id)
+    if (!json) return null
+    return deflateSync(json, { level: 9 }).toString('base64')
   }
 
   /**
@@ -233,7 +294,14 @@ export class CollectionsManager {
   private decode(base64: string): CollectionExport | null {
     let json: string
     try {
-      json = Buffer.from(base64, 'base64').toString('utf8')
+      const buf = Buffer.from(base64, 'base64')
+      try {
+        // New format: deflate-compressed JSON
+        json = inflateSync(buf).toString('utf8')
+      } catch {
+        // Legacy format: raw JSON (backward compat with old share codes)
+        json = buf.toString('utf8')
+      }
     } catch {
       return null
     }
@@ -255,6 +323,13 @@ export class CollectionsManager {
     const description = sanitizeText(parsed.description, MAX_DESCRIPTION_LEN)
     const author = sanitizeAuthor(parsed.author)
 
+    const sections = Array.isArray(parsed.sections)
+      ? (parsed.sections as unknown[])
+          .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+          .map((s) => s.trim().slice(0, MAX_NAME_LEN))
+          .slice(0, MAX_COLLECTION_SECTIONS)
+      : undefined
+
     const links = parsed.links
       .map((l) => {
         const url = String(l.url ?? '')
@@ -266,12 +341,14 @@ export class CollectionsManager {
           return null
         }
         const favicon = sanitizeHttpUrl(l.favicon)
-        const link: Pick<Link, 'title' | 'url' | 'note' | 'pinned' | 'favicon'> = {
+        const section = sanitizeText(l.section, MAX_NAME_LEN)
+        const link: Pick<Link, 'title' | 'url' | 'note' | 'pinned' | 'favicon' | 'section'> = {
           title: String(l.title ?? '').slice(0, MAX_TITLE_LEN),
           url,
           note: sanitizeText(l.note, MAX_NOTE_LEN),
           pinned: Boolean(l.pinned),
-          ...(favicon ? { favicon } : {})
+          ...(favicon ? { favicon } : {}),
+          ...(section ? { section } : {})
         }
         return link
       })
@@ -284,6 +361,7 @@ export class CollectionsManager {
       ...(description ? { description } : {}),
       ...(author ? { author } : {}),
       ...(iconUrl ? { iconUrl } : {}),
+      ...(sections ? { sections } : {}),
       links
     }
   }
@@ -307,6 +385,7 @@ export class CollectionsManager {
       ...(parsed.description ? { description: parsed.description } : {}),
       ...(parsed.author ? { author: parsed.author } : {}),
       ...(parsed.iconUrl ? { iconUrl: parsed.iconUrl } : {}),
+      ...(parsed.sections ? { sections: parsed.sections } : {}),
       links: parsed.links.map((l, i) => ({
         id: randomUUID(),
         title: l.title,
@@ -314,7 +393,8 @@ export class CollectionsManager {
         note: l.note,
         favicon: l.favicon,
         pinned: l.pinned,
-        order: i
+        order: i,
+        ...(l.section ? { section: l.section } : {})
       })),
       createdAt: now,
       updatedAt: now
@@ -339,6 +419,89 @@ export class CollectionsManager {
         .map((l, i) => ({ ...l, order: reordered.length + i }))
       return { ...c, links: [...reordered, ...extras] }
     })
+  }
+
+  /**
+   * Move a link to a section and insert it before `insertBeforeLinkId`.
+   * Pass `insertBeforeLinkId = null` to append to the end of the target section.
+   * Pass `targetSection = null` to move to unsorted.
+   */
+  moveLink(
+    collectionId: string,
+    linkId: string,
+    targetSection: string | null,
+    insertBeforeLinkId: string | null
+  ): Collection | null {
+    return this.mutate(collectionId, (c) => {
+      const sorted = [...c.links].sort((a, b) => a.order - b.order)
+      const movedLink = sorted.find((l) => l.id === linkId)
+      if (!movedLink) return c
+
+      const withoutMoved = sorted.filter((l) => l.id !== linkId)
+
+      const cleanSection = targetSection !== null ? sanitizeText(targetSection, MAX_NAME_LEN) : undefined
+      const updatedLink: Link = { ...movedLink }
+      if (cleanSection) {
+        updatedLink.section = cleanSection
+      } else {
+        delete updatedLink.section
+      }
+
+      let insertIdx: number
+      if (insertBeforeLinkId) {
+        insertIdx = withoutMoved.findIndex((l) => l.id === insertBeforeLinkId)
+        if (insertIdx === -1) insertIdx = withoutMoved.length
+      } else {
+        // Append after the last link that belongs to the (sanitized) target section
+        let lastIdx = -1
+        for (let i = 0; i < withoutMoved.length; i++) {
+          const lSection = withoutMoved[i].section ?? null
+          if (lSection === (cleanSection ?? null)) lastIdx = i
+        }
+        insertIdx = lastIdx === -1 ? withoutMoved.length : lastIdx + 1
+      }
+
+      const newLinks = [
+        ...withoutMoved.slice(0, insertIdx),
+        updatedLink,
+        ...withoutMoved.slice(insertIdx),
+      ]
+      return { ...c, links: newLinks.map((l, i) => ({ ...l, order: i })) }
+    })
+  }
+
+  /** Set (or replace) the full sections list for a collection. Same caps as the import path. */
+  setSections(collectionId: string, sections: string[]): Collection | null {
+    const clean = sections
+      .map((s) => s.trim().slice(0, MAX_NAME_LEN))
+      .filter((s) => s.length > 0)
+      .slice(0, MAX_COLLECTION_SECTIONS)
+    return this.mutate(collectionId, (c) => ({ ...c, sections: clean }))
+  }
+
+  /** Rename a section — also updates all links referencing the old name. */
+  renameSection(collectionId: string, oldName: string, newName: string): Collection | null {
+    const clean = newName.trim().slice(0, MAX_NAME_LEN)
+    if (!clean) return null
+    return this.mutate(collectionId, (c) => ({
+      ...c,
+      sections: (c.sections ?? []).map((s) => (s === oldName ? clean : s)),
+      links: c.links.map((l) => (l.section === oldName ? { ...l, section: clean } : l))
+    }))
+  }
+
+  /** Delete a section — links assigned to it become unsectioned. */
+  deleteSection(collectionId: string, name: string): Collection | null {
+    return this.mutate(collectionId, (c) => ({
+      ...c,
+      sections: (c.sections ?? []).filter((s) => s !== name),
+      links: c.links.map((l) => {
+        if (l.section !== name) return l
+        const updated = { ...l }
+        delete updated.section
+        return updated
+      })
+    }))
   }
 
   /** Reorder collections for a given profile by providing the ordered array of collection IDs. */
