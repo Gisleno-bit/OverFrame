@@ -29,6 +29,8 @@ export const IPC = {
   OverlaySetPosition: 'overlay:setPosition',
   OverlayMoveByDelta: 'overlay:moveByDelta',
   OverlaySetBounds: 'overlay:setBounds',
+  OverlayResizeStart: 'overlay:resizeStart',
+  OverlayResizeEnd: 'overlay:resizeEnd',
   OverlaySetWebViewBounds: 'overlay:setWebViewBounds',
   OverlaySetMouseInteractive: 'overlay:setMouseInteractive',
   OverlayRequestClickThrough: 'overlay:requestClickThrough',

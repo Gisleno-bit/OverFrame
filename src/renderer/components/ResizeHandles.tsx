@@ -22,6 +22,10 @@ function ResizeHandle({ dir, className }: { dir: Dir; className: string }) {
       const startL = window.screenX
       const startT = window.screenY
 
+      // Retract the IG promo for the whole drag instead of re-tracking it on every
+      // setBounds tick — the per-frame reposition otherwise reads as a flicker.
+      window.aether.overlay.resizeStart()
+
       const onMove = (ev: MouseEvent) => {
         const dx = ev.screenX - startX
         const dy = ev.screenY - startY
@@ -38,6 +42,7 @@ function ResizeHandle({ dir, className }: { dir: Dir; className: string }) {
       const onUp = () => {
         document.removeEventListener('mousemove', onMove)
         document.removeEventListener('mouseup', onUp)
+        window.aether.overlay.resizeEnd()
       }
 
       document.addEventListener('mousemove', onMove)

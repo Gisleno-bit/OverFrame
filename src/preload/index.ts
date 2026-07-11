@@ -69,6 +69,8 @@ const api = {
     moveByDelta: (dx: number, dy: number): void => ipcRenderer.send(IPC.OverlayMoveByDelta, dx, dy),
     setBounds: (b: { x: number; y: number; width: number; height: number }): void =>
       ipcRenderer.send(IPC.OverlaySetBounds, b),
+    resizeStart: (): void => ipcRenderer.send(IPC.OverlayResizeStart),
+    resizeEnd: (): void => ipcRenderer.send(IPC.OverlayResizeEnd),
     setWebViewBounds: (x: number, y: number, w: number, h: number): void =>
       ipcRenderer.send(IPC.OverlaySetWebViewBounds, x, y, w, h),
   },

@@ -315,6 +315,11 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.on(IPC.OverlaySetBounds, (_e, b: { x: number; y: number; width: number; height: number }) => {
     if ([b?.x, b?.y, b?.width, b?.height].every(Number.isFinite)) overlay.setBounds(b)
   })
+  // Renderer resize-handle drag: hide the IG promo for the whole drag and bring
+  // it back at mouseup. PopupWindow also debounces the overlay 'resize' event
+  // itself as the authoritative fallback (OS-native resize, lost mouseup).
+  ipcMain.on(IPC.OverlayResizeStart, () => popup.beginResizeHold())
+  ipcMain.on(IPC.OverlayResizeEnd, () => popup.endResizeHold())
   ipcMain.on(IPC.OverlaySetWebViewBounds, (_e, x: number, y: number, w: number, h: number) =>
     tabs.setActiveViewBounds(x, y, w, h)
   )

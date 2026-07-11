@@ -82,6 +82,14 @@ export class PopupWindow {
   /** Active-tab vertical scrollbar width (px) measured at the last show. */
   private igPromoScrollbar = 0
   /**
+   * True while the renderer reports a resize-handle drag in progress (mousedown
+   * held). Extends the resize settle delay so the promo never pops back
+   * mid-drag, even if the user holds the handle still.
+   */
+  private igPromoResizeHold = false
+  /** Debounce timer that restores the promo once the overlay size has settled. */
+  private igPromoSettleTimer: NodeJS.Timeout | null = null
+  /**
    * "Mission complete" toast — same embedded-WS_CHILD model as the IG promo
    * (created/shown once, toggled via SetChildWindowBounds, never destroyed
    * mid-session). Auto-dismisses after a timer; queues multiple completions.
@@ -257,16 +265,18 @@ export class PopupWindow {
   }
 
   /**
-   * True if `wc` belongs to one of this popup's own windows — the main panel
-   * OR the standalone notification window. Used to authorise popup-originated
-   * IPC: the game-detection notification (e.g. "Create profile" on an
-   * unrecognised game) lives in `notifWin`, not `win`.
+   * True if `wc` belongs to one of this popup's own windows — the main panel,
+   * the standalone game-detection notification, or the achievement toast. Used
+   * to authorise popup-originated IPC (e.g. the game-detection notification's
+   * "Create profile" lives in `notifWin`, the mission-complete toast in
+   * `achievementWin`, neither is `win`).
    */
   ownsWebContents(wc: Electron.WebContents | null): boolean {
     if (!wc) return false
     return (
       (this.win != null && !this.win.isDestroyed() && this.win.webContents === wc) ||
-      (this.notifWin != null && !this.notifWin.isDestroyed() && this.notifWin.webContents === wc)
+      (this.notifWin != null && !this.notifWin.isDestroyed() && this.notifWin.webContents === wc) ||
+      (this.achievementWin != null && !this.achievementWin.isDestroyed() && this.achievementWin.webContents === wc)
     )
   }
 
@@ -555,13 +565,18 @@ export class PopupWindow {
     )
 
     // As a WS_CHILD the promo follows the overlay's moves automatically; only a
-    // resize changes the bottom-right anchor, so reposition just on 'resize'.
+    // resize changes the bottom-right anchor. A live resize fires 'resize' many
+    // times per second and nudging the child on every tick reads as a flicker —
+    // so retract on the first tick and restore once the size has settled. This
+    // is the authoritative path: it also covers resizes that never go through
+    // the renderer handles (OS-native edges, unmaximize, profile bounds).
     const trackOverlay = (): void => {
-      if (win.isDestroyed() || !this.igPromoVisible) return
-      const r = this.igPromoRect()
-      if (r && this.igPromoAttached) {
-        WebView2View.setChildWindowBounds(win.getNativeWindowHandle(), r.x, r.y, r.w, r.h, true)
-      }
+      if (win.isDestroyed()) return
+      if (this.igPromoVisible) this.hideIGPromoWindow()
+      // While a renderer drag is held, wait long enough that the promo never
+      // pops back mid-drag (mouseup restores it instantly; the long delay is
+      // only the failsafe for a lost mouseup). Otherwise settle quickly.
+      this.armIGPromoSettle(this.igPromoResizeHold ? 2_000 : 300)
     }
     this.overlayWin.on('resize', trackOverlay)
 
@@ -571,6 +586,7 @@ export class PopupWindow {
     win.on('closed', () => {
       this.overlayWin.removeListener('resize', trackOverlay)
       this.overlayWin.removeListener('closed', onOverlayClosed)
+      if (this.igPromoSettleTimer) { clearTimeout(this.igPromoSettleTimer); this.igPromoSettleTimer = null }
       this.igPromoWin = null
       this.igPromoReady = false
       this.igPromoAttached = false
@@ -691,6 +707,46 @@ export class PopupWindow {
     const win = this.ensureIGPromoWin()
     if (!win || !this.igPromoReady) return  // did-finish-load will reveal it
     this.revealIGPromo(this.igPromoPayload)
+  }
+
+  /**
+   * (Re)arm the debounce that restores the promo once resize activity stops.
+   * Also clears the drag-hold flag so a lost mouseup can never strand the
+   * promo hidden.
+   */
+  private armIGPromoSettle(delayMs: number): void {
+    if (this.igPromoSettleTimer) clearTimeout(this.igPromoSettleTimer)
+    this.igPromoSettleTimer = setTimeout(() => {
+      this.igPromoSettleTimer = null
+      this.igPromoResizeHold = false
+      // If the overlay was hidden meanwhile, its show handler restores instead.
+      if (!this.overlayWin.isDestroyed() && this.overlayWin.isVisible()) this.restoreIGPromo()
+    }, delayMs)
+  }
+
+  /**
+   * Renderer resize-handle drag started (mousedown held). Retracts the promo
+   * immediately — before the first bounds change — and keeps it retracted for
+   * the whole drag via the extended settle delay in the 'resize' tracker.
+   */
+  beginResizeHold(): void {
+    this.igPromoResizeHold = true
+    this.retractIGPromo()
+    // Arm the failsafe now in case no 'resize' tick ever fires (mousedown
+    // without movement) AND the mouseup is lost.
+    this.armIGPromoSettle(2_000)
+  }
+
+  /**
+   * Renderer resize-handle drag ended (mouseup). Restores the promo right away
+   * instead of waiting for the settle timer. If this event is ever lost (the
+   * mouseup can land in the WebView2 child HWND), the settle timer in the
+   * 'resize' tracker restores the promo on its own.
+   */
+  endResizeHold(): void {
+    this.igPromoResizeHold = false
+    if (this.igPromoSettleTimer) { clearTimeout(this.igPromoSettleTimer); this.igPromoSettleTimer = null }
+    if (!this.overlayWin.isDestroyed() && this.overlayWin.isVisible()) this.restoreIGPromo()
   }
 
   // ─── Achievement notification (bottom-right, stacked queue) ──────────────
