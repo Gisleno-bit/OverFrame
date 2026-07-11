@@ -11,7 +11,7 @@ import {
   PROCESS_POLL_IDLE_INTERVAL_MS,
   PROCESS_POLL_INTERVAL_MS,
 } from '@shared/types'
-import { DEFAULT_NON_GAME_DIRS, DEFAULT_GAME_PATH_HINTS, DEFAULT_BLOCKED_PROCESSES } from '@shared/gameDefaults'
+import { DEFAULT_NON_GAME_DIRS, DEFAULT_GAME_PATH_HINTS, DEFAULT_BLOCKED_PROCESSES, LAUNCHER_NAME_PATTERNS } from '@shared/gameDefaults'
 import { getVisibleGames } from '../utils/getVisibleGames'
 import { getCachedWindowIcon } from '../utils/getWindowIcon'
 import {
@@ -541,6 +541,7 @@ export class ProfileManager {
     const userBlocked = new Set((userSettings.blockedProcesses ?? [...DEFAULT_BLOCKED_PROCESSES]).map((s) => s.toLowerCase().replace(/\.exe$/i, '')))
     const nonGameDirs = userSettings.nonGameDirs ?? [...DEFAULT_NON_GAME_DIRS]
     const gamePathHints = userSettings.gamePathHints ?? [...DEFAULT_GAME_PATH_HINTS]
+    const launcherPatterns = userSettings.launcherPatterns ?? [...LAUNCHER_NAME_PATTERNS]
     const launcherExceptions = userSettings.launcherExceptions ?? []
     const pathFilteredCandidates: Array<{ processName: string; displayName: string; exePath: string; iconDataUrl: string }> = []
 
@@ -557,7 +558,7 @@ export class ProfileManager {
       ) {
         continue
       }
-      if (isLikelyLauncher(key, launcherExceptions)) continue
+      if (isLikelyLauncher(key, launcherExceptions, launcherPatterns)) continue
 
       if (existingNames.has(key)) {
         const pathAlreadyCovered = allProfiles.some(

@@ -1,4 +1,4 @@
-import koffi from 'koffi'
+import * as koffi from 'koffi'
 import { screen } from 'electron'
 import path from 'node:path'
 import { getExeProductName } from './getExeProductName'
@@ -155,6 +155,7 @@ function enumerateVisibleGames(): VisibleGame[] {
         )
       }
 
+      const hwndForIcon = hwnd
       results.push({
         processName: path.basename(exePath, '.exe'),
         exePath,
@@ -163,8 +164,11 @@ function enumerateVisibleGames(): VisibleGame[] {
         displayName: getExeProductName(exePath),
         windowTitle: getWindowTitle(hwnd),
         // Taskbar icon of the window — universal across launchers and app models
-        // (Win32 + UWP/Xbox). Cached per path. '' falls back to the exe icon.
-        iconDataUrl: getWindowIconDataUrl(hwnd, exePath),
+        // (Win32 + UWP/Xbox). Extracted LAZILY on first read: extraction can block
+        // the main thread up to ~600 ms (3 × 200 ms SendMessageTimeoutW + GDI),
+        // so it must only run for candidates that survive ProfileManager's
+        // filters, not for every visible window on every poll. Cached per path.
+        get iconDataUrl(): string { return getWindowIconDataUrl(hwndForIcon, exePath) },
         isFullscreen,
         windowCX,
         windowCY,

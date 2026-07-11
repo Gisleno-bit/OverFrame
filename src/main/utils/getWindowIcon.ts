@@ -1,4 +1,4 @@
-import koffi from 'koffi'
+import * as koffi from 'koffi'
 import { nativeImage } from 'electron'
 
 /**
@@ -209,6 +209,11 @@ export function iconHandleToBitmap(
 
 // ── Cache + public API ──────────────────────────────────────────────────────
 const iconCache = new Map<string, string>() // exePath (lowercased) → PNG data URL
+const iconFailedAt = new Map<string, number>() // exePath (lowercased) → last failed attempt
+/** Failure back-off — a window with no extractable icon (up to ~600 ms of blocking
+ *  SendMessageTimeoutW per attempt) is not retried more often than this. Still
+ *  covers the just-launched case: the icon appears within one back-off window. */
+const ICON_RETRY_MS = 30_000
 
 /** Cache-only lookup (no HWND needed) — used to backfill closed games. */
 export function getCachedWindowIcon(exePath: string): string {
@@ -216,14 +221,16 @@ export function getCachedWindowIcon(exePath: string): string {
 }
 
 /**
- * Returns a PNG data URL of the window's icon, or '' on failure. Cached per exe
- * path; only successful results are cached (a transiently icon-less window —
- * e.g. just launched — is retried on the next poll).
+ * Returns a PNG data URL of the window's icon, or '' on failure. Successes are
+ * cached per exe path; failures are negative-cached for ICON_RETRY_MS so a
+ * permanently icon-less window doesn't pay the blocking extraction on every poll.
  */
 export function getWindowIconDataUrl(hwnd: unknown, exePath: string): string {
   const key = exePath.toLowerCase()
   const cached = iconCache.get(key)
   if (cached) return cached
+  const failedAt = iconFailedAt.get(key)
+  if (failedAt !== undefined && Date.now() - failedAt < ICON_RETRY_MS) return ''
 
   let url = ''
   try {
@@ -240,6 +247,11 @@ export function getWindowIconDataUrl(hwnd: unknown, exePath: string): string {
   } catch {
     url = ''
   }
-  if (url) iconCache.set(key, url)
+  if (url) {
+    iconCache.set(key, url)
+    iconFailedAt.delete(key)
+  } else {
+    iconFailedAt.set(key, Date.now())
+  }
   return url
 }

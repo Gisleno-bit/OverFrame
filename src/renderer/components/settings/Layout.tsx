@@ -1,6 +1,6 @@
-import { useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { Info, Plus, X } from 'lucide-react'
+import { Info, Plus, X, FileSearch } from 'lucide-react'
 
 export function Section({
   title,
@@ -115,6 +115,154 @@ export function InfoTip({ text }: { text: string }): JSX.Element {
   )
 }
 
+interface ChipListProps {
+  values: string[]
+  ariaLabel: string
+  /** Inner content of each chip (label + action button) — the list only owns layout/collapse/filter. */
+  renderChip: (value: string) => ReactNode
+  /** Show a filter input above the chips once expanded, when the list exceeds this. Default: 8. */
+  filterThreshold?: number
+  filterPlaceholder?: string
+}
+
+/**
+ * A list of many string chips that stays out of the way: collapsed to ONE
+ * clipped line ending in a "+N" toggle by default, expandable (with an
+ * optional filter for long lists) on demand. Shared by StringListEditor
+ * (editable) and any read-only chip list (e.g. Excluded processes) so both
+ * scale the same way to 100+ entries.
+ */
+export function ChipList({ values, ariaLabel, renderChip, filterThreshold, filterPlaceholder }: ChipListProps): JSX.Element {
+  const [filter, setFilter] = useState('')
+  const filterId = useId()
+  const threshold = filterThreshold ?? 8
+  const showFilter = values.length > threshold
+
+  // Collapsed by default: the chips render as ONE line ending with a "+N"
+  // toggle, so long lists don't eat vertical space. Expanding (or typing a
+  // filter) shows the full wrapped list.
+  const [expanded, setExpanded] = useState(false)
+  const listRef = useRef<HTMLUListElement>(null)
+  /** How many chips fit on the collapsed line. null = needs (re)measuring. */
+  const [fitCount, setFitCount] = useState<number | null>(null)
+  const filtering = filter.trim() !== ''
+  const collapsed = !expanded && !filtering
+
+  // Any change to the list or view mode invalidates the measurement.
+  useLayoutEffect(() => { setFitCount(null) }, [values, collapsed])
+  useEffect(() => {
+    const onResize = (): void => setFitCount(null)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  // Measuring pass: all chips are rendered on one clipped line; count how many
+  // fit, reserving room for the "+N" toggle when not everything fits.
+  useLayoutEffect(() => {
+    if (!collapsed || fitCount !== null) return
+    const el = listRef.current
+    if (!el) return
+    const GAP = 4 // gap-1
+    const RESERVE = 56 // room for the "+N" chip
+    const widths = (Array.from(el.children) as HTMLElement[])
+      .filter((c) => !c.dataset.overflowChip)
+      .map((c) => c.offsetWidth)
+    const fits = (budget: number): number => {
+      let used = 0
+      let n = 0
+      for (const w of widths) {
+        const next = used + (n > 0 ? GAP : 0) + w
+        if (next > budget) break
+        used = next
+        n++
+      }
+      return n
+    }
+    const all = fits(el.clientWidth)
+    setFitCount(all >= widths.length ? widths.length : fits(el.clientWidth - RESERVE))
+  }, [collapsed, fitCount])
+
+  const visibleValues = filter.trim()
+    ? values.filter((v) => v.toLowerCase().includes(filter.toLowerCase().trim()))
+    : values
+
+  const collapsedValues = fitCount === null ? values : values.slice(0, fitCount)
+  const overflowCount = values.length - collapsedValues.length
+
+  return (
+    <>
+      {/* Filter — only in the expanded view of a long list */}
+      {showFilter && !collapsed && (
+        <input
+          id={filterId}
+          type="search"
+          aria-label={`Filter ${ariaLabel}`}
+          placeholder={filterPlaceholder ?? 'Filter…'}
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          className="w-full mb-1.5 rounded border border-border bg-transparent px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+      )}
+
+      {collapsed ? (
+        <ul
+          ref={listRef}
+          className="flex flex-nowrap items-center gap-1 overflow-hidden"
+          aria-label={ariaLabel}
+        >
+          {collapsedValues.map((v) => (
+            <li
+              key={v}
+              className="flex items-center gap-1 rounded bg-muted/40 pl-2 pr-1 py-0.5 text-[11px] text-foreground/80 font-mono shrink-0"
+            >
+              {renderChip(v)}
+            </li>
+          ))}
+          {overflowCount > 0 && (
+            <li data-overflow-chip="true" className="shrink-0">
+              <button
+                type="button"
+                aria-expanded={false}
+                aria-label={`Show ${overflowCount} more`}
+                onClick={() => setExpanded(true)}
+                className="rounded bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                +{overflowCount}
+              </button>
+            </li>
+          )}
+        </ul>
+      ) : visibleValues.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No matches for "{filter}".</p>
+      ) : (
+        <ul
+          className="flex flex-wrap gap-1 max-h-44 overflow-y-auto pr-1"
+          aria-label={ariaLabel}
+        >
+          {visibleValues.map((v) => (
+            <li
+              key={v}
+              className="flex items-center gap-1 rounded bg-muted/40 pl-2 pr-1 py-0.5 text-[11px] text-foreground/80 font-mono min-w-0 max-w-full"
+            >
+              {renderChip(v)}
+            </li>
+          ))}
+          <li>
+            <button
+              type="button"
+              aria-expanded={true}
+              onClick={() => { setExpanded(false); setFilter('') }}
+              className="rounded bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              Show less
+            </button>
+          </li>
+        </ul>
+      )}
+    </>
+  )
+}
+
 interface StringListEditorProps {
   label: string
   hint?: string
@@ -128,6 +276,13 @@ interface StringListEditorProps {
   normalize?: (input: string) => string
   validate?: (input: string) => string | null
   emptyText?: string
+  /**
+   * When provided, shows a "Browse…" button (native file picker) next to Add.
+   * Return the raw picked value (e.g. a file path) — it goes through the same
+   * normalize/validate/dedupe pipeline as manual entry. Return null on cancel.
+   */
+  onBrowse?: () => Promise<string | null>
+  browseLabel?: string
 }
 
 /**
@@ -144,30 +299,34 @@ export function StringListEditor({
   normalize,
   validate,
   emptyText,
+  onBrowse,
+  browseLabel,
 }: StringListEditorProps): JSX.Element {
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [filter, setFilter] = useState('')
   const inputId = useId()
-  const filterId = useId()
-  const threshold = filterThreshold ?? 8
-  const showFilter = values.length > threshold
 
-  const visibleValues = filter.trim()
-    ? values.filter((v) => v.toLowerCase().includes(filter.toLowerCase().trim()))
-    : values
-
-  const submit = (): void => {
-    const raw = draft.trim()
-    if (!raw) return
+  const commit = (raw: string): void => {
     const value = normalize ? normalize(raw) : raw
     if (!value) return
     const err = validate ? validate(value) : null
     if (err) { setError(err); return }
     if (values.includes(value)) { setError('Already in the list.'); return }
     onChange([...values, value])
-    setDraft('')
     setError(null)
+  }
+
+  const submit = (): void => {
+    const raw = draft.trim()
+    if (!raw) return
+    commit(raw)
+    setDraft('')
+  }
+
+  const browse = async (): Promise<void> => {
+    if (!onBrowse) return
+    const picked = await onBrowse()
+    if (picked) commit(picked)
   }
 
   const remove = (entry: string): void => {
@@ -221,6 +380,17 @@ export function StringListEditor({
           <Plus size={11} />
           Add
         </button>
+        {onBrowse && (
+          <button
+            type="button"
+            aria-label={browseLabel ?? `Browse for ${label}`}
+            onClick={() => void browse()}
+            className="flex items-center gap-1 rounded border border-border px-1.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-colors"
+          >
+            <FileSearch size={11} />
+            Browse&hellip;
+          </button>
+        )}
       </div>
 
       {error && (
@@ -229,37 +399,19 @@ export function StringListEditor({
         </p>
       )}
 
-      {/* Filter — only shown when list is long */}
-      {showFilter && values.length > 0 && (
-        <input
-          id={filterId}
-          type="search"
-          aria-label={`Filter ${label}`}
-          placeholder="Filter…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="w-full mb-1.5 rounded border border-border bg-transparent px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-        />
-      )}
-
-      {/* Chip list */}
+      {/* Chip list — one clipped line with a "+N" toggle when collapsed */}
       {values.length === 0 ? (
         emptyText && (
           <p className="text-xs text-muted-foreground leading-snug">{emptyText}</p>
         )
-      ) : visibleValues.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No matches for "{filter}".</p>
       ) : (
-        <ul
-          className="flex flex-wrap gap-1 max-h-44 overflow-y-auto pr-1"
-          aria-label={label}
-        >
-          {visibleValues.map((v) => (
-            <li
-              key={v}
-              className="flex items-center gap-1 rounded bg-muted/40 pl-2 pr-1 py-0.5 text-[11px] text-foreground/80 font-mono min-w-0 max-w-full"
-            >
-              <span title={v} className="truncate">{v}</span>
+        <ChipList
+          values={values}
+          ariaLabel={label}
+          filterThreshold={filterThreshold}
+          renderChip={(v) => (
+            <>
+              <span title={v} className="truncate max-w-[180px]">{v}</span>
               <button
                 type="button"
                 aria-label={`Remove ${v}`}
@@ -268,9 +420,9 @@ export function StringListEditor({
               >
                 <X size={10} />
               </button>
-            </li>
-          ))}
-        </ul>
+            </>
+          )}
+        />
       )}
     </div>
   )

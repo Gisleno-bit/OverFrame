@@ -1,4 +1,4 @@
-import koffi from 'koffi'
+import * as koffi from 'koffi'
 
 /**
  * Reads the PE version resource of an executable and returns its ProductName

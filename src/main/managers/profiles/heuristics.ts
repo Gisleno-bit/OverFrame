@@ -5,7 +5,7 @@
  * out lets us unit-test them independently of the polling loop.
  */
 
-import { DEFAULT_BLOCKED_PROCESSES, DEFAULT_GAME_PATH_HINTS, DEFAULT_NON_GAME_DIRS } from '@shared/gameDefaults'
+import { DEFAULT_BLOCKED_PROCESSES, DEFAULT_GAME_PATH_HINTS, DEFAULT_NON_GAME_DIRS, LAUNCHER_NAME_PATTERNS } from '@shared/gameDefaults'
 
 /**
  * Combined set of self-protection names + user-editable defaults.
@@ -46,14 +46,6 @@ const SYSTEM_VENDORS = [
   'avast', 'avg', 'mcafee', 'norton', 'webroot', 'symantec', 'eset', 'sophos',
   // ── Remote / admin tools ──────────────────────────────────────────────
   'teamviewer', 'anydesk',
-]
-
-const LAUNCHER_PATTERNS = [
-  'launcher', 'updater', 'patcher', 'installer', 'uninstaller',
-  'setup', 'helper', 'service', 'daemon', 'agent', 'tray',
-  'crashhandler', 'crashreporter', 'bugsplat', 'sentry',
-  'webhelper', 'cefsubprocess', 'subprocess', 'renderer',
-  'bootstrapper', 'bootstrap',
 ]
 
 export const PLATFORM_SUFFIX_RE =
@@ -139,10 +131,11 @@ export function hasGameLikePeMetadata(displayName: string): boolean {
 export function isLikelyLauncher(
   processName: string,
   exceptions: readonly string[] = [],
+  patterns: readonly string[] = LAUNCHER_NAME_PATTERNS,
 ): boolean {
   const n = processName.toLowerCase().replace(/\.exe$/i, '')
   if (exceptions.some((e) => e.toLowerCase().replace(/\.exe$/i, '') === n)) return false
-  return LAUNCHER_PATTERNS.some((p) => n.includes(p))
+  return patterns.some((p) => n.includes(p.toLowerCase()))
 }
 
 export function normalizeProcessName(name: string): string {
