@@ -298,6 +298,11 @@ export class TabManager {
       let pollPending = false
       spaPoller = setInterval(() => {
         if (view.isDestroyed()) { clearSpaPoller(); return }
+        // URL-bar and fullscreen sync only matter for the tab the user can see:
+        // skip the cross-process eval for background tabs and while the overlay
+        // is hidden (in-game). Self-heals within one tick when the tab becomes
+        // visible again — the interval keeps running, only the eval is skipped.
+        if (tab.id !== this.activeTabId || this.overlay.getState() === 'HIDDEN') return
         if (pollPending) return
         pollPending = true
         void view.executeJavaScript('[window.location.href, !!document.fullscreenElement]').then((raw) => {

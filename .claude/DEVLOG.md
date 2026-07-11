@@ -26,6 +26,24 @@ Le hook `SessionStart` injecte automatiquement la **dernière** entrée (titre +
 
 ---
 
+## [2026-07-11] [FIX] Flicker du promo IG au resize + ménage des commits
+
+**Contexte :** Le popup IG promo (fenêtre enfant WS_CHILD embarquée) clignotait pendant le resize de l'overlay : chaque tick 'resize' repositionnait la fenêtre native. Une première passe (retract au mousedown / restore au mouseup côté renderer) était instable — les resizes OS natifs, unmaximize et bounds de profil ne passent pas par les handles React, et un mouseup perdu (avalé par le HWND WebView2) laissait le promo caché définitivement.
+
+**Fichiers modifiés :**
+- `PopupWindow.ts` — logique autoritaire dans le main : retract au premier tick 'resize', restore par debounce de stabilisation (300 ms natif / 2 s failsafe pendant un drag renderer). `beginResizeHold()`/`endResizeHold()` pour le retract instantané au mousedown et le restore instantané au mouseup.
+- `ResizeHandles.tsx`, `handlers.ts`, `preload`, `ipc.ts` — canaux `overlay:resizeStart`/`resizeEnd` (hints, pas autoritaires).
+
+**Observations :** Vérifié par screenshots OS réels (CopyFromScreen — capturePage ne voit pas la fenêtre native) : caché pendant tout le drag, retour instantané au mouseup, retour ≤2 s si mouseup perdu, chemin natif OK.
+
+**Décisions :** Le débounce main-process est la source de vérité ; les événements renderer ne sont que des accélérateurs UX. Jamais de reposition par tick sur une fenêtre enfant embarquée.
+
+**Ménage :** working tree (~2 250 insertions, 55 fichiers) découpé en 7 commits thématiques : fix ig-promo, shared schema/IPC, adblock (AdGuard Ads + reset one-time), collections (sections/banner/éditeur/vue créateur), détection (icônes jeu/exe picker/launcher patterns), home (page à onglets/quick links/missions), chore.
+
+**Prochaine étape :** Validation humaine du fix en conditions réelles (resize à la souris avec promo affiché), puis merge de `feat/game-detection` vers `dev`.
+
+---
+
 ## [2026-06-05] [REFACTOR] IG affiliate — coup de balais + nouvelle architecture
 
 **Contexte :** Pivot depuis l'approche catalogue produits hardcodé (IDs, prix, images — impasse de maintenance) vers une architecture simple : popup contextuel + bannière WelcomePage + IGStorePage browse-only.

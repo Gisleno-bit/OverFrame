@@ -205,7 +205,7 @@ overframe/                  ← root (Electron app)
 | Web content privilege escalation | Tabs render in Edge WebView2 (separate OS process) — no Electron preload, no Node bridge |
 | Dangerous navigation | `isSafeUrl()` on renderer requests + non-http(s)/about navigations cancelled in the addon's `NavigationStarting` |
 | New window popups | Open in new Overframe tab via the addon's `NewWindowRequested` (http/https only) |
-| Data exfiltration | Local storage only, no network calls from main process |
+| Data exfiltration | Local storage only. Sole sanctioned main-process egress: the user-triggered collection share upload (`collections:share` → share worker) and update-electron-app's GitHub release checks. Any other outbound call from main is a red flag |
 
 ---
 
