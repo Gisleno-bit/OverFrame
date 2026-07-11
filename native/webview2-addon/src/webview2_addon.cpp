@@ -177,6 +177,12 @@ static std::string g_pendingExtensionPath;             // extension folder path 
 static bool        g_pendingExtensionEnabled = false;  // desired enabled state for deferred load
 static ComPtr<ICoreWebView2BrowserExtension> g_activeExtension; // retained for runtime enable/disable
 
+// Resolved from CreateTab's controller-created callback once the deferred
+// AddBrowserExtension+Enable calls (queued by addExtension() before any tab
+// existed) genuinely complete. Non-null iff a caller is awaiting that result.
+static Napi::Promise::Deferred*  g_pendingExtensionDeferred = nullptr;
+static Napi::ThreadSafeFunction  g_pendingExtensionTsfn; // valid iff g_pendingExtensionDeferred != nullptr
+
 // ── Pending NewWindowRequested deferrals — keyed by request ID.
 // When NewWindowRequested fires we take a deferral and emit the request ID to JS.
 // JS creates a new tab and calls completeNewWindow(reqId, newTabId) to provide the
@@ -362,22 +368,28 @@ Napi::Value CreateTab(const Napi::CallbackInfo& info) {
           tab.controller = ctrl;
           ctrl->get_CoreWebView2(&tab.webview);
 
-          // If addExtension() was called before any tab existed, load it now
-          // (fire-and-forget — no Promise since we're inside an internal callback).
+          // If addExtension() was called before any tab existed, load it now.
+          // If that call is being awaited (g_pendingExtensionDeferred), resolve it
+          // once Enable() genuinely completes, instead of leaving it fire-and-forget.
           if (tab.webview && !g_pendingExtensionPath.empty()) {
             std::string extPath = std::exchange(g_pendingExtensionPath, {});
             bool extEnable = g_pendingExtensionEnabled;
+            Napi::Promise::Deferred* pendingDef  = std::exchange(g_pendingExtensionDeferred, nullptr);
+            Napi::ThreadSafeFunction  pendingTsfn = g_pendingExtensionTsfn;
             ComPtr<ICoreWebView2>         wvForReload = tab.webview;
             ComPtr<ICoreWebView2_13>      wv13ext;
             ComPtr<ICoreWebView2Profile>  profileExt;
             ComPtr<ICoreWebView2Profile7> profile7ext;
-            if (SUCCEEDED(tab.webview.As(&wv13ext)) &&
-                SUCCEEDED(wv13ext->get_Profile(&profileExt)) &&
-                SUCCEEDED(profileExt.As(&profile7ext))) {
+            bool gotProfile =
+              SUCCEEDED(tab.webview.As(&wv13ext)) &&
+              SUCCEEDED(wv13ext->get_Profile(&profileExt)) &&
+              SUCCEEDED(profileExt.As(&profile7ext));
+            if (gotProfile) {
               std::wstring wPath = Utf8ToWide(extPath);
               profile7ext->AddBrowserExtension(wPath.c_str(),
                 Callback<ICoreWebView2ProfileAddBrowserExtensionCompletedHandler>(
-                  [extEnable](HRESULT hr, ICoreWebView2BrowserExtension* ext) mutable -> HRESULT {
+                  [extEnable, pendingDef, pendingTsfn](
+                    HRESULT hr, ICoreWebView2BrowserExtension* ext) mutable -> HRESULT {
                     if (SUCCEEDED(hr) && ext) {
                       g_activeExtension = ext;
                       // Always explicitly enable/disable. Edge marks side-loaded extensions
@@ -386,10 +398,34 @@ Napi::Value CreateTab(const Napi::CallbackInfo& info) {
                       // URL has been navigated to. Calling Reload() would cancel the pending
                       // Navigate() and leave the tab at about:blank. Content scripts inject
                       // normally on the first real page load.
-                      ext->Enable(extEnable ? TRUE : FALSE, nullptr);
+                      ext->Enable(extEnable ? TRUE : FALSE,
+                        Callback<ICoreWebView2BrowserExtensionEnableCompletedHandler>(
+                          [pendingDef, pendingTsfn](HRESULT hr2) mutable -> HRESULT {
+                            if (pendingDef) {
+                              pendingTsfn.NonBlockingCall([hr2, pendingDef](Napi::Env e, Napi::Function) {
+                                if (SUCCEEDED(hr2)) pendingDef->Resolve(e.Undefined());
+                                else pendingDef->Reject(Napi::String::New(e, "Enable failed hr=" + std::to_string(hr2)));
+                                delete pendingDef;
+                              });
+                              pendingTsfn.Release();
+                            }
+                            return S_OK;
+                          }).Get());
+                    } else if (pendingDef) {
+                      pendingTsfn.NonBlockingCall([hr, pendingDef](Napi::Env e, Napi::Function) {
+                        pendingDef->Reject(Napi::String::New(e, "AddBrowserExtension failed hr=" + std::to_string(hr)));
+                        delete pendingDef;
+                      });
+                      pendingTsfn.Release();
                     }
                     return S_OK;
                   }).Get());
+            } else if (pendingDef) {
+              pendingTsfn.NonBlockingCall([pendingDef](Napi::Env e, Napi::Function) {
+                pendingDef->Reject(Napi::String::New(e, "addExtension: failed to get WebView2 profile"));
+                delete pendingDef;
+              });
+              pendingTsfn.Release();
             }
           }
 
@@ -1171,8 +1207,9 @@ Napi::Value SetColorScheme(const Napi::CallbackInfo& info) {
 // If the extension is already installed (ERROR_FILE_EXISTS), the call is idempotent:
 // it falls back to Enable/Disable on the existing handle rather than rejecting.
 // If no tab exists yet the call is deferred: the path+state are stored and applied
-// when the first tab is created. The returned Promise resolves immediately in that
-// case; it resolves after AddBrowserExtension+Enable complete when tabs already exist.
+// when the first tab is created, and the returned Promise resolves once that deferred
+// AddBrowserExtension+Enable actually completes (see CreateTab). Same when tabs
+// already exist — the Promise always tracks genuine completion, never an early return.
 
 Napi::Value AddExtension(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
@@ -1192,10 +1229,29 @@ Napi::Value AddExtension(const Napi::CallbackInfo& info) {
   }
 
   if (!wv) {
-    // No tabs yet — store for deferred loading on first CreateTab
+    // No tabs yet — store for deferred loading on first CreateTab. Resolved later,
+    // from CreateTab's controller-created callback, once AddBrowserExtension+Enable
+    // genuinely complete (see g_pendingExtensionDeferred there) rather than here.
+    //
+    // A previous pre-first-tab call may still be parked (e.g. the startup install
+    // followed by an adBlockEnabled settings toggle before any tab exists). Reject
+    // it — not resolve — so callers sequencing follow-up work on genuine install
+    // completion (the filter-list migration in main/index.ts) don't run against an
+    // install that never happened. We are on the JS thread here, so settling the
+    // parked deferred directly is safe.
+    if (g_pendingExtensionDeferred) {
+      g_pendingExtensionDeferred->Reject(
+        Napi::String::New(env, "addExtension superseded by a newer call"));
+      delete g_pendingExtensionDeferred;
+      g_pendingExtensionDeferred = nullptr;
+      g_pendingExtensionTsfn.Release();
+    }
     g_pendingExtensionPath    = extPath;
     g_pendingExtensionEnabled = enable;
-    deferred.Resolve(env.Undefined());
+    g_pendingExtensionDeferred = new Napi::Promise::Deferred(deferred);
+    g_pendingExtensionTsfn = Napi::ThreadSafeFunction::New(
+      env, Napi::Function::New(env, [](const Napi::CallbackInfo&){}),
+      "addExtensionPending", 0, 1);
     return deferred.Promise();
   }
 
@@ -1302,6 +1358,46 @@ Napi::Value SetExtensionEnabled(const Napi::CallbackInfo& info) {
   return deferred.Promise();
 }
 
+// ── RemoveExtension (async) ──────────────────────────────────────────────────
+// Fully uninstalls the extension loaded via addExtension(), wiping its
+// storage.local/IndexedDB (filter list selection, whitelist, custom rules)
+// along with it. Used as a one-time migration path: existing profiles keep
+// whatever filter lists were selected on their first run, so shipping a new
+// default selection (see download-ublock.mjs) only reaches them by uninstalling
+// once and letting the caller reinstall via addExtension() — which then
+// re-triggers uBlock's first-run default-list selection. No-op if nothing is
+// currently installed (a subsequent addExtension() call will install fresh).
+Napi::Value RemoveExtension(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  auto deferred = Napi::Promise::Deferred::New(env);
+
+  ComPtr<ICoreWebView2BrowserExtension> ext = g_activeExtension;
+  if (!ext) {
+    deferred.Resolve(env.Undefined());
+    return deferred.Promise();
+  }
+
+  auto* def  = new Napi::Promise::Deferred(deferred);
+  auto  tsfn = Napi::ThreadSafeFunction::New(
+    env, Napi::Function::New(env, [](const Napi::CallbackInfo&){}),
+    "removeExtension", 0, 1);
+
+  ext->Remove(
+    Callback<ICoreWebView2BrowserExtensionRemoveCompletedHandler>(
+      [tsfn, def](HRESULT hr) mutable -> HRESULT {
+        g_activeExtension = nullptr;
+        tsfn.NonBlockingCall([hr, def](Napi::Env e, Napi::Function) {
+          if (SUCCEEDED(hr)) def->Resolve(e.Undefined());
+          else def->Reject(Napi::String::New(e, "Remove failed hr=" + std::to_string(hr)));
+          delete def;
+        });
+        tsfn.Release();
+        return S_OK;
+      }).Get());
+
+  return deferred.Promise();
+}
+
 // ── Module init ───────────────────────────────────────────────────────────────
 
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
@@ -1333,6 +1429,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("setChildWindowBounds", Napi::Function::New(env, SetChildWindowBounds));
   exports.Set("addExtension",         Napi::Function::New(env, AddExtension));
   exports.Set("setExtensionEnabled",  Napi::Function::New(env, SetExtensionEnabled));
+  exports.Set("removeExtension",      Napi::Function::New(env, RemoveExtension));
   return exports;
 }
 

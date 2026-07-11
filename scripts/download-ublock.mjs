@@ -5,7 +5,7 @@
  */
 
 import { execSync } from 'node:child_process'
-import { existsSync, mkdirSync, rmSync, readdirSync, renameSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, readdirSync, renameSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -45,5 +45,16 @@ renameSync(srcDir, DEST)
 // Cleanup
 if (existsSync(TMP_DIR)) rmSync(TMP_DIR, { recursive: true })
 if (existsSync(TMP_ZIP)) rmSync(TMP_ZIP)
+
+// Enable "AdGuard – Ads" by default alongside the stock EasyList/uBlock filters —
+// it catches ad patterns (including some YouTube ones) the default lists miss.
+// Only affects fresh WebView2 profiles: uBlock picks its default list selection
+// once on first run and persists it, so this has no effect on profiles that
+// already exist at %APPDATA%\Overframe\WebView2.
+console.log('Patching default filter list selection...')
+const assetsJsonPath = join(DEST, 'assets', 'assets.json')
+const assetsJson = JSON.parse(readFileSync(assetsJsonPath, 'utf8'))
+if (assetsJson['adguard-generic']) delete assetsJson['adguard-generic'].off
+writeFileSync(assetsJsonPath, JSON.stringify(assetsJson, null, '\t') + '\n')
 
 console.log(`Done — uBlock Origin ${VERSION} at ${DEST}`)

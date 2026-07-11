@@ -77,6 +77,13 @@ interface NativeAddon {
   addExtension(folderPath: string, enabled: boolean): Promise<void>
   /** Runtime toggle for the extension loaded via addExtension(). No-op if not loaded. */
   setExtensionEnabled(enabled: boolean): Promise<void>
+  /**
+   * Fully uninstalls the extension loaded via addExtension(), wiping its storage
+   * (filter list selection, whitelist, custom rules) along with it. No-op if nothing
+   * is currently loaded in this process. Callers typically follow with addExtension()
+   * to reinstall fresh.
+   */
+  removeExtension(): Promise<void>
 }
 
 let _addon: NativeAddon | null = null
@@ -247,6 +254,11 @@ export class WebView2View extends EventEmitter {
   /** Enable or disable the extension that was loaded via addExtension(). */
   static setExtensionEnabled(enabled: boolean): Promise<void> {
     try { return getAddon().setExtensionEnabled(enabled) } catch { return Promise.resolve() }
+  }
+
+  /** Uninstall the extension loaded via addExtension(), wiping its storage. See NativeAddon.removeExtension. */
+  static removeExtension(): Promise<void> {
+    try { return getAddon().removeExtension() } catch { return Promise.resolve() }
   }
 
   /**

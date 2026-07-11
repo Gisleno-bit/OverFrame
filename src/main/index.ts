@@ -30,6 +30,14 @@ import { startDevServer } from './utils/devServer'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 
+/**
+ * Bump when public/extensions/ublock's default filter-list selection changes
+ * (see download-ublock.mjs) — existing profiles keep whatever was selected on
+ * their first run, so this triggers a one-time uninstall+reinstall to pick up
+ * the new defaults. See the adBlockListGeneration migration in app.whenReady().
+ */
+const ADBLOCK_LIST_GENERATION = 1
+
 /** Single-instance lock — a second launch focuses the existing instance. */
 const gotLock = isSquirrelEvent ? true : app.requestSingleInstanceLock()
 if (!gotLock) app.quit()
@@ -88,13 +96,28 @@ app.whenReady().then(() => {
   // addExtension() is idempotent: it installs if not present and sets the enabled
   // state. Called unconditionally so a disabled-then-reenabled extension is
   // properly synced without requiring manual profile cleanup.
-  // The C++ layer defers AddBrowserExtension until the first CreateTab call.
+  // The C++ layer defers AddBrowserExtension until the first CreateTab call, and
+  // the returned promise resolves once that install genuinely completes — not
+  // awaited here since nothing yet exists to create that first tab.
   {
     const extPath = path.join(app.getAppPath(), 'public', 'extensions', 'ublock')
     if (existsSync(extPath)) {
-      WebView2View.addExtension(extPath, initialSettings.adBlockEnabled ?? false).catch((e: unknown) => {
-        console.error('[AdBlock] startup addExtension failed:', e)
-      })
+      const adBlockEnabled = initialSettings.adBlockEnabled ?? false
+      const needsListReset = store.get('adBlockListGeneration', 0) < ADBLOCK_LIST_GENERATION
+      void WebView2View.addExtension(extPath, adBlockEnabled)
+        .then(async () => {
+          if (!needsListReset) return
+          // uBlock only picks its default filter-list selection on first run, and this
+          // profile already has one persisted from before — uninstall (wiping storage)
+          // and reinstall once so it re-picks the current defaults (see
+          // download-ublock.mjs). One-time only, gated by adBlockListGeneration.
+          await WebView2View.removeExtension()
+          await WebView2View.addExtension(extPath, adBlockEnabled)
+          store.set('adBlockListGeneration', ADBLOCK_LIST_GENERATION)
+        })
+        .catch((e: unknown) => {
+          console.error('[AdBlock] startup addExtension failed:', e)
+        })
     }
   }
 
@@ -163,7 +186,10 @@ app.whenReady().then(() => {
     }, 300)
   }
 
-  tabs.on((event) => {
+  // Stable local reference: `tabs` (the outer `let`) is non-null here, but a mutable
+  // module-level binding can't be narrowed inside a closure that runs later.
+  const tabManager = tabs
+  tabManager.on((event) => {
     if (!overlay) return
     const wc = overlay.win.webContents
     if (event.type === 'updated') wc.send(IPC.EventTabUpdated, event.tab)
@@ -175,7 +201,7 @@ app.whenReady().then(() => {
     // right gap stays correct after navigation.
     if ((event.type === 'activeChanged' || event.type === 'updated')
         && (popup?.isIGPromoVisible() || popup?.isAchievementVisible())) {
-      void tabs.measureActiveScrollbarWidth().then((w) => {
+      void tabManager.measureActiveScrollbarWidth().then((w) => {
         popup?.raiseIGPromo(w)
         popup?.raiseAchievement(w)
       })
