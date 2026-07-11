@@ -97,6 +97,8 @@ const api = {
       ipcRenderer.invoke(IPC.CollectionsPreviewImport, input),
     setIconUrl: (id: string, iconUrl: string | null): Promise<Collection | null> =>
       ipcRenderer.invoke(IPC.CollectionsSetIconUrl, id, iconUrl),
+    setBannerUrl: (id: string, bannerUrl: string | null): Promise<Collection | null> =>
+      ipcRenderer.invoke(IPC.CollectionsSetBannerUrl, id, bannerUrl),
     setDescription: (id: string, description: string | null): Promise<Collection | null> =>
       ipcRenderer.invoke(IPC.CollectionsSetDescription, id, description),
     setAuthor: (id: string, author: CollectionAuthor | null): Promise<Collection | null> =>
@@ -105,6 +107,14 @@ const api = {
       ipcRenderer.invoke(IPC.CollectionsReorderLinks, collectionId, linkIds),
     reorder: (collectionIds: string[]): Promise<void> =>
       ipcRenderer.invoke(IPC.CollectionsReorder, collectionIds),
+    setSections: (collectionId: string, sections: string[]): Promise<Collection | null> =>
+      ipcRenderer.invoke(IPC.CollectionsSetSections, collectionId, sections),
+    renameSection: (collectionId: string, oldName: string, newName: string): Promise<Collection | null> =>
+      ipcRenderer.invoke(IPC.CollectionsRenameSection, collectionId, oldName, newName),
+    deleteSection: (collectionId: string, name: string): Promise<Collection | null> =>
+      ipcRenderer.invoke(IPC.CollectionsDeleteSection, collectionId, name),
+    moveLink: (collectionId: string, linkId: string, targetSection: string | null, insertBeforeLinkId: string | null): Promise<Collection | null> =>
+      ipcRenderer.invoke(IPC.CollectionsMoveLink, collectionId, linkId, targetSection, insertBeforeLinkId),
   },
   profiles: {
     getAll: (): Promise<Profile[]> => ipcRenderer.invoke(IPC.ProfilesGetAll),
@@ -123,7 +133,7 @@ const api = {
     getCustomGamePaths: (): Promise<string[]> => ipcRenderer.invoke(IPC.ProfilesGetCustomGamePaths),
     addCustomGamePath: (path: string) => ipcRenderer.invoke(IPC.ProfilesAddCustomGamePath, path),
     removeCustomGamePath: (path: string) => ipcRenderer.invoke(IPC.ProfilesRemoveCustomGamePath, path),
-    getVisibleGames: (): Promise<{ processName: string; exePath: string; displayName: string }[]> =>
+    getVisibleGames: (): Promise<{ processName: string; exePath: string; displayName: string; windowTitle: string; iconDataUrl: string; isFullscreen: boolean }[]> =>
       ipcRenderer.invoke(IPC.ProfilesGetVisibleGames),
     forceDetect: (): Promise<void> => ipcRenderer.invoke(IPC.ProfilesForceDetect),
   },
@@ -139,6 +149,7 @@ const api = {
     devStoreReset: (): Promise<void> => ipcRenderer.invoke(IPC.DevStoreReset),
     reportLayoutMap: (map: Record<string, string>) => ipcRenderer.send(IPC.SystemLayoutMap, map),
     pickFolder: (): Promise<string | null> => ipcRenderer.invoke(IPC.SystemPickFolder),
+    pickExecutable: (): Promise<string | null> => ipcRenderer.invoke(IPC.SystemPickExecutable),
     uninstall: (): Promise<void> => ipcRenderer.invoke(IPC.SystemUninstall),
     openFolder: (target: 'userData' | 'app' | 'logs'): Promise<void> => ipcRenderer.invoke(IPC.SystemOpenFolder, target),
     simulateCrash: (): Promise<void> => ipcRenderer.invoke(IPC.DevSimulateCrash),
@@ -179,6 +190,8 @@ const api = {
     closeNotification: (): void => ipcRenderer.send(IPC.PopupCloseNotification),
     openPanel: (panelId: string, collectionId?: string, prefillNewProfile?: { name: string; processName: string }): Promise<void> =>
       ipcRenderer.invoke(IPC.OpenPanelFromPopup, panelId, collectionId, prefillNewProfile),
+    navigateHome: (tab: string): Promise<void> =>
+      ipcRenderer.invoke(IPC.NavigateHomeFromPopup, tab),
     onInit: (cb: (payload:
       | { type: 'bookmark'; data: BookmarkPopupPayload }
       | { type: 'memory'; data: MemoryPopupPayload }
@@ -287,6 +300,11 @@ const api = {
       const listener = (): void => cb()
       ipcRenderer.on(IPC.EventWebviewFocused, listener)
       return (): void => { ipcRenderer.removeListener(IPC.EventWebviewFocused, listener) }
+    },
+    navigateHome: (cb: (tab: string) => void): (() => void) => {
+      const listener = (_e: unknown, tab: string): void => cb(tab)
+      ipcRenderer.on(IPC.EventNavigateHome, listener)
+      return (): void => { ipcRenderer.removeListener(IPC.EventNavigateHome, listener) }
     },
   },
 }

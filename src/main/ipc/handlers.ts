@@ -10,7 +10,7 @@ import type { ProfileManager } from '../managers/ProfileManager'
 import type { CollectionsManager } from '../managers/CollectionsManager'
 import type { ShortcutManager } from '../managers/ShortcutManager'
 import type { OverlayWindow } from '../windows/OverlayWindow'
-import { DEFAULT_HOMEPAGE, DEFAULT_SHORTCUTS } from '@shared/types'
+import { DEFAULT_HOMEPAGE, DEFAULT_SHORTCUTS, CREATOR_PLATFORMS, MAX_CREATOR_LINKS, MAX_COLLECTION_SECTIONS } from '@shared/types'
 import { WebView2View } from '../managers/tabs/WebView2View'
 import type { BookmarkPopupPayload, AchievementPayload, CollectionAuthor, CollectionsPopupPayload, LinkOverflowPayload, MemoryPopupPayload, Settings, Shortcuts, IGPromoPayload } from '@shared/types'
 import { getVisibleGames } from '../utils/getVisibleGames'
@@ -133,6 +133,7 @@ const SETTINGS_ALLOWLIST: ReadonlySet<keyof Settings> = new Set([
   'blockedProcesses',
   'nonGameDirs',
   'launcherExceptions',
+  'launcherPatterns',
   'gamePathHints',
   'searchEngine',
   'autoCreateProfiles',
@@ -146,6 +147,7 @@ const SETTINGS_ALLOWLIST: ReadonlySet<keyof Settings> = new Set([
   'adBlockEnabled',
   'creatorHandle',
   'creatorColor',
+  'creatorLinks',
 ])
 
 /** User-configurable string list caps — prevents storing pathological lists. */
@@ -204,6 +206,13 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.on(IPC.IGPromoClose, (_e, dismissed: boolean) => {
     popup.closeIGPromo()
     if (dismissed) overlay.win.webContents.send(IPC.IGPromoDismissed)
+  })
+
+  ipcMain.handle(IPC.NavigateHomeFromPopup, (e, tab: string) => {
+    if (popup.ownsWebContents(e.sender)) {
+      popup.close()
+      overlay.win.webContents.send(IPC.EventNavigateHome, tab)
+    }
   })
 
   ipcMain.handle(IPC.OpenPanelFromPopup, (e, panelId?: string, collectionId?: string, prefillNewProfile?: { name: string; processName: string }) => {
@@ -349,7 +358,7 @@ export function registerIpcHandlers(deps: Deps): void {
   })
   ipcMain.handle(IPC.CollectionsAddLink, (_e, collectionId: string, link) => {
     if (!link || !isSafeBoundedUrl(link.url)) return null
-    if (link.title !== undefined && !isBoundedString(link.title, MAX_NAME_LENGTH)) return null
+    if (link.title !== undefined && (typeof link.title !== 'string' || link.title.length > MAX_NAME_LENGTH)) return null
     if (link.note !== undefined && typeof link.note === 'string' && link.note.length > MAX_NOTE_LENGTH) return null
     return collections.addLink(collectionId, link)
   })
@@ -357,10 +366,22 @@ export function registerIpcHandlers(deps: Deps): void {
     collections.removeLink(collectionId, linkId)
   )
   ipcMain.handle(IPC.CollectionsUpdateLink, (_e, collectionId: string, linkId: string, patch) => {
-    if (patch?.url !== undefined && !isSafeBoundedUrl(patch.url)) return null
-    if (patch?.title !== undefined && !isBoundedString(String(patch.title), MAX_NAME_LENGTH)) return null
-    if (patch?.note !== undefined && typeof patch.note === 'string' && patch.note.length > MAX_NOTE_LENGTH) return null
-    return collections.updateLink(collectionId, linkId, patch)
+    if (patch === null || typeof patch !== 'object') return null
+    if (patch.url !== undefined && !isSafeBoundedUrl(patch.url)) return null
+    if (patch.title !== undefined && !isBoundedString(String(patch.title), MAX_NAME_LENGTH)) return null
+    if (patch.note !== undefined && typeof patch.note === 'string' && patch.note.length > MAX_NOTE_LENGTH) return null
+    if (patch.section !== undefined && patch.section !== null
+      && (typeof patch.section !== 'string' || patch.section.length > MAX_NAME_LENGTH)) return null
+    if (patch.pinned !== undefined && typeof patch.pinned !== 'boolean') return null
+    if (patch.order !== undefined && typeof patch.order !== 'number') return null
+    if (patch.favicon !== undefined && patch.favicon !== null && !isSafeBoundedUrl(patch.favicon)) return null
+    // Whitelist the patch keys — a raw spread would let the renderer inject
+    // arbitrary fields (including overwriting the link id) into the stored Link.
+    const clean: Record<string, unknown> = {}
+    for (const k of ['title', 'url', 'note', 'pinned', 'favicon', 'order', 'section'] as const) {
+      if ((patch as Record<string, unknown>)[k] !== undefined) clean[k] = (patch as Record<string, unknown>)[k]
+    }
+    return collections.updateLink(collectionId, linkId, clean)
   })
   ipcMain.handle(IPC.CollectionsTogglePin, (_e, collectionId: string, linkId: string) =>
     collections.togglePin(collectionId, linkId)
@@ -370,9 +391,8 @@ export function registerIpcHandlers(deps: Deps): void {
   // Upload the full collection JSON (including embedded images) to the share worker
   // and return the 8-char short code. Falls back to null on network error.
   ipcMain.handle(IPC.CollectionsShare, async (_e, id: string) => {
-    const b64 = collections.export(id)
-    if (!b64) return null
-    const json = Buffer.from(b64, 'base64').toString('utf8')
+    const json = collections.exportJson(id)
+    if (!json) return null
     try {
       const res = await fetch(SHARE_API_URL, {
         method: 'POST',
@@ -406,6 +426,14 @@ export function registerIpcHandlers(deps: Deps): void {
     }
     return collections.setIconUrl(id, iconUrl ?? null)
   })
+  ipcMain.handle(IPC.CollectionsSetBannerUrl, (_e, id: string, bannerUrl: string | null) => {
+    if (bannerUrl !== null && bannerUrl !== undefined) {
+      const u = String(bannerUrl)
+      if (u.length > MAX_URL_LENGTH * 8) return null
+      if (!u.startsWith('data:image/') && !isSafeUrl(u)) return null
+    }
+    return collections.setBannerUrl(id, bannerUrl ?? null)
+  })
   ipcMain.handle(IPC.CollectionsSetDescription, (_e, id: string, description: unknown) => {
     if (description !== null && description !== undefined
       && (typeof description !== 'string' || description.length > MAX_NOTE_LENGTH)) return null
@@ -415,7 +443,7 @@ export function registerIpcHandlers(deps: Deps): void {
     if (author !== null && author !== undefined) {
       if (typeof author !== 'object') return null
       const a = author as { handle?: unknown; color?: unknown }
-      if (!isBoundedString(a.handle, MAX_NAME_LENGTH)) return null
+      if (typeof a.handle !== 'string' || a.handle.length > MAX_NAME_LENGTH) return null
       if (a.color !== undefined && (typeof a.color !== 'string' || a.color.length > 32)) return null
     }
     return collections.setAuthor(id, (author as CollectionAuthor | null) ?? null)
@@ -427,6 +455,25 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle(IPC.CollectionsReorder, (_e, collectionIds: unknown) => {
     if (!Array.isArray(collectionIds) || !collectionIds.every((x) => typeof x === 'string')) return null
     collections.reorder(collectionIds as string[])
+  })
+  ipcMain.handle(IPC.CollectionsSetSections, (_e, collectionId: string, sections: unknown) => {
+    if (!Array.isArray(sections) || sections.length > MAX_COLLECTION_SECTIONS
+      || !sections.every((x) => typeof x === 'string' && x.length <= MAX_NAME_LENGTH)) return null
+    return collections.setSections(collectionId, sections as string[])
+  })
+  ipcMain.handle(IPC.CollectionsRenameSection, (_e, collectionId: string, oldName: string, newName: string) => {
+    if (typeof oldName !== 'string' || oldName.length > MAX_NAME_LENGTH) return null
+    if (typeof newName !== 'string' || newName.length > MAX_NAME_LENGTH) return null
+    return collections.renameSection(collectionId, oldName, newName)
+  })
+  ipcMain.handle(IPC.CollectionsDeleteSection, (_e, collectionId: string, name: string) => {
+    if (typeof name !== 'string' || name.length > MAX_NAME_LENGTH) return null
+    return collections.deleteSection(collectionId, name)
+  })
+  ipcMain.handle(IPC.CollectionsMoveLink, (_e, collectionId: string, linkId: string, targetSection: unknown, insertBeforeLinkId: unknown) => {
+    if (targetSection !== null && (typeof targetSection !== 'string' || targetSection.length > MAX_NAME_LENGTH)) return null
+    if (insertBeforeLinkId !== null && typeof insertBeforeLinkId !== 'string') return null
+    return collections.moveLink(collectionId, linkId, targetSection as string | null, insertBeforeLinkId as string | null)
   })
 
   // ─── Profiles ────────────────────────────────────────────────────────
@@ -498,20 +545,32 @@ export function registerIpcHandlers(deps: Deps): void {
       'blockedProcesses',
       'nonGameDirs',
       'launcherExceptions',
+      'launcherPatterns',
       'gamePathHints',
       'protectedDomains',
     ])
     if (LIST_KEYS.has(key as keyof Settings) && !isBoundedStringList(value)) return null
     if (key === 'homepageUrl' && (typeof value !== 'string' || !isSafeBoundedUrl(value as string))) return null
-    if (key === 'quickLinks') {
-      if (!Array.isArray(value) || (value as unknown[]).length > 30) return null
+    if (key === 'creatorLinks') {
+      const VALID_PLATFORMS = new Set<string>(CREATOR_PLATFORMS)
+      if (!Array.isArray(value) || (value as unknown[]).length > MAX_CREATOR_LINKS) return null
       const valid = (value as unknown[]).every((item) =>
         typeof item === 'object' && item !== null &&
-        typeof (item as Record<string, unknown>).name === 'string' &&
-        typeof (item as Record<string, unknown>).url === 'string' &&
-        ((item as Record<string, unknown>).name as string).length <= 100 &&
-        ((item as Record<string, unknown>).url as string).length <= 500
+        VALID_PLATFORMS.has(String((item as Record<string, unknown>).platform)) &&
+        isSafeBoundedUrl((item as Record<string, unknown>).url)
       )
+      if (!valid) return null
+    }
+    if (key === 'quickLinks') {
+      if (!Array.isArray(value) || (value as unknown[]).length > 30) return null
+      const valid = (value as unknown[]).every((item) => {
+        const it = item as Record<string, unknown>
+        return typeof item === 'object' && item !== null &&
+          typeof it.id === 'string' && it.id.length > 0 && it.id.length <= 100 &&
+          typeof it.name === 'string' && it.name.length <= 100 &&
+          isSafeBoundedUrl(it.url) &&
+          (it.description === undefined || (typeof it.description === 'string' && it.description.length <= 140))
+      })
       if (!valid) return null
     }
 
@@ -576,6 +635,14 @@ export function registerIpcHandlers(deps: Deps): void {
   })
   ipcMain.handle(IPC.SystemPickFolder, async (_e) => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+  })
+
+  ipcMain.handle(IPC.SystemPickExecutable, async (_e) => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [{ name: 'Executable', extensions: ['exe'] }],
+    })
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
   })
 

@@ -62,6 +62,15 @@ export const SHORTCUT_GROUPS: { label: string; ids: ShortcutId[] }[] = [
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
+/** A user-added quick access link on the home page — fully user-managed (name, description, order). */
+export interface CustomLink {
+  id: string
+  name: string
+  url: string
+  /** Optional short description shown under the name. */
+  description?: string
+}
+
 export interface Settings {
   shortcuts: Shortcuts
   startWithWindows: boolean
@@ -78,6 +87,8 @@ export interface Settings {
   nonGameDirs?: string[]
   /** Path fragments used to identify game installs — user owns the full list (mirrors GAME_PATH_HINTS). */
   gamePathHints?: string[]
+  /** Name keywords that mark a process as a launcher/utility (skipped by detection) — user owns the full list. */
+  launcherPatterns?: string[]
   /** Process names matching the launcher heuristic but that the user wants detected anyway. */
   launcherExceptions?: string[]
 
@@ -93,7 +104,7 @@ export interface Settings {
   /** Domains whose tabs survive profile switches and performance-mode unloads. */
   protectedDomains?: string[]
   /** User-defined quick access links shown on the home page. */
-  quickLinks?: Array<{ name: string; url: string }>
+  quickLinks?: CustomLink[]
   // ── Profile automation ───────────────────────────────────────────────
   /** When false, Overframe will never auto-create a profile for an unrecognised game. */
   autoCreateProfiles?: boolean
@@ -117,6 +128,8 @@ export interface Settings {
   creatorHandle?: string
   /** Optional accent colour (#rrggbb) for the creator signature. */
   creatorColor?: string
+  /** Creator social/support links that travel with shared collections. */
+  creatorLinks?: CreatorLink[]
 }
 
 export interface WindowBounds {
@@ -144,12 +157,29 @@ export interface Profile {
 
 export type CollectionSource = 'user' | 'publisher' | 'community'
 
+/** Single source of truth for creator platforms — validation allowlists derive from it. */
+export const CREATOR_PLATFORMS = ['twitch', 'youtube', 'kick', 'discord', 'kofi', 'patreon', 'twitter', 'tiktok', 'website'] as const
+export type CreatorPlatform = (typeof CREATOR_PLATFORMS)[number]
+
+/** Maximum creator links carried by a signature — enforced at the IPC boundary and on import. */
+export const MAX_CREATOR_LINKS = 10
+
+/** Maximum named sections per collection — enforced at the IPC boundary and on import. */
+export const MAX_COLLECTION_SECTIONS = 50
+
+export interface CreatorLink {
+  platform: CreatorPlatform
+  url: string
+}
+
 /** Local creator identity — no account, no PII. Travels with a shared collection. */
 export interface CollectionAuthor {
   /** Creator's chosen display handle. */
   handle: string
   /** Optional accent colour as a #rrggbb hex string. */
   color?: string
+  /** Social/support links — shown to importers as a creator discovery card. */
+  links?: CreatorLink[]
 }
 
 export interface Link {
@@ -160,6 +190,8 @@ export interface Link {
   favicon?: string
   pinned: boolean
   order: number
+  /** Named group within a creator collection. Undefined = unsectioned. */
+  section?: string
 }
 
 export interface Collection {
@@ -173,8 +205,11 @@ export interface Collection {
   author?: CollectionAuthor
   links: Link[]
   iconUrl?: string
+  bannerUrl?: string
   createdAt: number
   updatedAt: number
+  /** Ordered list of section names for creator collections. Undefined = sections not activated. */
+  sections?: string[]
 }
 
 export interface CollectionExport {
@@ -184,7 +219,9 @@ export interface CollectionExport {
   source: CollectionSource
   author?: CollectionAuthor
   iconUrl?: string
-  links: Array<Pick<Link, 'title' | 'url' | 'note' | 'pinned' | 'favicon'>>
+  bannerUrl?: string
+  sections?: string[]
+  links: Array<Pick<Link, 'title' | 'url' | 'note' | 'pinned' | 'favicon' | 'section'>>
 }
 
 export interface TabState {
@@ -216,6 +253,7 @@ export interface NewLink {
   note?: string
   favicon?: string
   pinned?: boolean
+  section?: string
 }
 
 export interface NewCollection {

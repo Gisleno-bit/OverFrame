@@ -54,6 +54,11 @@ export const IPC = {
   CollectionsSetAuthor: 'collections:setAuthor',
   CollectionsReorderLinks: 'collections:reorderLinks',
   CollectionsReorder: 'collections:reorder',
+  CollectionsSetBannerUrl: 'collections:setBannerUrl',
+  CollectionsSetSections: 'collections:setSections',
+  CollectionsRenameSection: 'collections:renameSection',
+  CollectionsDeleteSection: 'collections:deleteSection',
+  CollectionsMoveLink: 'collections:moveLink',
 
   // Profiles
   ProfilesGetAll: 'profiles:getAll',
@@ -83,6 +88,8 @@ export const IPC = {
   SystemLayoutMap: 'system:layoutMap',
   /** Opens a native folder picker; returns the selected path or null. */
   SystemPickFolder: 'system:pickFolder',
+  /** Opens a native file picker filtered to .exe; returns the selected path or null. */
+  SystemPickExecutable: 'system:pickExecutable',
   /** Launches the Squirrel uninstaller and quits the app. */
   SystemUninstall: 'system:uninstall',
   /** Renderer → Main: show an achievement notification popup window. */
@@ -138,6 +145,9 @@ export const IPC = {
 
   // Popup → Main (close popup and open a side panel)
   OpenPanelFromPopup: 'popup:openPanel',
+  // Popup → Main → Overlay renderer: close popup + navigate to a Home tab
+  NavigateHomeFromPopup: 'popup:navigateHome',
+  EventNavigateHome: 'event:navigateHome',
 
   // Zoom
   TabsSetZoom: 'tabs:setZoom',
