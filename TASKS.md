@@ -36,13 +36,12 @@ _(vide — à remplir par Claude au début d'une session de travail)_
 
 ### UX & polish
 - [ ] **Context menu** dans les WebContentsViews : right-click → copier, coller, ouvrir dans un nouvel onglet, inspecter.
-- [ ] **Raccourci Ctrl+L** : focus address bar depuis n'importe quel état.
 - [ ] **Vérifier l'onboarding flow** : parcourir le OnboardingOverlay complet, valider chaque étape, tester sur une installation fraîche (devStoreReset).
 
 ### Release
-- [ ] **README** : ajouter captures d'écran + GIF de démonstration (enregistrer l'overlay en action sur un jeu).
-- [ ] **Build packagé** : valider `pnpm make` produit un `.exe` installable sans droits admin, SmartScreen bypass documenté.
-- [ ] **FAQ README** : SmartScreen workaround, disclaimer anti-cheat, modes jeu supportés (borderless windowed only).
+- [ ] **README — GIF de démo** : enregistrer l'overlay en action sur un vrai jeu (tâche humaine — captures statiques faites le 2026-07-18).
+- [ ] **[VALID HUMAIN] Installation réelle** : dérouler `Overframe-Setup.exe` (produit le 2026-07-18) sur machine propre — pas de droits admin demandés, app démarre, tray OK.
+- [ ] **[CHORE] Dégraisser le package** : l'installeur pèse 169 MB ; `app.asar.unpacked` embarque un dossier parasite `@rollup/rollup-win32-x64-msvc_tmp_*` (outil de build) — auditer les exclusions electron-forge.
 
 ---
 
@@ -62,6 +61,9 @@ _(vide — à remplir par Claude au début d'une session de travail)_
 
 ## Done — Récent
 
+- [x] **[RELEASE] `pnpm make` validé** (2026-07-18) — `Overframe-Setup.exe` + nupkg + zip produits, addon WebView2 présent en `extraResource`, natifs unpacked OK
+- [x] **[RELEASE] README release-ready** (2026-07-18) — captures (home, collections), FAQ (SmartScreen, anti-cheat, borderless, adblock, données locales), tech stack corrigée (WebView2)
+- [x] **Raccourci Ctrl+L** — déjà implémenté (App.tsx, handler DOM) ; la tâche était périmée
 - [x] **[FIX] Smoke flaky sur `/overlay/show`** (2026-07-18) — poll-until (3 s max, pas de sleep fixe) sur show ET hide ; ALL PASS ×3 consécutifs
 - [x] **[BUG court terme] Toggle adblock honnête** (2026-07-18) — case désactivée + bandeau explicatif en langage simple dans Settings → Browser (vérifié visuellement)
 - [x] **[TEST] Couverture 100% restaurée après le WIP bannerFocus** (2026-07-18) — +24 tests (CollectionsManager sections/moveLink/sanitizeFocus, backfill quickLinks, appStore.setHomeTab) via qa-tester
