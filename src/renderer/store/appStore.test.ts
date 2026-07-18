@@ -44,6 +44,8 @@ beforeEach(() => {
     settings: null,
     isFocusMode: false,
     missionsPanelOpen: false,
+    isMaximized: false,
+    homeTab: 'home',
   })
 })
 
@@ -123,5 +125,17 @@ describe('appStore — UI flags', () => {
     expect(useAppStore.getState().missionsPanelOpen).toBe(true)
     pristine.toggleMissionsPanel()
     expect(useAppStore.getState().missionsPanelOpen).toBe(false)
+  })
+
+  it('setIsMaximized sets the maximized flag', () => {
+    expect(useAppStore.getState().isMaximized).toBe(false)
+    pristine.setIsMaximized(true)
+    expect(useAppStore.getState().isMaximized).toBe(true)
+  })
+
+  it('setHomeTab switches the active home tab', () => {
+    expect(useAppStore.getState().homeTab).toBe('home')
+    pristine.setHomeTab('missions')
+    expect(useAppStore.getState().homeTab).toBe('missions')
   })
 })

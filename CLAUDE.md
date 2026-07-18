@@ -49,9 +49,9 @@ Main Process (Node.js)
 Renderer Process (React + Zustand)
   ├─ window.aether.* — the entire IPC API surface
   └─ src/renderer/store/ — Zustand stores (appStore, missionsStore)
-           ↕ WebContentsView (per tab)
+           ↕ WebView2 native addon (per tab)
 Web Content Layer
-  └─ Sandboxed Chromium per tab, no preload, no Node access
+  └─ Microsoft Edge WebView2 per tab — separate OS process, no preload, no Node access
 ```
 
 **Rule:** The renderer has zero Node.js access. Every OS operation goes through `window.aether.*` → preload → IPC handler → main process manager.
@@ -66,7 +66,7 @@ Web Content Layer
 | [src/preload/index.ts](src/preload/index.ts) | Full IPC API surface exposed to renderer (`window.aether`) |
 | [src/renderer/App.tsx](src/renderer/App.tsx) | React root, IPC subscriptions, event listeners |
 | [src/renderer/store/appStore.ts](src/renderer/store/appStore.ts) | Central Zustand store (tabs, profiles, collections, UI state) |
-| [src/main/managers/TabManager.ts](src/main/managers/TabManager.ts) | WebContentsView lifecycle, navigation, zoom, mute |
+| [src/main/managers/TabManager.ts](src/main/managers/TabManager.ts) | WebView2 tab lifecycle, navigation, zoom, mute, downloads |
 | [src/main/managers/ProfileManager.ts](src/main/managers/ProfileManager.ts) | Game process detection (polls every 5s), profile switching |
 | [src/main/store/index.ts](src/main/store/index.ts) | electron-store schema + defaults |
 | [src/shared/types.ts](src/shared/types.ts) | All shared TypeScript types (TabState, Profile, Collection, etc.) |
@@ -202,10 +202,10 @@ overframe/                  ← root (Electron app)
 | Concern | Mitigation |
 |---|---|
 | Renderer XSS | `contextIsolation: true`, no Node access in renderer |
-| Web content privilege escalation | `sandbox: true` on WebContentsView, no preload on web views |
-| Dangerous navigation | Block non-http(s) protocols in `will-navigate` |
-| New window popups | Open in new Overframe tab via `setWindowOpenHandler` |
-| Data exfiltration | Local storage only, no network calls from main process |
+| Web content privilege escalation | Tabs render in Edge WebView2 (separate OS process) — no Electron preload, no Node bridge |
+| Dangerous navigation | `isSafeUrl()` on renderer requests + non-http(s)/about navigations cancelled in the addon's `NavigationStarting` |
+| New window popups | Open in new Overframe tab via the addon's `NewWindowRequested` (http/https only) |
+| Data exfiltration | Local storage only. Sole sanctioned main-process egress: the user-triggered collection share upload (`collections:share` → share worker) and update-electron-app's GitHub release checks. Any other outbound call from main is a red flag |
 
 ---
 
@@ -241,6 +241,13 @@ curl http://127.0.0.1:9119/metrics
 # Piloter l'overlay depuis le terminal (utile avant un screenshot)
 curl http://127.0.0.1:9119/overlay/show
 curl http://127.0.0.1:9119/overlay/hide
+
+# Exécuter du JS dans le renderer Electron (accès window.aether.*)
+# Utiliser PowerShell pour l'encodage URL sur Windows :
+# $js = "window.aether.settings.get().then(function(s){return s.applyDarkMode})"
+# $enc = [System.Uri]::EscapeDataString($js)
+# Invoke-WebRequest "http://127.0.0.1:9119/overlay/eval?js=$enc"
+# ⚠️  S'exécute dans l'overlay Electron — PAS dans les tabs WebView2
 
 # Logs console (300 lignes par défaut)
 curl http://127.0.0.1:9119/log/renderer
@@ -331,16 +338,48 @@ curl http://127.0.0.1:9119/state
 - Si modification main/preload : `pnpm smoke` lance la vraie app et vérifie boot + overlay + screenshot + RAM via le devServer
 - Si modification main/preload : redémarrer `pnpm dev` (hot reload ne couvre pas le main process)
 
+### Avant tout commit — Protocole QA obligatoire
+
+**Le commit n'intervient qu'APRÈS validation humaine. Séquence :**
+
+```
+1. pnpm typecheck && pnpm lint && pnpm test:coverage && pnpm build && pnpm smoke
+2. Lancer l'app pour tests UI (script Node.js — voir WORKFLOW.md §2bis)
+3. Tests via devServer :
+   - Screenshots avec Read tool : overlay/state visible, favicons, texte lisible
+   - /overlay/eval : vérifier les IPC (settings save, profile update, popup open)
+   - /log/renderer : zéro erreur JavaScript
+4. Présenter le tableau de résultats + checklist humaine → ATTENDRE validation
+5. Committer uniquement après réponse positive
+```
+
+**Lancement de l'app pour tests (sans ELECTRON_RUN_AS_NODE) :**
+```js
+// scripts/test-launch.mjs ou inline dans un node --input-type=module
+import electronPath from 'electron'
+import { spawn } from 'node:child_process'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
+const childEnv = { ...process.env, NODE_ENV: 'development' }
+delete childEnv.ELECTRON_RUN_AS_NODE
+delete childEnv.ELECTRON_NO_ATTACH_CONSOLE
+const child = spawn(electronPath, [path.join(root,'out/main/index.js')], { cwd: root, env: childEnv, stdio: 'ignore', detached: true })
+child.unref()
+```
+
 ### Ajouter un canal IPC
 1. Déclarer la constante dans [src/shared/ipc.ts](src/shared/ipc.ts)
 2. Ajouter le handler dans [src/main/ipc/handlers.ts](src/main/ipc/handlers.ts)
 3. Exposer dans [src/preload/index.ts](src/preload/index.ts) sous `window.aether.*`
 
 ### Clore une session
-1. `pnpm typecheck && pnpm lint && pnpm test` — doit passer au vert
-2. Mettre à jour [TASKS.md](TASKS.md) — déplacer les tâches terminées dans "Done"
-3. Mettre à jour [.claude/DEVLOG.md](.claude/DEVLOG.md) — nouvelle entrée avec contexte, décisions, prochaine étape
-4. `git add` + `git commit` sur la branche feature
+1. `pnpm typecheck && pnpm lint && pnpm test:coverage && pnpm build && pnpm smoke`
+2. Tests UI via devServer (screenshots + /overlay/eval + logs)
+3. Présenter les résultats + checklist humaine — **attendre validation avant commit**
+4. Après validation : `git add` + `git commit` sur la branche feature
+5. Mettre à jour [TASKS.md](TASKS.md) — déplacer les tâches terminées dans "Done"
+6. Mettre à jour [.claude/DEVLOG.md](.claude/DEVLOG.md) — nouvelle entrée avec contexte, décisions, prochaine étape
 
 ### Hooks automatiques
 | Hook | Déclencheur | Action |

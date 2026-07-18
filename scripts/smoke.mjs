@@ -59,6 +59,19 @@ function killApp() {
 
 const getJson = async (path) => (await fetch(BASE + path)).json()
 
+// Poll /state until `pred` holds or the timeout elapses, returning the last state
+// seen. Overlay show/hide are asynchronous pipelines (first-show sequencing, game
+// detection polling) — a single fixed sleep races them and made this check flaky.
+async function waitForState(pred, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs
+  let state = await getJson('/state')
+  while (!pred(state) && Date.now() < deadline) {
+    await sleep(150)
+    state = await getJson('/state')
+  }
+  return state
+}
+
 try {
   // 1. Boot — wait up to 30s for the dev observer
   let up = false
@@ -88,8 +101,7 @@ try {
 
   // 4. Overlay show pipeline
   await fetch(BASE + '/overlay/show')
-  await sleep(500)
-  const shown = await getJson('/state')
+  const shown = await waitForState((s) => s.overlay !== 'HIDDEN')
   check('overlay/show leaves HIDDEN', shown.overlay !== 'HIDDEN', `overlay=${shown.overlay}`)
 
   // 5. Screenshot pipeline
@@ -99,8 +111,7 @@ try {
 
   // 6. Overlay hide pipeline
   await fetch(BASE + '/overlay/hide')
-  await sleep(400)
-  const hidden = await getJson('/state')
+  const hidden = await waitForState((s) => s.overlay === 'HIDDEN')
   check('overlay/hide returns to HIDDEN', hidden.overlay === 'HIDDEN', `overlay=${hidden.overlay}`)
 } catch (err) {
   check('smoke run completed without throwing', false, err.message)

@@ -1,4 +1,4 @@
-import { ipcMain, shell, app, dialog, autoUpdater, webContents } from 'electron'
+import { ipcMain, shell, app, dialog, autoUpdater, webContents, nativeTheme } from 'electron'
 import { spawn } from 'child_process'
 import fs from 'fs'
 import path from 'path'
@@ -10,8 +10,9 @@ import type { ProfileManager } from '../managers/ProfileManager'
 import type { CollectionsManager } from '../managers/CollectionsManager'
 import type { ShortcutManager } from '../managers/ShortcutManager'
 import type { OverlayWindow } from '../windows/OverlayWindow'
-import { DEFAULT_HOMEPAGE, DEFAULT_SHORTCUTS } from '@shared/types'
-import type { BookmarkPopupPayload, AchievementPayload, CollectionsPopupPayload, LinkOverflowPayload, MemoryPopupPayload, Settings, Shortcuts } from '@shared/types'
+import { DEFAULT_HOMEPAGE, DEFAULT_SHORTCUTS, CREATOR_PLATFORMS, MAX_CREATOR_LINKS, MAX_COLLECTION_SECTIONS } from '@shared/types'
+import { WebView2View } from '../managers/tabs/WebView2View'
+import type { BookmarkPopupPayload, AchievementPayload, CollectionAuthor, CollectionsPopupPayload, LinkOverflowPayload, MemoryPopupPayload, Settings, Shortcuts, IGPromoPayload } from '@shared/types'
 import { getVisibleGames } from '../utils/getVisibleGames'
 import { crashLogPath, ensureLogsDir, logCrash } from '../utils/crashLogger'
 import { logConsole, readLog } from '../utils/devLogger'
@@ -51,7 +52,7 @@ function ensureUpdater(): void {
   )
 }
 
-// Only these protocols are safe to load in a WebContentsView
+// Only these protocols are safe to load in a browser tab (WebView2)
 function isSafeUrl(url: string): boolean {
   try {
     const proto = new URL(url).protocol
@@ -82,6 +83,23 @@ function isBoundedString(input: unknown, maxLength: number): input is string {
 /** Returns true if `url` passes both the protocol whitelist and the length cap. */
 function isSafeBoundedUrl(url: unknown): url is string {
   return typeof url === 'string' && url.length <= MAX_URL_LENGTH && isSafeUrl(url)
+}
+
+/** Resolve a share input (raw base64 export, or an 8-char short code) to a base64 payload, or null. */
+async function resolveShareInput(input: unknown): Promise<string | null> {
+  if (typeof input !== 'string' || input.length === 0) return null
+  let base64 = input
+  // Short code (8 lowercase alphanumeric chars) — resolve via the share worker.
+  if (/^[a-z0-9]{8}$/.test(input)) {
+    try {
+      const res = await fetch(`${SHARE_API_URL}/${input}`)
+      if (!res.ok) return null
+      base64 = Buffer.from(await res.text(), 'utf8').toString('base64')
+    } catch {
+      return null
+    }
+  }
+  return base64.length > MAX_IMPORT_BASE64_LENGTH ? null : base64
 }
 
 // Profile-specific limits — well above any legitimate UX scenario.
@@ -115,10 +133,21 @@ const SETTINGS_ALLOWLIST: ReadonlySet<keyof Settings> = new Set([
   'blockedProcesses',
   'nonGameDirs',
   'launcherExceptions',
+  'launcherPatterns',
   'gamePathHints',
   'searchEngine',
   'autoCreateProfiles',
   'autoSwitchProfile',
+  'applyDarkMode',
+  'homepageUrl',
+  'igAutoAffiliate',
+  'showIGPromo',
+  'protectedDomains',
+  'quickLinks',
+  'adBlockEnabled',
+  'creatorHandle',
+  'creatorColor',
+  'creatorLinks',
 ])
 
 /** User-configurable string list caps — prevents storing pathological lists. */
@@ -148,6 +177,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle(IPC.PopupOpen, (_e, type: 'bookmark' | 'memory', data: BookmarkPopupPayload | MemoryPopupPayload) => {
     popup.open({ type, data } as Parameters<typeof popup.open>[0])
   })
+
   ipcMain.handle(IPC.PopupOpenLinkOverflow, (_e, data: LinkOverflowPayload) => {
     if (!data || typeof data.anchorX !== 'number' || !Array.isArray(data.links)) return
     popup.open({ type: 'linkOverflow', data })
@@ -160,12 +190,35 @@ export function registerIpcHandlers(deps: Deps): void {
   })
   ipcMain.on(IPC.PopupCloseNotification, () => popup.closeNotification())
 
-  ipcMain.handle(IPC.AchievementNotify, (_e, payload: AchievementPayload) => {
+  ipcMain.handle(IPC.AchievementNotify, async (_e, payload: AchievementPayload) => {
     if (!payload || typeof payload.title !== 'string' || payload.title.length > 200) return
-    popup.openAchievementNotification(payload)
+    const scrollbar = await tabs.measureActiveScrollbarWidth()
+    popup.openAchievementNotification(payload, scrollbar)
   })
+
+  ipcMain.handle(IPC.IGPromoShow, async (_e, payload: IGPromoPayload) => {
+    if (!payload || typeof payload.purchaseHint !== 'string' || typeof payload.browseUrl !== 'string') return
+    // Measure the active tab's scrollbar so the promo keeps an equal gap to the
+    // visible content edge on the right and bottom.
+    const scrollbar = await tabs.measureActiveScrollbarWidth()
+    popup.openIGPromo(payload, scrollbar)
+  })
+  ipcMain.on(IPC.IGPromoClose, (_e, dismissed: boolean) => {
+    popup.closeIGPromo()
+    if (dismissed) overlay.win.webContents.send(IPC.IGPromoDismissed)
+  })
+
+  ipcMain.handle(IPC.NavigateHomeFromPopup, (e, tab: string) => {
+    if (popup.ownsWebContents(e.sender)) {
+      popup.close()
+      overlay.win.webContents.send(IPC.EventNavigateHome, tab)
+    }
+  })
+
   ipcMain.handle(IPC.OpenPanelFromPopup, (e, panelId?: string, collectionId?: string, prefillNewProfile?: { name: string; processName: string }) => {
-    if (e.sender === popup.getWebContents()) {
+    // Accept both the main popup AND the game-detection notification window —
+    // "Create profile" on an unrecognised game is fired from the notification.
+    if (popup.ownsWebContents(e.sender)) {
       popup.close()
       const b = overlay.win.getBounds()
       const anchorX = Math.round(b.width / 2)
@@ -180,7 +233,7 @@ export function registerIpcHandlers(deps: Deps): void {
 
   // ─── Tabs ────────────────────────────────────────────────────────────
   ipcMain.handle(IPC.TabsCreate, (_e, url?: string) => {
-    const target = isSafeBoundedUrl(url) ? url : (profiles.getActive().homepageUrl || DEFAULT_HOMEPAGE)
+    const target = isSafeBoundedUrl(url) ? url : (store.get('settings').homepageUrl || DEFAULT_HOMEPAGE)
     return tabs.create(target)
   })
   ipcMain.handle(IPC.TabsClose, (_e, id: string) => tabs.close(id))
@@ -191,6 +244,7 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle(IPC.TabsGoBack, (_e, id: string) => tabs.goBack(id))
   ipcMain.handle(IPC.TabsGoForward, (_e, id: string) => tabs.goForward(id))
   ipcMain.handle(IPC.TabsReload, (_e, id: string) => tabs.reload(id))
+  ipcMain.handle(IPC.TabsStop,   (_e, id: string) => tabs.stop(id))
   ipcMain.handle(IPC.TabsSetActive, (_e, id: string) => tabs.setActive(id))
   ipcMain.handle(IPC.TabsDeactivate, () => tabs.deactivate())
   ipcMain.handle(IPC.TabsReorder, (_e, ids: string[]) => {
@@ -217,7 +271,15 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle(IPC.SystemToggleDevTools, () => {
     const wc = overlay.win.webContents
     if (wc.isDevToolsOpened()) wc.closeDevTools()
-    else wc.openDevTools({ mode: 'detach' })
+    else {
+      popup.retractIGPromo()
+      // `activate: false` opens DevTools WITHOUT bringing it to the foreground.
+      // A detached DevTools window that steals foreground triggers a focus /
+      // activation reshuffle over the transparent overlay + WebView2 children,
+      // which trips Chromium's hwnd_util GetClassName FATAL 1400 (same family as
+      // the Alt+B crash). Not stealing focus avoids that reshuffle.
+      wc.openDevTools({ mode: 'detach', activate: false })
+    }
   })
   ipcMain.handle(IPC.DevStoreReset, () => {
     if (app.isPackaged) return // safety guard — dev only
@@ -244,10 +306,32 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle(IPC.OverlayHide, () => overlay.hide())
   ipcMain.on(IPC.OverlayShow, () => overlay.show())
   ipcMain.handle(IPC.OverlayGetState, () => overlay.getState())
+  // Reclaim OS keyboard focus from WebView2 back to the Electron renderer.
+  // Uses sendSync so the renderer blocks until ::SetFocus(chromiumRenderWidgetHwnd)
+  // completes — ensuring keyboard input reaches the address bar before any key is pressed.
+  ipcMain.on(IPC.RendererClaimFocus, (e) => {
+    // Exclude the embedded child windows (IG promo + achievement) — each has its
+    // own render-widget HWND that must not capture focus, or the address bar
+    // becomes untypeable while one is shown.
+    WebView2View.claimFocus(overlay.win.getNativeWindowHandle(), ...popup.getEmbeddedHwnds())
+    e.returnValue = null // required for sendSync
+  })
   ipcMain.handle(IPC.OverlayToggleMaximize, () => overlay.toggleMaximize())
   ipcMain.handle(IPC.OverlayIsMaximized, () => overlay.isMaximized())
   ipcMain.handle(IPC.OverlayUnmaximize, () => overlay.unmaximize())
   ipcMain.on(IPC.OverlaySetPosition, (_e, x: number, y: number) => overlay.setPositionXY(x, y))
+  ipcMain.on(IPC.OverlayMoveByDelta, (_e, dx: number, dy: number) => overlay.moveByDelta(dx, dy))
+  ipcMain.on(IPC.OverlaySetBounds, (_e, b: { x: number; y: number; width: number; height: number }) => {
+    if ([b?.x, b?.y, b?.width, b?.height].every(Number.isFinite)) overlay.setBounds(b)
+  })
+  // Renderer resize-handle drag: hide the IG promo for the whole drag and bring
+  // it back at mouseup. PopupWindow also debounces the overlay 'resize' event
+  // itself as the authoritative fallback (OS-native resize, lost mouseup).
+  ipcMain.on(IPC.OverlayResizeStart, () => popup.beginResizeHold())
+  ipcMain.on(IPC.OverlayResizeEnd, () => popup.endResizeHold())
+  ipcMain.on(IPC.OverlaySetWebViewBounds, (_e, x: number, y: number, w: number, h: number) =>
+    tabs.setActiveViewBounds(x, y, w, h)
+  )
   ipcMain.on(IPC.OverlaySetMouseInteractive, (_e, interactive: boolean) =>
     overlay.setMouseInteractive(interactive)
   )
@@ -274,7 +358,7 @@ export function registerIpcHandlers(deps: Deps): void {
   })
   ipcMain.handle(IPC.CollectionsAddLink, (_e, collectionId: string, link) => {
     if (!link || !isSafeBoundedUrl(link.url)) return null
-    if (link.title !== undefined && !isBoundedString(link.title, MAX_NAME_LENGTH)) return null
+    if (link.title !== undefined && (typeof link.title !== 'string' || link.title.length > MAX_NAME_LENGTH)) return null
     if (link.note !== undefined && typeof link.note === 'string' && link.note.length > MAX_NOTE_LENGTH) return null
     return collections.addLink(collectionId, link)
   })
@@ -282,10 +366,22 @@ export function registerIpcHandlers(deps: Deps): void {
     collections.removeLink(collectionId, linkId)
   )
   ipcMain.handle(IPC.CollectionsUpdateLink, (_e, collectionId: string, linkId: string, patch) => {
-    if (patch?.url !== undefined && !isSafeBoundedUrl(patch.url)) return null
-    if (patch?.title !== undefined && !isBoundedString(String(patch.title), MAX_NAME_LENGTH)) return null
-    if (patch?.note !== undefined && typeof patch.note === 'string' && patch.note.length > MAX_NOTE_LENGTH) return null
-    return collections.updateLink(collectionId, linkId, patch)
+    if (patch === null || typeof patch !== 'object') return null
+    if (patch.url !== undefined && !isSafeBoundedUrl(patch.url)) return null
+    if (patch.title !== undefined && !isBoundedString(String(patch.title), MAX_NAME_LENGTH)) return null
+    if (patch.note !== undefined && typeof patch.note === 'string' && patch.note.length > MAX_NOTE_LENGTH) return null
+    if (patch.section !== undefined && patch.section !== null
+      && (typeof patch.section !== 'string' || patch.section.length > MAX_NAME_LENGTH)) return null
+    if (patch.pinned !== undefined && typeof patch.pinned !== 'boolean') return null
+    if (patch.order !== undefined && typeof patch.order !== 'number') return null
+    if (patch.favicon !== undefined && patch.favicon !== null && !isSafeBoundedUrl(patch.favicon)) return null
+    // Whitelist the patch keys — a raw spread would let the renderer inject
+    // arbitrary fields (including overwriting the link id) into the stored Link.
+    const clean: Record<string, unknown> = {}
+    for (const k of ['title', 'url', 'note', 'pinned', 'favicon', 'order', 'section'] as const) {
+      if ((patch as Record<string, unknown>)[k] !== undefined) clean[k] = (patch as Record<string, unknown>)[k]
+    }
+    return collections.updateLink(collectionId, linkId, clean)
   })
   ipcMain.handle(IPC.CollectionsTogglePin, (_e, collectionId: string, linkId: string) =>
     collections.togglePin(collectionId, linkId)
@@ -295,9 +391,8 @@ export function registerIpcHandlers(deps: Deps): void {
   // Upload the full collection JSON (including embedded images) to the share worker
   // and return the 8-char short code. Falls back to null on network error.
   ipcMain.handle(IPC.CollectionsShare, async (_e, id: string) => {
-    const b64 = collections.export(id)
-    if (!b64) return null
-    const json = Buffer.from(b64, 'base64').toString('utf8')
+    const json = collections.exportJson(id)
+    if (!json) return null
     try {
       const res = await fetch(SHARE_API_URL, {
         method: 'POST',
@@ -313,21 +408,15 @@ export function registerIpcHandlers(deps: Deps): void {
   })
 
   ipcMain.handle(IPC.CollectionsImport, async (_e, input: string, profileId: string) => {
-    if (typeof input !== 'string' || input.length === 0) return null
-    let base64 = input
-    // Short code (8 lowercase alphanumeric chars) — resolve via share worker
-    if (/^[a-z0-9]{8}$/.test(input)) {
-      try {
-        const res = await fetch(`${SHARE_API_URL}/${input}`)
-        if (!res.ok) return null
-        const json = await res.text()
-        base64 = Buffer.from(json, 'utf8').toString('base64')
-      } catch {
-        return null
-      }
-    }
-    if (base64.length > MAX_IMPORT_BASE64_LENGTH) return null
+    const base64 = await resolveShareInput(input)
+    if (!base64) return null
     return collections.import(base64, profileId)
+  })
+  // Decode + sanitize a shared payload for a trustworthy preview, WITHOUT persisting it.
+  ipcMain.handle(IPC.CollectionsPreviewImport, async (_e, input: string) => {
+    const base64 = await resolveShareInput(input)
+    if (!base64) return null
+    return collections.previewImport(base64)
   })
   ipcMain.handle(IPC.CollectionsSetIconUrl, (_e, id: string, iconUrl: string | null) => {
     if (iconUrl !== null && iconUrl !== undefined) {
@@ -337,6 +426,46 @@ export function registerIpcHandlers(deps: Deps): void {
     }
     return collections.setIconUrl(id, iconUrl ?? null)
   })
+  ipcMain.handle(IPC.CollectionsSetBannerUrl, (_e, id: string, bannerUrl: string | null) => {
+    if (bannerUrl !== null && bannerUrl !== undefined) {
+      const u = String(bannerUrl)
+      if (u.length > MAX_URL_LENGTH * 8) return null
+      if (!u.startsWith('data:image/') && !isSafeUrl(u)) return null
+    }
+    return collections.setBannerUrl(id, bannerUrl ?? null)
+  })
+  ipcMain.handle(IPC.CollectionsSetBannerFocus, (_e, id: string, focus: unknown) => {
+    if (focus !== null && focus !== undefined) {
+      if (typeof focus !== 'object') return null
+      const f = focus as Record<string, unknown>
+      const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+      if (!finite(f.x) || !finite(f.y) || !finite(f.zoom)) return null
+    }
+    return collections.setBannerFocus(id, focus as { x: number; y: number; zoom: number } | null)
+  })
+  ipcMain.handle(IPC.CollectionsSetIconFocus, (_e, id: string, focus: unknown) => {
+    if (focus !== null && focus !== undefined) {
+      if (typeof focus !== 'object') return null
+      const f = focus as Record<string, unknown>
+      const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+      if (!finite(f.x) || !finite(f.y) || !finite(f.zoom)) return null
+    }
+    return collections.setIconFocus(id, focus as { x: number; y: number; zoom: number } | null)
+  })
+  ipcMain.handle(IPC.CollectionsSetDescription, (_e, id: string, description: unknown) => {
+    if (description !== null && description !== undefined
+      && (typeof description !== 'string' || description.length > MAX_NOTE_LENGTH)) return null
+    return collections.setDescription(id, (description as string | null) ?? null)
+  })
+  ipcMain.handle(IPC.CollectionsSetAuthor, (_e, id: string, author: unknown) => {
+    if (author !== null && author !== undefined) {
+      if (typeof author !== 'object') return null
+      const a = author as { handle?: unknown; color?: unknown }
+      if (typeof a.handle !== 'string' || a.handle.length > MAX_NAME_LENGTH) return null
+      if (a.color !== undefined && (typeof a.color !== 'string' || a.color.length > 32)) return null
+    }
+    return collections.setAuthor(id, (author as CollectionAuthor | null) ?? null)
+  })
   ipcMain.handle(IPC.CollectionsReorderLinks, (_e, collectionId: string, linkIds: unknown) => {
     if (!Array.isArray(linkIds) || !linkIds.every((x) => typeof x === 'string')) return null
     return collections.reorderLinks(collectionId, linkIds as string[])
@@ -344,6 +473,25 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle(IPC.CollectionsReorder, (_e, collectionIds: unknown) => {
     if (!Array.isArray(collectionIds) || !collectionIds.every((x) => typeof x === 'string')) return null
     collections.reorder(collectionIds as string[])
+  })
+  ipcMain.handle(IPC.CollectionsSetSections, (_e, collectionId: string, sections: unknown) => {
+    if (!Array.isArray(sections) || sections.length > MAX_COLLECTION_SECTIONS
+      || !sections.every((x) => typeof x === 'string' && x.length <= MAX_NAME_LENGTH)) return null
+    return collections.setSections(collectionId, sections as string[])
+  })
+  ipcMain.handle(IPC.CollectionsRenameSection, (_e, collectionId: string, oldName: string, newName: string) => {
+    if (typeof oldName !== 'string' || oldName.length > MAX_NAME_LENGTH) return null
+    if (typeof newName !== 'string' || newName.length > MAX_NAME_LENGTH) return null
+    return collections.renameSection(collectionId, oldName, newName)
+  })
+  ipcMain.handle(IPC.CollectionsDeleteSection, (_e, collectionId: string, name: string) => {
+    if (typeof name !== 'string' || name.length > MAX_NAME_LENGTH) return null
+    return collections.deleteSection(collectionId, name)
+  })
+  ipcMain.handle(IPC.CollectionsMoveLink, (_e, collectionId: string, linkId: string, targetSection: unknown, insertBeforeLinkId: unknown) => {
+    if (targetSection !== null && (typeof targetSection !== 'string' || targetSection.length > MAX_NAME_LENGTH)) return null
+    if (insertBeforeLinkId !== null && typeof insertBeforeLinkId !== 'string') return null
+    return collections.moveLink(collectionId, linkId, targetSection as string | null, insertBeforeLinkId as string | null)
   })
 
   // ─── Profiles ────────────────────────────────────────────────────────
@@ -357,6 +505,14 @@ export function registerIpcHandlers(deps: Deps): void {
     if (input.homepageUrl !== undefined && !isSafeBoundedUrl(input.homepageUrl)) return null
     if (input.priority !== undefined && (typeof input.priority !== 'number' || !Number.isFinite(input.priority))) return null
     return profiles.create(input)
+  })
+  ipcMain.handle(IPC.ProfilesCreateDetected, (_e, input) => {
+    if (!input || typeof input !== 'object') return null
+    if (!isBoundedString(input.processName, MAX_PROCESS_NAME_LENGTH)) return null
+    if (!isBoundedString(input.exePath, MAX_EXE_PATH_LENGTH)) return null
+    if (input.displayName !== undefined &&
+        (typeof input.displayName !== 'string' || input.displayName.length > MAX_NAME_LENGTH)) return null
+    return profiles.createDetectedProfile(input)
   })
   ipcMain.handle(IPC.ProfilesRemove, (_e, id: string, mode: 'delete' | 'exclude' = 'exclude') => profiles.remove(id, mode))
   ipcMain.handle(IPC.ProfilesUpdate, (_e, id: string, patch) => {
@@ -407,9 +563,34 @@ export function registerIpcHandlers(deps: Deps): void {
       'blockedProcesses',
       'nonGameDirs',
       'launcherExceptions',
+      'launcherPatterns',
       'gamePathHints',
+      'protectedDomains',
     ])
     if (LIST_KEYS.has(key as keyof Settings) && !isBoundedStringList(value)) return null
+    if (key === 'homepageUrl' && (typeof value !== 'string' || !isSafeBoundedUrl(value as string))) return null
+    if (key === 'creatorLinks') {
+      const VALID_PLATFORMS = new Set<string>(CREATOR_PLATFORMS)
+      if (!Array.isArray(value) || (value as unknown[]).length > MAX_CREATOR_LINKS) return null
+      const valid = (value as unknown[]).every((item) =>
+        typeof item === 'object' && item !== null &&
+        VALID_PLATFORMS.has(String((item as Record<string, unknown>).platform)) &&
+        isSafeBoundedUrl((item as Record<string, unknown>).url)
+      )
+      if (!valid) return null
+    }
+    if (key === 'quickLinks') {
+      if (!Array.isArray(value) || (value as unknown[]).length > 30) return null
+      const valid = (value as unknown[]).every((item) => {
+        const it = item as Record<string, unknown>
+        return typeof item === 'object' && item !== null &&
+          typeof it.id === 'string' && it.id.length > 0 && it.id.length <= 100 &&
+          typeof it.name === 'string' && it.name.length <= 100 &&
+          isSafeBoundedUrl(it.url) &&
+          (it.description === undefined || (typeof it.description === 'string' && it.description.length <= 140))
+      })
+      if (!valid) return null
+    }
 
     const settings = store.get('settings')
     const next = { ...settings, [key]: value } as Settings
@@ -426,6 +607,20 @@ export function registerIpcHandlers(deps: Deps): void {
     }
     if (key === 'startWithWindows' && typeof value === 'boolean') {
       setStartupWithWindows(value)
+    }
+    if (key === 'applyDarkMode') {
+      const dark = value !== false
+      nativeTheme.themeSource = dark ? 'dark' : 'light'
+      WebView2View.setColorScheme(dark ? 2 : 1)
+      tabs.setDarkMode(dark)
+    }
+    if (key === 'adBlockEnabled') {
+      const extPath = path.join(app.getAppPath(), 'public', 'extensions', 'ublock')
+      if (fs.existsSync(extPath)) {
+        WebView2View.addExtension(extPath, value === true).catch((e: unknown) => {
+          console.error('[AdBlock] addExtension failed:', e)
+        })
+      }
     }
     return next
   })
@@ -446,14 +641,26 @@ export function registerIpcHandlers(deps: Deps): void {
   ipcMain.handle(IPC.AppGetVersion, () => app.getVersion())
   ipcMain.handle(IPC.AppCheckForUpdates, () => {
     if (!app.isPackaged) {
-      broadcastUpdateStatus({ status: 'dev' })
+      broadcastUpdateStatus({ status: 'up-to-date' })
       return
     }
     ensureUpdater()
     autoUpdater.checkForUpdates()
   })
+  ipcMain.handle(IPC.AppRestartToUpdate, () => {
+    if (!app.isPackaged) return
+    autoUpdater.quitAndInstall()
+  })
   ipcMain.handle(IPC.SystemPickFolder, async (_e) => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+  })
+
+  ipcMain.handle(IPC.SystemPickExecutable, async (_e) => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [{ name: 'Executable', extensions: ['exe'] }],
+    })
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
   })
 

@@ -26,6 +26,191 @@ Le hook `SessionStart` injecte automatiquement la **dernière** entrée (titre +
 
 ---
 
+## [2026-07-18] [DIAG+FIX] Attribution IG, mort de l'adblock (MV2), couverture 100%, smoke stable
+
+**Contexte :** L'utilisateur a validé un plan revenu v1.0 (release → distribution passive → attribution IG → loadouts). Premier chantier : diagnostiquer pourquoi les commissions IG ne tombent pas, puis solidifier la branche pour le merge.
+
+**Fichiers modifiés :**
+- `scripts/smoke.mjs` — poll-until (3 s) au lieu des sleeps fixes sur show/hide ; le flaky 1-run-sur-2 ne se reproduit plus (ALL PASS ×3)
+- `SettingsPanel.tsx` — toggle adblock désactivé + bandeau honnête (l'adblock ne fonctionne plus, voir Observations)
+- `CollectionsManager.ts` — `updateLink` accepte `{ section: null }` (fix de signature + section exclue du spread)
+- `store/index.ts` — garde `l ?? {}` dans le backfill quickLinks (une entrée `null` faisait planter la migration)
+- Tests : +24 (CollectionsManager +19, store/index +3 dont régression null, appStore +1) — gate 100/100/100/100 restauré après le WIP bannerFocus
+
+**Observations :**
+- **Adblock mort silencieusement** : WebView2 Evergreen auto-mis à jour vers Edge/Chromium 150, qui a retiré Manifest V2 définitivement (fin juin 2026). uBlock 1.71 (MV2) : Add/Enable "succès" mais zéro fichier installé, zéro filtrage. Probe onglet réel : googlesyndication/doubleclick/GTM/GA chargent ; fbevents/TikTok bloqués par la tracking prevention **intégrée d'Edge** (toujours active) — d'où l'impression "pas de pub" côté utilisateur.
+- **Attribution IG** : le param `igr=overframe` survit (pas de removeparam), profil WebView2 persistant (cookies de juin présents), adblock in-app hors de cause. Le support IG confirme que les auto-achats (même compte/machine) sont filtrés → tests réels impossibles avant d'avoir de vrais utilisateurs. Décision : on gèle le sujet jusqu'à la release.
+- RAM au boot vue à 477 MB pendant un smoke (budget 300, tâche [PERF] déjà au backlog).
+
+**Décisions :** Toggle adblock désactivé plutôt que caché (honnêteté envers l'utilisateur) ; remplacement adblock = tâche dédiée (uBlock Lite MV3 à évaluer). Plan revenu acté : release v1.0 → Microsoft Store + winget → loadouts partagés (croissance).
+
+**Questions ouvertes :** WebView2 150 supporte-t-il les extensions MV3 (service workers) ? Sinon, filtrage `WebResourceRequested` natif. Findings mineurs qa-tester consignés dans TASKS.
+
+**Prochaine étape :** Merge `feat/game-detection` → `dev`, puis chantier release v1.0 (README captures/GIF, `pnpm make` validé, FAQ SmartScreen) et listing Microsoft Store.
+
+---
+
+## [2026-07-11] [FIX] Flicker du promo IG au resize + ménage des commits
+
+**Contexte :** Le popup IG promo (fenêtre enfant WS_CHILD embarquée) clignotait pendant le resize de l'overlay : chaque tick 'resize' repositionnait la fenêtre native. Une première passe (retract au mousedown / restore au mouseup côté renderer) était instable — les resizes OS natifs, unmaximize et bounds de profil ne passent pas par les handles React, et un mouseup perdu (avalé par le HWND WebView2) laissait le promo caché définitivement.
+
+**Fichiers modifiés :**
+- `PopupWindow.ts` — logique autoritaire dans le main : retract au premier tick 'resize', restore par debounce de stabilisation (300 ms natif / 2 s failsafe pendant un drag renderer). `beginResizeHold()`/`endResizeHold()` pour le retract instantané au mousedown et le restore instantané au mouseup.
+- `ResizeHandles.tsx`, `handlers.ts`, `preload`, `ipc.ts` — canaux `overlay:resizeStart`/`resizeEnd` (hints, pas autoritaires).
+
+**Observations :** Vérifié par screenshots OS réels (CopyFromScreen — capturePage ne voit pas la fenêtre native) : caché pendant tout le drag, retour instantané au mouseup, retour ≤2 s si mouseup perdu, chemin natif OK.
+
+**Décisions :** Le débounce main-process est la source de vérité ; les événements renderer ne sont que des accélérateurs UX. Jamais de reposition par tick sur une fenêtre enfant embarquée.
+
+**Ménage :** working tree (~2 250 insertions, 55 fichiers) découpé en 7 commits thématiques : fix ig-promo, shared schema/IPC, adblock (AdGuard Ads + reset one-time), collections (sections/banner/éditeur/vue créateur), détection (icônes jeu/exe picker/launcher patterns), home (page à onglets/quick links/missions), chore.
+
+**Prochaine étape :** Validation humaine du fix en conditions réelles (resize à la souris avec promo affiché), puis merge de `feat/game-detection` vers `dev`.
+
+---
+
+## [2026-06-05] [REFACTOR] IG affiliate — coup de balais + nouvelle architecture
+
+**Contexte :** Pivot depuis l'approche catalogue produits hardcodé (IDs, prix, images — impasse de maintenance) vers une architecture simple : popup contextuel + bannière WelcomePage + IGStorePage browse-only.
+
+**Fichiers supprimés :**
+- `IGQuickBuy.tsx`, `IGStorePopup.tsx` (jamais câblé)
+- Types `IGStoreProduct`, `IGStorePopupPayload`, IPC `PopupOpenIGStore`
+
+**Fichiers créés :**
+- `IGGamePromo.tsx` — popup bottom-right contextuel, par profil jeu, 1.5s de délai, reset sur changement de jeu, disparaît en click-through
+- `localizeIGUrl()` dans `ig-affiliate.ts` — remplace `/en/` par la locale navigateur (fr/de/es/it/pt/nl/pl)
+
+**Fichiers simplifiés :**
+- `ig-affiliate.ts` — catalogue réduit : exe + purchaseHint + description + browseUrl uniquement
+- `IGStorePage.tsx` — landing hero Overframe × IG + badge Affiliate + contexte jeu + CTA unique
+- `WelcomePage.tsx` — bannière IG en haut du tab Home
+
+**Résultat :** typecheck ✅ lint ✅ build ✅
+
+**Prochaine étape :** Validation humaine (`pnpm dev`) puis commit `feat/ig-affiliate`
+
+---
+
+## [2026-06-05] [FEAT] IG affiliate — refonte UX/UI IGStorePage + catalogue
+
+**Contexte :** Reprise de la session "Design IG affiliate feature with overlay and nudge UI". Le catalogue et les composants existaient déjà ; l'UX de la page store était mauvaise (bannière trop petite, bouton Browse orange qui concurrençait les boutons d'achat, affiliation peu visible).
+
+**Fichiers modifiés :**
+- `src/shared/ig-affiliate.ts` — LoL passe en "browse-only" (`products: []`), `displayName` ajouté
+- `src/shared/types.ts` — `IGStorePopupPayload` reçoit `browseUrl: string`
+- `src/renderer/components/IGStorePage.tsx` — refonte complète :
+  - Hero 190px, `object-top`, gradient bottom-up (image IG lisible + texte en bas)
+  - Badge "Official Partner" en haut-droite de la bannière
+  - `AffiliateDisclosure` déplacé immédiatement sous le hero (toujours visible)
+  - Bouton "Browse" → lien secondaire subtil en bas du grid (plus de gros bouton orange concurrent)
+  - Pour les jeux "browse-only" (aucun produit) : composant `BrowseCTA` avec un seul bouton orange centré
+- `src/renderer/components/IGStorePopup.tsx` — "Browse all" renommé "Browse on Instant Gaming", utilise `browseUrl` de l'entrée (avec referral) au lieu de `IG_HOME`
+- `src/renderer/components/AddressBar.tsx` — suppression des imports `IGBadge` et `getCatalogForProfile` inutilisés (+ `igEntry`)
+- `src/renderer/components/IGNudge.tsx` — suppression import `OverframeIcon` inutilisé
+- `src/renderer/App.tsx` — suppression directive `eslint-disable` devenue caduque
+
+**Résultat :** typecheck ✅ lint ✅ (0 erreur, 0 warning)
+
+**Questions ouvertes :**
+- La `IGStorePopup` existe (popup secondaire) mais n'est pas encore câblée dans `popup.tsx` — à brancher si on veut le popup flottant en plus de la page pleine.
+- LoL est maintenant "browse-only" : quand les produits Riot Points spécifiques seront connus, il suffit d'ajouter `products: [...]` dans l'entrée `leagueoflegends.exe`.
+
+**Prochaine étape :**
+- Validation humaine : lancer l'app, ouvrir IGStorePage depuis la barre d'adresse (bouton IG), vérifier le rendu de la bannière sur les jeux détectés (Valorant, Steam).
+- Si validation OK → commit sur une branche `feat/ig-affiliate`.
+
+---
+
+## [2026-06-03] [FEAT] Onglets WebView2 (Edge natif) + nettoyage chirurgical
+
+**Contexte :** L'approche « stealth » (spoofing UA + `tabStealth` sur `WebContentsView`) ne passait pas le Turnstile Cloudflare. Bascule des onglets sur un addon natif **WebView2** (vrai Edge) qui passe Google sign-in / Cloudflare nativement. Cette session : fiabiliser le working tree, sécuriser, et faire passer toutes les pipelines.
+
+**Fichiers modifiés (principaux) :**
+- `native/webview2-addon/src/webview2_addon.cpp` — addon N-API : ajout zoom (`setZoom` + `ZoomFactorChanged`), mute/audio (`setMuted`, `IsMuted/IsDocumentPlayingAudioChanged` via `ICoreWebView2_8`), téléchargements (`DownloadStarting` via `_4`), **garde de navigation** (`NavigationStarting` annule les schémas hors http(s)/about), échappement JSON robuste, nettoyage des tokens dans `DestroyTab`
+- `src/main/managers/tabs/WebView2View.ts` + `TabManager.ts` — recâblage zoom/mute/audio/download (plus de no-op) + garde protocole popup
+- `native/webview2-addon/{binding.gyp,README.md}` + `scripts/build-addon.mjs` + `package.json` — build-from-source : SDK WebView2 vendored (hermétique), `build:addon` (node-gyp, win32-guard), `postinstall`, c++20 (warning D9025 supprimé)
+- `forge.config.ts` — addon expédié en `extraResource` (→ `resources/webview2_addon.node`), `native/` exclu de l'asar
+- `.gitignore` — `native/webview2-addon/build/` ignoré (artefacts générés)
+- **Supprimés** : pile stealth (`OAuthPopupWindow`, `tabStealth.ts`, `userAgent.ts(+test)`), surface GGG/PoE OAuth (service, IPC, store, UI SettingsPanel), scripts jetables (`test-cf*`, `test-wv2`), devDep `playwright-core`, endpoints dev morts (`/oauth-popup`, `/debug/headers`, `/session/clear-cookies`)
+- Docs : `SECURITY.md` + `CLAUDE.md` réalignés sur le modèle WebView2
+
+**Observations :**
+- Pipelines vertes : `typecheck` (root), `lint`, `test:coverage` **100%**, `build`, addon (node-gyp), `pnpm smoke` ALL PASS (boot + overlay + addon chargé, RAM 257 MB < 300).
+- Un fichier corrompu de 2,6 Mo (résidu d'un `cp` shell raté) traînait dans `native/` — supprimé.
+
+**Décisions :**
+- SDK WebView2 **vendored** (header + `WebView2LoaderStatic.lib`) plutôt que fetch NuGet : build hermétique/offline, reproductible. Origine + licence + procédure de mise à jour documentées dans `native/webview2-addon/README.md`.
+- PoE/GGG OAuth retiré entièrement : avec WebView2, l'utilisateur se connecte directement dans un onglet (Cloudflare passe), le contournement POESESSID n'a plus lieu d'être.
+
+**Questions ouvertes :**
+- `typecheck:node` a 2 erreurs **préexistantes** hors périmètre (koffi sans default export dans `getVisibleGames.ts` ; typage `outDir` d'electron-vite). Non gating (la CI utilise `pnpm typecheck` racine), runtime OK. À traiter séparément.
+- Favicons + capture de la console webview non remontés par l'addon (limitation connue, hors périmètre).
+
+**Prochaine étape :**
+- Validation humaine réelle : login Google + site Cloudflare dans un onglet WebView2.
+- `pnpm make` pour vérifier le packaging de l'addon en `extraResource` sur une vraie install.
+
+---
+
+## [2026-06-01] [FEAT] Compatibilité navigateur standard — résolution finale
+
+**Contexte :** Suite de l'itération précédente. Google login fonctionnait 1 fois sur 3 ; re-connexion après déconnexion nécessitait de boucler sur "Réessayer". Tout est maintenant résolu.
+
+**Diagnostic final :**
+- La détection Google est **serveur + JS**. L'identité Firefox devait être COMPLÈTE : `productSub`, `oscpu`, `buildID`, `plugins:0`, `window.chrome:undefined` en plus du UA — chaque écart (ex. `productSub:"20030107"` = valeur Chrome) était un signal.
+- La détection de navigation via `resourceType === 'mainFrame'` était **non fiable** dans WebContentsView → remplacé par `Sec-Fetch-Mode: navigate` dans les headers existants (toujours présent, toujours correct).
+- L'intermittence à la re-connexion = cookies `AEC` + `ACCOUNT_CHOOSER` + `GAPS` écrits pendant la session Chrome précédente, portant l'empreinte Chrome. Nettoyage partiel (AEC seul) insuffisant ET cassait l'accountchooser. Solution : clear total des cookies `accounts.google.com` + navigation directe sur `/signin/identifier` (bypasse l'accountchooser).
+- Cloudflare Turnstile : `cf-chl-ra: 0` dans les headers = le challenge PoW échoue dans tout Chromium embarqué. Incompatibilité plateforme confirmée (Cloudflare Community + Anthropic Claude Code issue #33269). La navigation GÉNÉRALE sur les sites Cloudflare passe ✅.
+
+**Fichiers modifiés :**
+- `src/shared/userAgent.ts` — `isGoogleSignInHost`, `FIREFOX_UA`, `buildUaBrands`, helpers UA/hints
+- `src/preload/tabStealth.ts` — identité Firefox complète sur Google sign-in hosts : `userAgent`, `vendor`, `productSub`, `oscpu`, `buildID`, `plugins/mimeTypes:0`, `chrome:undefined` ; identité Chrome complète ailleurs : `userAgentData` + `window.chrome` augmenté (loadTimes, csi, runtime) + `Function.prototype.toString` natif
+- `src/main/managers/TabManager.ts` — `onBeforeSendHeaders` : détection nav via `Sec-Fetch-Mode:navigate` (au lieu de resourceType), Firefox headers complets pour Google, `Sec-Fetch-User:?1` pour toutes navigations ; `handleGoogleRejected` : auto-retry sur `/signin/rejected` avec clear total + redirect identifier
+- `src/main/index.ts` — `disable-blink-features=AutomationControlled`
+- `electron.vite.config.ts` — entrée preload `tabStealth`
+- `src/main/utils/devServer.ts` — endpoints debug : `/tab/new`, `/tab/navigate`, `/tab/eval`, `/debug/headers`, `/session/clear-cookies`
+
+**Résultat :**
+- ✅ Google login : premier essai + re-connexion après déconnexion sans friction
+- ✅ Navigation générale Cloudflare : passe
+- ❌ Cloudflare Turnstile OAuth (poe.ninja, filterblade) : incompatibilité plateforme, documentée
+
+**Prochaine étape :** Merger `feat/browser-compat` → `dev` via PR. Puis démarrer les features produit (TASKS.md).
+
+---
+
+## [2026-06-01] [FEAT] Compatibilité navigateur standard (Google / Cloudflare)
+
+**Contexte :** Première feature produit après validation du setup d'autonomie (mergé sur `dev`). Les WebContentsView Electron se font détecter comme navigateur automatisé/embarqué → login Google refusé, challenges Cloudflare. Objectif : présenter les onglets comme du Chrome desktop standard, **sans casser les invariants de sécurité** (zéro preload sur les web views).
+
+**Diagnostic (lecture du code) :** le UA était déjà débarrassé d'`Electron` et la session `persist:browser` persiste les cookies. Le vrai trou : Electron envoyait toujours `Sec-CH-UA: "Electron";v="33"` — **incohérence UA-string/client-hints** = signal de browser falsifié n°1 pour Cloudflare/Google. `navigator.webdriver` / AutomationControlled non traités.
+
+**Fichiers créés/modifiés :**
+- `src/shared/userAgent.ts` — **nouveau** : helpers purs `chromeMajor` / `buildUserAgent` / `buildClientHints` / `mergeClientHintHeaders`. UA + client hints dérivés d'une **source unique** (`process.versions.chrome`) → jamais de dérive entre eux. `chromeMajor` ne laisse passer que `[0-9]+` (anti header-splitting).
+- `src/shared/userAgent.test.ts` — **nouveau** : 13 tests, toutes branches.
+- `src/main/managers/TabManager.ts` — UA via `buildUserAgent` ; `onBeforeSendHeaders` sur `tabSession` (`persist:browser`) qui remplace `Sec-CH-UA/Mobile/Platform` (case-insensitive).
+- `src/main/index.ts` — `app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled')` (engine-level → pas de preload, `sandbox:true`/`contextIsolation:true` intacts).
+- `vitest.config.ts` — `userAgent.ts` ajouté à `coverage.include`.
+
+**Décisions :**
+- Tout au niveau **session-headers + command-line**, jamais de preload sur les WebContentsView (contrainte SECURITY.md respectée).
+- Override scopé à `persist:browser` uniquement — la CSP (`defaultSession` + `onHeadersReceived`) n'est pas touchée (event + session distincts).
+- Logique extraite en module pur testable à 100% : le seul morceau non vérifiable en unit (Google/Cloudflare réels) relève du test humain (WORKFLOW §4).
+
+**Observations :**
+- typecheck + lint + coverage (157 tests, **100%**) verts. Security review (checklist security-reviewer + SECURITY.md) : **clean**, aucun finding.
+- **Smoke flaky** : `/overlay/show` échoue ~1/2 runs (`overlay=HIDDEN`), passe au re-run sur le **même build** → non-déterministe, **pas une régression** de cette feature (aucun de mes changements ne touche la machine à états overlay ni la defaultSession). RAM observée 122→310 MB selon les runs. → ajouté en `[FIX]` TASKS.
+- **Résiduel connu** : `navigator.userAgentData` (API JS) annonce encore `Electron` — non corrigeable sans preload sur les web views (pas d'API stable Electron 33 pour le métadonnées client-hints). Les en-têtes HTTP (lus côté serveur par Google/Cloudflare) sont eux corrects. Impact : un challenge Cloudflare Turnstile purement JS *pourrait* encore détecter ; le login Google (UA + headers) devrait passer.
+
+**Questions ouvertes :**
+- Si la validation humaine montre que Turnstile bloque toujours : trancher préload durci sur web views (relâche l'invariant "no preload") vs accepter le résiduel.
+
+**Prochaine étape :**
+- **Validation humaine** : login Google réel + site Cloudflare dans un onglet Overframe. Si OK → PR `feat/browser-compat` → `dev`. Sinon, décider du préload durci.
+- Optionnel : fiabiliser le smoke (`/overlay/show` en poll-until au lieu d'un sleep fixe).
+
+---
+
 ## [2026-06-01] Durcissement de la méthode — chaque axe ≥ 9/10
 
 **Contexte :** Suite de l'audit. Objectif posé : amener chaque dimension de l'automatisation à ≥ 9/10 et éliminer tout problème de sévérité modérée+.

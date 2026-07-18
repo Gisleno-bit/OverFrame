@@ -9,8 +9,8 @@
 ## État actuel du projet
 
 **Version en cours :** v0.6 → v1.0 (Beta Polish → Release)
-**Branche active :** `dev`
-**Dernière session :** 2026-06-01 — Audit chirurgical de la méthode : hooks réparés (feedback réel à Claude), garde-fou PreToolUse, setup commité+poussé, couverture 100% sur la logique métier + gate CI
+**Branche active :** `feat/game-detection` — prête pour merge vers `dev` après cette session
+**Dernière session :** 2026-07-18 — Diagnostic attribution IG (adblock in-app hors de cause), découverte adblock mort (MV2 tué par WebView2 150) + toggle Settings rendu honnête, fix smoke flaky, couverture ramenée à 100% (+24 tests), fixes `updateLink`/`migrateStore`. Pipelines vertes (typecheck/lint/coverage 100%/build/smoke ×3).
 
 Le cœur du produit est fonctionnel : overlay, tabs, profils, collections, sessions, raccourcis globaux, tray, auto-update, onboarding. L'objectif immédiat est de solidifier pour la release publique v1.0.
 
@@ -25,7 +25,10 @@ _(vide — à remplir par Claude au début d'une session de travail)_
 ## Priorité haute — Chemin vers v1.0
 
 ### Qualité & robustesse
-- [ ] **[PERF] RAM au boot ~310 MB > budget 300** — détecté par `pnpm smoke` le 2026-06-01 (overlay FOCUSED / welcome au lancement). Lancer le subagent `perf-auditor`, isoler la cause (welcome page ? WebContentsView retenue ?), consigner avant/après.
+- [ ] **[BUG] Adblock mort — uBlock Origin (MV2) tué par WebView2 150 — reste à remplacer** — le runtime WebView2 Evergreen (Chromium/Edge 150) a définitivement retiré Manifest V2 (fin juin 2026) ; uBlock 1.71 est MV2. `AddBrowserExtension`/`Enable` répondent "succès", zéro erreur, mais rien ne s'installe ni ne filtre. Probe du 2026-07-18 dans un onglet réel : `googlesyndication`/`doubleclick`/`GTM`/`GA` chargent (pubs NON bloquées) ; `fbevents`/TikTok bloqués par la **tracking prevention intégrée d'Edge** (toujours active — d'où l'impression utilisateur "pas de pub"). Fait : toggle Settings désactivé avec explication honnête (2026-07-18). Pistes de remplacement : uBlock Origin Lite (MV3 — vérifier support WebView2), niveau de tracking prevention via `ICoreWebView2Profile3`, ou filtrage `WebResourceRequested`.
+- [ ] **[QA] Findings mineurs qa-tester (2026-07-18)** — `setIconUrl`/`create` sans sanitisation interne (l'IPC valide déjà — défense en profondeur), import de `sections: ['', ' ']` produit `sections: []` (active le mode sections à tort), `moveLink` avec id inconnu persiste quand même (bump `updatedAt`).
+- [ ] **[VALID HUMAIN] [FEAT] WebView2 — test réel Google + Cloudflare** — vérifier un vrai login Google et un site Cloudflare-protégé (Turnstile inclus) dans un onglet Overframe. Les onglets sont désormais rendus par Edge WebView2 (vrai navigateur), donc plus de spoofing `navigator.userAgentData` : l'ancien résiduel Electron est levé. Vérifier aussi `pnpm make` (addon packagé en `extraResource`).
+- [ ] **[PERF] RAM au boot ~310 MB > budget 300** — détecté par `pnpm smoke` le 2026-06-01 (overlay FOCUSED / welcome au lancement). Lancer le subagent `perf-auditor`, isoler la cause (welcome page ? WebContentsView retenue ?), consigner avant/après. NB : la RAM observée varie fortement run-à-run (122–310 MB) — mesurer plusieurs fois.
 - [ ] **[PERF] Audit performance** : `curl http://127.0.0.1:9119/metrics` idle + 3 onglets. Corriger si hors budget (< 150 MB idle, < 300 MB actif). Consigner avant/après chiffrés dans DEVLOG. Guide : `.claude/guides/PERFORMANCE.md`
 - [ ] **[FIX] Multi-monitor** : vérifier que la fenêtre se souvient du bon écran après un changement de configuration moniteurs.
 - [ ] **[FIX] Gestion d'erreur page load** : affiner l'état "failed to load" dans les WebContentsViews (réseau coupé, SSL invalide). Ajouter test de régression.
@@ -59,6 +62,18 @@ _(vide — à remplir par Claude au début d'une session de travail)_
 
 ## Done — Récent
 
+- [x] **[FIX] Smoke flaky sur `/overlay/show`** (2026-07-18) — poll-until (3 s max, pas de sleep fixe) sur show ET hide ; ALL PASS ×3 consécutifs
+- [x] **[BUG court terme] Toggle adblock honnête** (2026-07-18) — case désactivée + bandeau explicatif en langage simple dans Settings → Browser (vérifié visuellement)
+- [x] **[TEST] Couverture 100% restaurée après le WIP bannerFocus** (2026-07-18) — +24 tests (CollectionsManager sections/moveLink/sanitizeFocus, backfill quickLinks, appStore.setHomeTab) via qa-tester
+- [x] **[FIX] `updateLink` accepte `section: null`** (2026-07-18) — le widening voulu était annulé par le Pick ; section exclue du spread
+- [x] **[FIX] `migrateStore` survit à une entrée `null` dans quickLinks** (2026-07-18) — garde + test de régression
+- [x] **[DIAG] Attribution IG — adblock in-app hors de cause** (2026-07-18) — igr= survit, profil persistant ; vrais suspects : achats même compte/machine (confirmé par le support IG), tag absent ; re-tester avec de vrais utilisateurs post-release
+- [x] **[FEAT] Compatibilité navigateur standard (Google, Cloudflare)** (2026-06-01) — `feat/browser-compat`
+  - Google login : UA Firefox + Sec-Fetch-* cohérents + identité JS complète (userAgent, productSub, oscpu, buildID, plugins:0, chrome:undefined) + auto-retry sur /rejected (clear cookies AEC + redir /signin/identifier)
+  - Cloudflare navigation générale : UA Chrome propre + Sec-CH-UA alignés + userAgentData "Google Chrome" + webdriver:false + chrome.loadTimes/csi/runtime corrects + Function.prototype.toString native
+  - `src/shared/userAgent.ts` + `src/preload/tabStealth.ts` + `TabManager` onBeforeSendHeaders + `index.ts` disable-blink-features
+  - 162 tests, 100% coverage ; typecheck + lint verts
+  - **Cloudflare Turnstile OAuth** (poe.ninja, filterblade) : incompatibilité plateforme WebContentsView documentée dans SECURITY.md — solution future : shell.openExternal
 - [x] **Durcissement méthode — chaque axe ≥9/10** (2026-06-01)
   - Garde-fous : egress hors-localhost + `node -e` bloqués, permissions scopées
   - `SessionStart` hook (boot avec branche+TASKS+DEVLOG) ; routage auto des guides métier
