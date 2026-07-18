@@ -26,6 +26,15 @@ if (!existsSync(entry)) {
   process.exit(1)
 }
 
+// Refuse to run against a pre-existing instance: if 9119 is already served, the
+// child spawned below silently skips its own devServer ("Port 9119 already in
+// use") and every check would measure the OLD app instead of the build under test.
+try {
+  await fetch(BASE + '/ping', { signal: AbortSignal.timeout(1000) })
+  console.error('[smoke] port 9119 is already in use (a dev instance is running?) — close it and retry.')
+  process.exit(1)
+} catch { /* port free — good */ }
+
 let failures = 0
 function check(name, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`)
