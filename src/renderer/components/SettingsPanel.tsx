@@ -305,21 +305,22 @@ export function SettingsPanel(): JSX.Element {
                     onChange={(e) => void updateSetting('showIGPromo', e.target.checked)}
                   />
                 </Check>
+                {/* Ad blocking is dead until further notice: uBlock Origin is a Manifest V2
+                    extension and the WebView2 runtime (Edge 150+) permanently removed MV2 —
+                    install/enable still report success but the extension never runs. Showing a
+                    live toggle here would lie to the user. See TASKS.md [BUG] for the fix paths. */}
                 <Check
-                  label="Block ads &amp; cookie banners (uBlock Origin)"
-                  hint="Disable this if a site breaks."
+                  label="Block ads &amp; cookie banners"
+                  hint="Temporarily unavailable."
                 >
-                  <input
-                    type="checkbox"
-                    checked={settings.adBlockEnabled ?? false}
-                    onChange={(e) => void updateSetting('adBlockEnabled', e.target.checked)}
-                  />
+                  <input type="checkbox" checked={false} disabled readOnly />
                 </Check>
                 <div className="flex items-start gap-2 rounded border border-amber-500/25 bg-amber-500/10 px-2.5 py-2">
                   <TriangleAlert size={13} className="shrink-0 mt-0.5 text-amber-400" aria-hidden="true" />
                   <p className="text-[11px] text-amber-400 leading-snug">
-                    Google is phasing out ad blockers everywhere, so some ads (e.g. on YouTube) may
-                    still get through.
+                    A Microsoft Edge update switched off the ad blocker Overframe was using — that
+                    affects every app built on Edge, not just Overframe. Edge&apos;s built-in tracker
+                    protection still runs, but ads are no longer blocked until we ship a replacement.
                   </p>
                 </div>
               </Section>
