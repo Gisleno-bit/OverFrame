@@ -50,6 +50,24 @@ Le hook `SessionStart` injecte automatiquement la **dernière** entrée (titre +
 
 ---
 
+## [2026-07-18] (suite) PRs #55/#56, alertes CodeQL corrigées, CI réparée, vitest 3
+
+**Contexte :** Suite de session — merge de la branche, chantier release, et traitement des 3 checks CI rouges découverts sur la PR #55.
+
+**Fait :**
+- **PR #55** (feat/game-detection → dev) : mergée. ⚠️ L'auto-merge est passé malgré 3 checks rouges car aucun check n'était "required" — corrigé (protection de branche sur `dev`).
+- **12 alertes CodeQL (10 high)** : `hostname.includes(domaine)` spoofable dans `ig-affiliate` et la détection de plateforme des liens créateur → nouveau helper `src/shared/hostMatch.ts` (match exact ou frontière de point, 100% couvert) ; + 2 stack-trace-exposure dans le devServer (message seul désormais). Vérifié : check CodeQL vert sur la PR #56.
+- **CI Windows** : `windows-latest` → VS2026, incompatible node-gyp + `.npmrc msvs_version=2022` → job épinglé `windows-2022`. Vert.
+- **vitest 2.1.9 → 3.2.7** (advisory critique GHSA-5xrq-8626-4rwp, accord humain) : pipeline 100% vert sans modification de config ni de test. **App vérifiée après MaJ** : boot, IPC, création d'onglet, navigation réelle (example.com chargé), 0 erreur renderer.
+- **Release** : README (captures réelles, FAQ SmartScreen/anti-cheat/borderless/adblock/data, stack corrigée WebView2) ; `pnpm make` validé (Setup.exe + nupkg + zip, addon en extraResource).
+- **PR #56** (chore/release-docs → dev) : tout ce qui précède.
+
+**Observations :** `pnpm check:deps` échoue sur koffi (pré-existant — utilisé en lecture seule Win32 par la détection de jeu, décision à prendre, voir TASKS). Piège smoke découvert : si le port 9119 est occupé, le smoke mesure l'instance existante en silence (voir TASKS). Installeur à 169 MB avec un dossier rollup parasite (voir TASKS).
+
+**Prochaine étape :** Merger #56 (auto-merge armé sur checks requis), puis : GIF de démo in-game + installation réelle du Setup.exe (humain), onboarding, listing Microsoft Store.
+
+---
+
 ## [2026-07-11] [FIX] Flicker du promo IG au resize + ménage des commits
 
 **Contexte :** Le popup IG promo (fenêtre enfant WS_CHILD embarquée) clignotait pendant le resize de l'overlay : chaque tick 'resize' repositionnait la fenêtre native. Une première passe (retract au mousedown / restore au mouseup côté renderer) était instable — les resizes OS natifs, unmaximize et bounds de profil ne passent pas par les handles React, et un mouseup perdu (avalé par le HWND WebView2) laissait le promo caché définitivement.
