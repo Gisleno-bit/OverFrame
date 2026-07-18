@@ -26,6 +26,8 @@ _(vide — à remplir par Claude au début d'une session de travail)_
 
 ### Qualité & robustesse
 - [ ] **[BUG] Adblock mort — uBlock Origin (MV2) tué par WebView2 150 — reste à remplacer** — le runtime WebView2 Evergreen (Chromium/Edge 150) a définitivement retiré Manifest V2 (fin juin 2026) ; uBlock 1.71 est MV2. `AddBrowserExtension`/`Enable` répondent "succès", zéro erreur, mais rien ne s'installe ni ne filtre. Probe du 2026-07-18 dans un onglet réel : `googlesyndication`/`doubleclick`/`GTM`/`GA` chargent (pubs NON bloquées) ; `fbevents`/TikTok bloqués par la **tracking prevention intégrée d'Edge** (toujours active — d'où l'impression utilisateur "pas de pub"). Fait : toggle Settings désactivé avec explication honnête (2026-07-18). Pistes de remplacement : uBlock Origin Lite (MV3 — vérifier support WebView2), niveau de tracking prevention via `ICoreWebView2Profile3`, ou filtrage `WebResourceRequested`.
+- [ ] **[SEC] `check:deps` rouge sur koffi — trancher** — le script interdit les bindings natifs "hooks/injection", mais koffi ne sert ici qu'à des appels Win32 en lecture seule pour la détection de jeu (`getExeProductName`, `getVisibleGames`, `getWindowIcon`) — pas d'injection (uiohook, déjà accepté, est plus intrusif). Décision : allowlister koffi avec justification dans le script, ou remplacer par un mini-addon dédié. En attendant, `pnpm check:deps` échoue.
+- [ ] **[FIX] Smoke : refuser un port 9119 déjà occupé** — si une instance dev tourne déjà, l'enfant du smoke saute son devServer (`Port 9119 already in use`) et le smoke mesure silencieusement l'instance PRÉ-EXISTANTE (constaté le 2026-07-18 : RAM 477 MB et version 0.1.0 venaient de l'app dev, pas du build testé). Pinger 9119 avant le spawn et échouer avec un message clair.
 - [ ] **[QA] Findings mineurs qa-tester (2026-07-18)** — `setIconUrl`/`create` sans sanitisation interne (l'IPC valide déjà — défense en profondeur), import de `sections: ['', ' ']` produit `sections: []` (active le mode sections à tort), `moveLink` avec id inconnu persiste quand même (bump `updatedAt`).
 - [ ] **[VALID HUMAIN] [FEAT] WebView2 — test réel Google + Cloudflare** — vérifier un vrai login Google et un site Cloudflare-protégé (Turnstile inclus) dans un onglet Overframe. Les onglets sont désormais rendus par Edge WebView2 (vrai navigateur), donc plus de spoofing `navigator.userAgentData` : l'ancien résiduel Electron est levé. Vérifier aussi `pnpm make` (addon packagé en `extraResource`).
 - [ ] **[PERF] RAM au boot ~310 MB > budget 300** — détecté par `pnpm smoke` le 2026-06-01 (overlay FOCUSED / welcome au lancement). Lancer le subagent `perf-auditor`, isoler la cause (welcome page ? WebContentsView retenue ?), consigner avant/après. NB : la RAM observée varie fortement run-à-run (122–310 MB) — mesurer plusieurs fois.
@@ -36,13 +38,12 @@ _(vide — à remplir par Claude au début d'une session de travail)_
 
 ### UX & polish
 - [ ] **Context menu** dans les WebContentsViews : right-click → copier, coller, ouvrir dans un nouvel onglet, inspecter.
-- [ ] **Raccourci Ctrl+L** : focus address bar depuis n'importe quel état.
 - [ ] **Vérifier l'onboarding flow** : parcourir le OnboardingOverlay complet, valider chaque étape, tester sur une installation fraîche (devStoreReset).
 
 ### Release
-- [ ] **README** : ajouter captures d'écran + GIF de démonstration (enregistrer l'overlay en action sur un jeu).
-- [ ] **Build packagé** : valider `pnpm make` produit un `.exe` installable sans droits admin, SmartScreen bypass documenté.
-- [ ] **FAQ README** : SmartScreen workaround, disclaimer anti-cheat, modes jeu supportés (borderless windowed only).
+- [ ] **README — GIF de démo** : enregistrer l'overlay en action sur un vrai jeu (tâche humaine — captures statiques faites le 2026-07-18).
+- [ ] **[VALID HUMAIN] Installation réelle** : dérouler `Overframe-Setup.exe` (produit le 2026-07-18) sur machine propre — pas de droits admin demandés, app démarre, tray OK.
+- [ ] **[CHORE] Dégraisser le package** : l'installeur pèse 169 MB ; `app.asar.unpacked` embarque un dossier parasite `@rollup/rollup-win32-x64-msvc_tmp_*` (outil de build) — auditer les exclusions electron-forge.
 
 ---
 
@@ -62,6 +63,9 @@ _(vide — à remplir par Claude au début d'une session de travail)_
 
 ## Done — Récent
 
+- [x] **[RELEASE] `pnpm make` validé** (2026-07-18) — `Overframe-Setup.exe` + nupkg + zip produits, addon WebView2 présent en `extraResource`, natifs unpacked OK
+- [x] **[RELEASE] README release-ready** (2026-07-18) — captures (home, collections), FAQ (SmartScreen, anti-cheat, borderless, adblock, données locales), tech stack corrigée (WebView2)
+- [x] **Raccourci Ctrl+L** — déjà implémenté (App.tsx, handler DOM) ; la tâche était périmée
 - [x] **[FIX] Smoke flaky sur `/overlay/show`** (2026-07-18) — poll-until (3 s max, pas de sleep fixe) sur show ET hide ; ALL PASS ×3 consécutifs
 - [x] **[BUG court terme] Toggle adblock honnête** (2026-07-18) — case désactivée + bandeau explicatif en langage simple dans Settings → Browser (vérifié visuellement)
 - [x] **[TEST] Couverture 100% restaurée après le WIP bannerFocus** (2026-07-18) — +24 tests (CollectionsManager sections/moveLink/sanitizeFocus, backfill quickLinks, appStore.setHomeTab) via qa-tester

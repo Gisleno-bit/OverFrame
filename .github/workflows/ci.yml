@@ -54,7 +54,10 @@ jobs:
   # native rebuild + typecheck + bundle on Windows.
   build-windows:
     name: Build (Windows / native modules)
-    runs-on: windows-latest
+    # Pinned: windows-latest moved to VS2026 (v18), which node-gyp can't use and
+    # which contradicts our .npmrc msvs_version=2022. windows-2022 ships VS2022,
+    # matching the documented local requirement (VS Build Tools 2022).
+    runs-on: windows-2022
 
     steps:
       - name: Checkout
