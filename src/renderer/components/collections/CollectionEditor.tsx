@@ -12,6 +12,7 @@ import { Tooltip } from '../ui/Tooltip'
 import { Favicon, InfoTip } from './atoms'
 import { PLATFORM_META } from './CreatorCollectionView'
 import { bannerImageStyle } from '../../lib/bannerFocusStyle'
+import { hostMatchesDomain } from '@shared/hostMatch'
 import {
   BANNER_ASPECT_RATIO, coverBaseScale, maxPanOffset, clampOffset,
   offsetToFocusPercent, focusPercentToOffset,
@@ -68,15 +69,16 @@ const ACCENT_COLORS: Array<{ hex: string; name: string }> = [
 
 function detectPlatform(url: string): CreatorPlatform {
   try {
-    const h = new URL(url).hostname.toLowerCase()
-    if (h.includes('twitch.tv')) return 'twitch'
-    if (h.includes('youtube.com') || h.includes('youtu.be')) return 'youtube'
-    if (h.includes('kick.com')) return 'kick'
-    if (h.includes('twitter.com') || h.includes('x.com')) return 'twitter'
-    if (h.includes('tiktok.com')) return 'tiktok'
-    if (h.includes('discord.gg') || h.includes('discord.com')) return 'discord'
-    if (h.includes('ko-fi.com')) return 'kofi'
-    if (h.includes('patreon.com')) return 'patreon'
+    const h = new URL(url).hostname
+    const on = (domain: string): boolean => hostMatchesDomain(h, domain)
+    if (on('twitch.tv')) return 'twitch'
+    if (on('youtube.com') || on('youtu.be')) return 'youtube'
+    if (on('kick.com')) return 'kick'
+    if (on('twitter.com') || on('x.com')) return 'twitter'
+    if (on('tiktok.com')) return 'tiktok'
+    if (on('discord.gg') || on('discord.com')) return 'discord'
+    if (on('ko-fi.com')) return 'kofi'
+    if (on('patreon.com')) return 'patreon'
   } catch { /* invalid URL */ }
   return 'website'
 }

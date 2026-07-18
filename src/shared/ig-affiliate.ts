@@ -16,6 +16,8 @@
  * Matching order: exact exe first, then keywords on profile name, then catch-all (*).
  */
 
+import { hostMatchesDomain } from './hostMatch'
+
 export const IG_AFFILIATE_TAG = 'overframe'
 export const IG_BASE_URL      = 'https://www.instant-gaming.com'
 export const IG_HOME          = `${IG_BASE_URL}/en/?igr=${IG_AFFILIATE_TAG}`
@@ -26,7 +28,7 @@ const AFFILIATE = `&igr=${IG_AFFILIATE_TAG}`
 // ── URL helpers ───────────────────────────────────────────────────────────────
 
 export function isIGUrl(url: string): boolean {
-  try { return new URL(url).hostname.includes('instant-gaming.com') } catch { return false }
+  try { return hostMatchesDomain(new URL(url).hostname, 'instant-gaming.com') } catch { return false }
 }
 export function hasIGAffiliate(url: string): boolean {
   try { return new URL(url).searchParams.get('igr') === IG_AFFILIATE_TAG } catch { return false }
@@ -34,7 +36,7 @@ export function hasIGAffiliate(url: string): boolean {
 export function addIGAffiliate(url: string): string {
   try {
     const u = new URL(url)
-    if (!u.hostname.includes('instant-gaming.com')) return url
+    if (!hostMatchesDomain(u.hostname, 'instant-gaming.com')) return url
     u.searchParams.set('igr', IG_AFFILIATE_TAG)
     return u.toString()
   } catch { return url }

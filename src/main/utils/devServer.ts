@@ -127,7 +127,8 @@ export function startDevServer({ overlay, tabs, profiles }: Deps): void {
         res.end(JSON.stringify({ ok: true, result }, null, 2))
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: false, error: String(err) }))
+        // Message only — never the stack (CodeQL js/stack-trace-exposure).
+        res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }))
       }
       return
     }
@@ -165,7 +166,8 @@ export function startDevServer({ overlay, tabs, profiles }: Deps): void {
         res.end(JSON.stringify({ ok: true, result }, null, 2))
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ ok: false, error: String(err) }))
+        // Message only — never the stack (CodeQL js/stack-trace-exposure).
+        res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }))
       }
       return
     }
