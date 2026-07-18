@@ -26,6 +26,30 @@ Le hook `SessionStart` injecte automatiquement la **dernière** entrée (titre +
 
 ---
 
+## [2026-07-18] [DIAG+FIX] Attribution IG, mort de l'adblock (MV2), couverture 100%, smoke stable
+
+**Contexte :** L'utilisateur a validé un plan revenu v1.0 (release → distribution passive → attribution IG → loadouts). Premier chantier : diagnostiquer pourquoi les commissions IG ne tombent pas, puis solidifier la branche pour le merge.
+
+**Fichiers modifiés :**
+- `scripts/smoke.mjs` — poll-until (3 s) au lieu des sleeps fixes sur show/hide ; le flaky 1-run-sur-2 ne se reproduit plus (ALL PASS ×3)
+- `SettingsPanel.tsx` — toggle adblock désactivé + bandeau honnête (l'adblock ne fonctionne plus, voir Observations)
+- `CollectionsManager.ts` — `updateLink` accepte `{ section: null }` (fix de signature + section exclue du spread)
+- `store/index.ts` — garde `l ?? {}` dans le backfill quickLinks (une entrée `null` faisait planter la migration)
+- Tests : +24 (CollectionsManager +19, store/index +3 dont régression null, appStore +1) — gate 100/100/100/100 restauré après le WIP bannerFocus
+
+**Observations :**
+- **Adblock mort silencieusement** : WebView2 Evergreen auto-mis à jour vers Edge/Chromium 150, qui a retiré Manifest V2 définitivement (fin juin 2026). uBlock 1.71 (MV2) : Add/Enable "succès" mais zéro fichier installé, zéro filtrage. Probe onglet réel : googlesyndication/doubleclick/GTM/GA chargent ; fbevents/TikTok bloqués par la tracking prevention **intégrée d'Edge** (toujours active) — d'où l'impression "pas de pub" côté utilisateur.
+- **Attribution IG** : le param `igr=overframe` survit (pas de removeparam), profil WebView2 persistant (cookies de juin présents), adblock in-app hors de cause. Le support IG confirme que les auto-achats (même compte/machine) sont filtrés → tests réels impossibles avant d'avoir de vrais utilisateurs. Décision : on gèle le sujet jusqu'à la release.
+- RAM au boot vue à 477 MB pendant un smoke (budget 300, tâche [PERF] déjà au backlog).
+
+**Décisions :** Toggle adblock désactivé plutôt que caché (honnêteté envers l'utilisateur) ; remplacement adblock = tâche dédiée (uBlock Lite MV3 à évaluer). Plan revenu acté : release v1.0 → Microsoft Store + winget → loadouts partagés (croissance).
+
+**Questions ouvertes :** WebView2 150 supporte-t-il les extensions MV3 (service workers) ? Sinon, filtrage `WebResourceRequested` natif. Findings mineurs qa-tester consignés dans TASKS.
+
+**Prochaine étape :** Merge `feat/game-detection` → `dev`, puis chantier release v1.0 (README captures/GIF, `pnpm make` validé, FAQ SmartScreen) et listing Microsoft Store.
+
+---
+
 ## [2026-07-11] [FIX] Flicker du promo IG au resize + ménage des commits
 
 **Contexte :** Le popup IG promo (fenêtre enfant WS_CHILD embarquée) clignotait pendant le resize de l'overlay : chaque tick 'resize' repositionnait la fenêtre native. Une première passe (retract au mousedown / restore au mouseup côté renderer) était instable — les resizes OS natifs, unmaximize et bounds de profil ne passent pas par les handles React, et un mouseup perdu (avalé par le HWND WebView2) laissait le promo caché définitivement.
