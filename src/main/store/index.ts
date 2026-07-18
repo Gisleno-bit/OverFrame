@@ -148,7 +148,9 @@ export function migrateStore(): void {
   const rawLinks = settingsNow.quickLinks as unknown[] | undefined
   if (Array.isArray(rawLinks) && rawLinks.some((l) => !l || typeof (l as Record<string, unknown>).id !== 'string')) {
     const migratedLinks = rawLinks.map((l) => {
-      const link = l as Record<string, unknown>
+      // `l` can be literally null/undefined in a corrupted store — the some() above
+      // treats that as needing migration, so the map must survive it too.
+      const link = (l ?? {}) as Record<string, unknown>
       return {
         id: typeof link.id === 'string' ? link.id : randomUUID(),
         name: typeof link.name === 'string' ? link.name : '',

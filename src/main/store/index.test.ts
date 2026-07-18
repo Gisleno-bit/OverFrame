@@ -14,7 +14,7 @@ vi.mock('electron-store', () => {
 })
 
 import { store, migrateStore, getStorePath } from './index'
-import { DEFAULT_SHORTCUTS, DEFAULT_PROFILE_ID, type Settings } from '@shared/types'
+import { DEFAULT_SHORTCUTS, DEFAULT_PROFILE_ID, DEFAULT_HOMEPAGE, type Settings } from '@shared/types'
 
 type Raw = Record<string, unknown>
 
@@ -182,6 +182,47 @@ describe('migrateStore — quickLinks id backfill', () => {
     expect((store.get('settings') as Settings).quickLinks).toBeUndefined()
   })
 
+  it('survives a literally null entry in a corrupted store (regression: the map used to crash)', () => {
+    store.set('settings', {
+      shortcuts: { ...DEFAULT_SHORTCUTS },
+      startWithWindows: true,
+      activeProfileId: DEFAULT_PROFILE_ID,
+      hasCompletedOnboarding: false,
+      showMemoryUsage: false,
+      quickLinks: [null, { id: 'ok', name: 'A', url: 'https://a.tld' }],
+    } as unknown as Settings)
+
+    expect(() => migrateStore()).not.toThrow()
+
+    const links = (store.get('settings') as Settings).quickLinks ?? []
+    expect(links).toHaveLength(2)
+    expect(typeof links[0].id).toBe('string')
+    expect(links[0].name).toBe('')
+    expect(links[0].url).toBe('')
+    expect(links[1]).toEqual({ id: 'ok', name: 'A', url: 'https://a.tld' })
+  })
+
+  it('coerces malformed legacy entries while keeping valid ids and descriptions', () => {
+    store.set('settings', {
+      shortcuts: { ...DEFAULT_SHORTCUTS },
+      startWithWindows: true,
+      activeProfileId: DEFAULT_PROFILE_ID,
+      hasCompletedOnboarding: false,
+      showMemoryUsage: false,
+      quickLinks: [
+        { name: 'A', url: 'https://a.tld' },                          // missing id → triggers the backfill
+        { id: 'kept-id', name: 42, url: null, description: 'kept' },  // non-string name/url coerced to ''
+      ],
+    } as unknown as Settings)
+
+    migrateStore()
+
+    const links = (store.get('settings') as Settings).quickLinks ?? []
+    expect(typeof links[0].id).toBe('string')
+    expect(links[0]).toMatchObject({ name: 'A', url: 'https://a.tld' })
+    expect(links[1]).toEqual({ id: 'kept-id', name: '', url: '', description: 'kept' })
+  })
+
   it('does not re-migrate (and does not change ids) once already migrated', () => {
     store.set('settings', {
       shortcuts: { ...DEFAULT_SHORTCUTS },
@@ -316,6 +357,28 @@ describe('migrateStore — quickLinks homepage dedup', () => {
 
     const links = (store.get('settings') as Settings).quickLinks ?? []
     expect(links.map((l) => l.id)).toEqual(['yt'])
+  })
+
+  it('falls back to the default homepage URL when settings has no homepageUrl', () => {
+    store.set('quickLinksHomepageDeduped', false)
+    store.set('settings', {
+      shortcuts: { ...DEFAULT_SHORTCUTS },
+      startWithWindows: true,
+      activeProfileId: DEFAULT_PROFILE_ID,
+      hasCompletedOnboarding: false,
+      showMemoryUsage: false,
+      // homepageUrl intentionally absent → DEFAULT_HOMEPAGE fallback
+      quickLinks: [
+        { id: 'stale-default-home', name: 'Google', url: DEFAULT_HOMEPAGE },
+        { id: 'yt', name: 'YouTube', url: 'https://www.youtube.com' },
+      ],
+    } as unknown as Settings)
+
+    migrateStore()
+
+    const links = (store.get('settings') as Settings).quickLinks ?? []
+    expect(links.map((l) => l.id)).toEqual(['yt'])
+    expect(store.get('quickLinksHomepageDeduped')).toBe(true)
   })
 
   it('does not re-run once already deduped', () => {
