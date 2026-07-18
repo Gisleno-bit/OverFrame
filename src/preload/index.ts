@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/ipc'
 import type {
+  BannerFocus,
   Collection,
   CollectionAuthor,
   CollectionExport,
@@ -99,6 +100,10 @@ const api = {
       ipcRenderer.invoke(IPC.CollectionsSetIconUrl, id, iconUrl),
     setBannerUrl: (id: string, bannerUrl: string | null): Promise<Collection | null> =>
       ipcRenderer.invoke(IPC.CollectionsSetBannerUrl, id, bannerUrl),
+    setBannerFocus: (id: string, focus: BannerFocus | null): Promise<Collection | null> =>
+      ipcRenderer.invoke(IPC.CollectionsSetBannerFocus, id, focus),
+    setIconFocus: (id: string, focus: BannerFocus | null): Promise<Collection | null> =>
+      ipcRenderer.invoke(IPC.CollectionsSetIconFocus, id, focus),
     setDescription: (id: string, description: string | null): Promise<Collection | null> =>
       ipcRenderer.invoke(IPC.CollectionsSetDescription, id, description),
     setAuthor: (id: string, author: CollectionAuthor | null): Promise<Collection | null> =>

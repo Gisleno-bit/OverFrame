@@ -434,6 +434,24 @@ export function registerIpcHandlers(deps: Deps): void {
     }
     return collections.setBannerUrl(id, bannerUrl ?? null)
   })
+  ipcMain.handle(IPC.CollectionsSetBannerFocus, (_e, id: string, focus: unknown) => {
+    if (focus !== null && focus !== undefined) {
+      if (typeof focus !== 'object') return null
+      const f = focus as Record<string, unknown>
+      const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+      if (!finite(f.x) || !finite(f.y) || !finite(f.zoom)) return null
+    }
+    return collections.setBannerFocus(id, focus as { x: number; y: number; zoom: number } | null)
+  })
+  ipcMain.handle(IPC.CollectionsSetIconFocus, (_e, id: string, focus: unknown) => {
+    if (focus !== null && focus !== undefined) {
+      if (typeof focus !== 'object') return null
+      const f = focus as Record<string, unknown>
+      const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+      if (!finite(f.x) || !finite(f.y) || !finite(f.zoom)) return null
+    }
+    return collections.setIconFocus(id, focus as { x: number; y: number; zoom: number } | null)
+  })
   ipcMain.handle(IPC.CollectionsSetDescription, (_e, id: string, description: unknown) => {
     if (description !== null && description !== undefined
       && (typeof description !== 'string' || description.length > MAX_NOTE_LENGTH)) return null

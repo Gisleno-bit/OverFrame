@@ -72,7 +72,7 @@ export function LinkRow({ link, isDragging, onOpen, onEdit, onRemove }: LinkRowP
       <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
         {link.note && (
           <Tooltip label={link.note} side="top" wrap>
-            <Button size="icon" variant="ghost" aria-label="View note" className="h-6 w-6 text-muted-foreground/40 hover:text-muted-foreground">
+            <Button size="icon" variant="ghost" aria-label="View note" className="h-6 w-6 text-muted-foreground hover:text-foreground">
               <NotebookPen size={10} aria-hidden="true" />
             </Button>
           </Tooltip>

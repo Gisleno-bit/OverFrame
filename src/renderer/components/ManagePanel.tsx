@@ -12,7 +12,7 @@ import {
   X as XIcon,
 } from 'lucide-react'
 import { DEFAULT_PROFILE_ID } from '@shared/types'
-import type { Collection, CollectionAuthor, Profile } from '@shared/types'
+import type { BannerFocus, Collection, CollectionAuthor, Profile } from '@shared/types'
 import { cn } from '../lib/cn'
 import { useAppStore } from '../store/appStore'
 import { useMissionsStore } from '../store/missionsStore'
@@ -25,6 +25,7 @@ import { ProfileCreateForm, ProfileEditForm } from './collections/ProfileForms'
 import { CollectionEditor } from './collections/CollectionEditor'
 import { CreatorCollectionView } from './collections/CreatorCollectionView'
 import { CopiedTooltip } from './collections/atoms'
+import { bannerImageStyle } from '../lib/bannerFocusStyle'
 
 // ── Drag state ────────────────────────────────────────────────────────────────
 interface DragState { draggedId: string | null; overId: string | null }
@@ -308,6 +309,16 @@ export function ManagePanel(): JSX.Element {
 
   const handleSetBannerUrl = async (cid: string, url: string | null): Promise<void> => {
     await window.aether.collections.setBannerUrl(cid, url)
+    await refresh()
+  }
+
+  const handleSetBannerFocus = async (cid: string, focus: BannerFocus | null): Promise<void> => {
+    await window.aether.collections.setBannerFocus(cid, focus)
+    await refresh()
+  }
+
+  const handleSetIconFocus = async (cid: string, focus: BannerFocus | null): Promise<void> => {
+    await window.aether.collections.setIconFocus(cid, focus)
     await refresh()
   }
 
@@ -636,7 +647,9 @@ export function ManagePanel(): JSX.Element {
                                   aria-label={`${coll.name}, ${coll.links.length} link${coll.links.length !== 1 ? 's' : ''}`}
                                 >
                                   {coll.iconUrl
-                                    ? <img src={coll.iconUrl} alt="" className="h-3.5 w-3.5 shrink-0 rounded-sm object-contain" onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                                    ? <span className="h-3.5 w-3.5 shrink-0 rounded-sm overflow-hidden">
+                                        <img src={coll.iconUrl} alt="" className="h-full w-full object-cover" style={bannerImageStyle(coll.iconFocus)} onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                                      </span>
                                     : <Globe size={9} className="text-muted-foreground shrink-0" aria-hidden="true" />
                                   }
                                   <span className={cn('text-[11px] truncate flex-1', isSelected && 'text-primary font-medium')}>
@@ -725,7 +738,7 @@ export function ManagePanel(): JSX.Element {
           type="button"
           onClick={() => setLeftCollapsed((v) => !v)}
           aria-label={leftCollapsed ? 'Show sidebar' : 'Hide sidebar'}
-          className="absolute left-0 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center w-2.5 h-10 rounded-r-md bg-muted/50 border-y border-r border-border/60 text-muted-foreground/40 hover:text-foreground hover:bg-muted hover:border-border transition-all"
+          className="absolute left-0 top-1/2 -translate-y-1/2 z-10 flex items-center justify-center w-2.5 h-10 rounded-r-md bg-muted/50 border-y border-r border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted hover:border-border transition-all"
         >
           {leftCollapsed ? <ChevronRight size={9} /> : <ChevronLeft size={9} />}
         </button>
@@ -764,7 +777,9 @@ export function ManagePanel(): JSX.Element {
                 onSetName={(name) => void handleSetName(selectedCollection.id, name)}
                 onSetDescription={(desc) => void handleSetDescription(selectedCollection.id, desc)}
                 onSetIconUrl={(url) => void handleSetIconUrl(selectedCollection.id, url)}
+                onSetIconFocus={(focus) => void handleSetIconFocus(selectedCollection.id, focus)}
                 onSetBannerUrl={(url) => void handleSetBannerUrl(selectedCollection.id, url)}
+                onSetBannerFocus={(focus) => void handleSetBannerFocus(selectedCollection.id, focus)}
                 onSetAuthor={(author) => void handleSetAuthor(selectedCollection.id, author)}
                 onExport={() => void handleExport(selectedCollection.id)}
               />

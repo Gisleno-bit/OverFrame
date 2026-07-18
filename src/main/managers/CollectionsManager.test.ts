@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { inflateSync } from 'node:zlib'
-import type { Collection, CollectionAuthor, CollectionExport } from '@shared/types'
-import { MAX_PINNED_LINKS } from '@shared/types'
+import type { Collection, CollectionAuthor, CollectionExport, CreatorLink, CreatorPlatform } from '@shared/types'
+import { MAX_PINNED_LINKS, MAX_CREATOR_LINKS, MAX_COLLECTION_SECTIONS } from '@shared/types'
 
 // In-memory replacement for the electron-store-backed `store` module.
 const h = vi.hoisted(() => ({ collections: [] as Collection[] }))
@@ -86,6 +86,34 @@ describe('CollectionsManager — mutations', () => {
     expect(mgr.setIconUrl(c.id, 'https://i/x.png')?.iconUrl).toBe('https://i/x.png')
     expect(mgr.setIconUrl(c.id, null)?.iconUrl).toBeUndefined()
     expect(mgr.setIconUrl('nope', null)).toBeNull()
+  })
+
+  it('setBannerUrl sets and clears the banner, rejecting unsafe values', () => {
+    const c = mgr.create({ name: 'X', profileId: 'p1' })
+    expect(mgr.setBannerUrl(c.id, 'https://i/banner.png')?.bannerUrl).toBe('https://i/banner.png')
+    expect(mgr.setBannerUrl(c.id, 'javascript:1')?.bannerUrl).toBeUndefined()
+    expect(mgr.setBannerUrl(c.id, null)?.bannerUrl).toBeUndefined()
+    expect(mgr.setBannerUrl('nope', null)).toBeNull()
+  })
+
+  it('setBannerFocus clamps x/y/zoom into range and clears on null', () => {
+    const c = mgr.create({ name: 'X', profileId: 'p1' })
+    expect(mgr.setBannerFocus(c.id, { x: 10, y: 20, zoom: 2 })?.bannerFocus).toEqual({ x: 10, y: 20, zoom: 2 })
+    expect(mgr.setBannerFocus(c.id, { x: -5, y: 150, zoom: 99 })?.bannerFocus).toEqual({ x: 0, y: 100, zoom: 4 })
+    expect(mgr.setBannerFocus(c.id, { x: 10, y: 10, zoom: 0 })?.bannerFocus).toEqual({ x: 10, y: 10, zoom: 1 })
+    expect(mgr.setBannerFocus(c.id, { x: NaN, y: 10, zoom: 1 })?.bannerFocus).toBeUndefined()
+    expect(mgr.setBannerFocus(c.id, null)?.bannerFocus).toBeUndefined()
+    expect(mgr.setBannerFocus('nope', null)).toBeNull()
+  })
+
+  it('setIconFocus clamps x/y/zoom into range and clears on null', () => {
+    const c = mgr.create({ name: 'X', profileId: 'p1' })
+    expect(mgr.setIconFocus(c.id, { x: 10, y: 20, zoom: 2 })?.iconFocus).toEqual({ x: 10, y: 20, zoom: 2 })
+    expect(mgr.setIconFocus(c.id, { x: -5, y: 150, zoom: 99 })?.iconFocus).toEqual({ x: 0, y: 100, zoom: 4 })
+    expect(mgr.setIconFocus(c.id, { x: 10, y: 10, zoom: 0 })?.iconFocus).toEqual({ x: 10, y: 10, zoom: 1 })
+    expect(mgr.setIconFocus(c.id, { x: NaN, y: 10, zoom: 1 })?.iconFocus).toBeUndefined()
+    expect(mgr.setIconFocus(c.id, null)?.iconFocus).toBeUndefined()
+    expect(mgr.setIconFocus('nope', null)).toBeNull()
   })
 
   it('addLink appends with defaults and order', () => {
@@ -178,6 +206,23 @@ describe('CollectionsManager — export', () => {
     expect(decoded.iconUrl).toBe('https://i/x.png')
     expect(mgr.export('nope')).toBeNull()
   })
+
+  it('export carries banner + icon/banner focus, and omits them when absent', () => {
+    const c = mgr.create({ name: 'X', profileId: 'p1', iconUrl: 'https://i/x.png' })
+    mgr.setBannerUrl(c.id, 'https://i/banner.png')
+    mgr.setBannerFocus(c.id, { x: 30, y: 60, zoom: 2 })
+    mgr.setIconFocus(c.id, { x: 10, y: 20, zoom: 1.5 })
+    const decoded = decodeExport(mgr.export(c.id)!)
+    expect(decoded.bannerUrl).toBe('https://i/banner.png')
+    expect(decoded.bannerFocus).toEqual({ x: 30, y: 60, zoom: 2 })
+    expect(decoded.iconFocus).toEqual({ x: 10, y: 20, zoom: 1.5 })
+
+    const plain = mgr.create({ name: 'Y', profileId: 'p1' })
+    const d2 = decodeExport(mgr.export(plain.id)!)
+    expect(d2.bannerUrl).toBeUndefined()
+    expect(d2.bannerFocus).toBeUndefined()
+    expect(d2.iconFocus).toBeUndefined()
+  })
 })
 
 describe('CollectionsManager — import', () => {
@@ -256,6 +301,33 @@ describe('CollectionsManager — import', () => {
     expect(mgr.import(b64({ version: 1, name: 'x', source: 'user', iconUrl: tooLong, links: [] }), 'p1')!.iconUrl).toBeUndefined()
     expect(mgr.import(b64({ version: 1, name: 'x', source: 'user', iconUrl: 'javascript:1', links: [] }), 'p1')!.iconUrl).toBeUndefined()
     expect(mgr.import(b64({ version: 1, name: 'x', source: 'user', iconUrl: 'http%', links: [] }), 'p1')!.iconUrl).toBeUndefined()
+  })
+
+  it('imports banner + focus data, sanitizing hostile values', () => {
+    const payload: CollectionExport = {
+      version: 1,
+      name: 'Styled',
+      source: 'community',
+      bannerUrl: 'https://i/banner.png',
+      bannerFocus: { x: 30, y: 60, zoom: 2 },
+      iconFocus: { x: -5, y: 150, zoom: 99 }, // out of range → clamped
+      links: [],
+    }
+    const c = mgr.import(b64(payload), 'p1')!
+    expect(c.bannerUrl).toBe('https://i/banner.png')
+    expect(c.bannerFocus).toEqual({ x: 30, y: 60, zoom: 2 })
+    expect(c.iconFocus).toEqual({ x: 0, y: 100, zoom: 4 })
+
+    const hostile = mgr.import(b64({
+      version: 1, name: 'x', source: 'user',
+      bannerUrl: 'javascript:1',
+      bannerFocus: { x: NaN, y: 1, zoom: 1 },
+      iconFocus: 'evil' as unknown as { x: number; y: number; zoom: number },
+      links: [],
+    }), 'p1')!
+    expect(hostile.bannerUrl).toBeUndefined()
+    expect(hostile.bannerFocus).toBeUndefined()
+    expect(hostile.iconFocus).toBeUndefined()
   })
 
   it('clamps an overly long name to 200 chars', () => {
@@ -374,6 +446,206 @@ describe('CollectionsManager — previewImport', () => {
 
   it('returns null for an invalid payload', () => {
     expect(mgr.previewImport(Buffer.from('not json', 'utf8').toString('base64'))).toBeNull()
+  })
+})
+
+describe('CollectionsManager — creator links', () => {
+  const twitch: CreatorLink = { platform: 'twitch', url: 'https://twitch.tv/roirr' }
+
+  it('create keeps valid creator links, dropping unknown platforms, bad urls and non-objects', () => {
+    const c = mgr.create({
+      name: 'X',
+      profileId: 'p1',
+      author: {
+        handle: 'roirr',
+        links: [
+          twitch,
+          { platform: 'myspace' as CreatorPlatform, url: 'https://myspace.com/x' }, // unknown platform
+          { platform: 'youtube', url: 'javascript:alert(1)' },                      // non-http url
+          'evil' as unknown as CreatorLink,                                          // non-object entry
+        ],
+      },
+    })
+    expect(c.author?.links).toEqual([twitch])
+  })
+
+  it('create caps creator links at MAX_CREATOR_LINKS', () => {
+    const links: CreatorLink[] = Array.from({ length: MAX_CREATOR_LINKS + 2 }, (_, i) => ({
+      platform: 'website',
+      url: `https://site${i}.tld`,
+    }))
+    const c = mgr.create({ name: 'X', profileId: 'p1', author: { handle: 'h', links } })
+    expect(c.author?.links).toHaveLength(MAX_CREATOR_LINKS)
+  })
+
+  it('create drops the author entirely when links are all invalid and the handle is empty', () => {
+    const c = mgr.create({
+      name: 'X',
+      profileId: 'p1',
+      author: { handle: '', links: [{ platform: 'youtube', url: 'not a url' }] },
+    })
+    expect(c.author).toBeUndefined()
+  })
+
+  it('create accepts an author whose handle field is missing, defaulting it to an empty string', () => {
+    const c = mgr.create({
+      name: 'X',
+      profileId: 'p1',
+      author: { links: [twitch] } as unknown as CollectionAuthor,
+    })
+    expect(c.author).toEqual({ handle: '', links: [twitch] })
+  })
+})
+
+describe('CollectionsManager — sections', () => {
+  it('addLink stores a sanitized section and omits a blank one', () => {
+    const c = mgr.create({ name: 'X', profileId: 'p1' })
+    const withSection = mgr.addLink(c.id, { title: 'a', url: 'https://a', section: '  Guides  ' })!
+    expect(withSection.links[0].section).toBe('Guides')
+    const withBlank = mgr.addLink(c.id, { title: 'b', url: 'https://b', section: '   ' })!
+    expect(withBlank.links[1].section).toBeUndefined()
+  })
+
+  it('updateLink sets, sanitizes, and clears the section', () => {
+    const c = mgr.create({ name: 'X', profileId: 'p1' })
+    const withLink = mgr.addLink(c.id, { title: 'a', url: 'https://a' })!
+    const id = withLink.links[0].id
+    expect(mgr.updateLink(c.id, id, { section: '  S  ' })!.links[0].section).toBe('S')
+    expect(mgr.updateLink(c.id, id, { section: null })!.links[0].section).toBeUndefined()
+    expect(mgr.updateLink(c.id, id, { section: '   ' })!.links[0].section).toBeUndefined()
+  })
+
+  it('setSections trims, drops empties, and caps at MAX_COLLECTION_SECTIONS', () => {
+    const c = mgr.create({ name: 'X', profileId: 'p1' })
+    expect(mgr.setSections(c.id, ['  A  ', '', '   ', 'B'])!.sections).toEqual(['A', 'B'])
+    const many = Array.from({ length: MAX_COLLECTION_SECTIONS + 5 }, (_, i) => `s${i}`)
+    expect(mgr.setSections(c.id, many)!.sections).toHaveLength(MAX_COLLECTION_SECTIONS)
+    expect(mgr.setSections('nope', [])).toBeNull()
+  })
+
+  it('renameSection renames the section and relabels only its links', () => {
+    const c = mgr.create({ name: 'X', profileId: 'p1' })
+    mgr.setSections(c.id, ['A', 'B'])
+    mgr.addLink(c.id, { title: 'a', url: 'https://a', section: 'A' })
+    mgr.addLink(c.id, { title: 'b', url: 'https://b', section: 'B' })
+    const after = mgr.renameSection(c.id, 'A', '  New  ')!
+    expect(after.sections).toEqual(['New', 'B'])
+    expect(after.links.map((l) => l.section)).toEqual(['New', 'B'])
+  })
+
+  it('renameSection rejects a blank new name and tolerates a collection without sections', () => {
+    const c = mgr.create({ name: 'X', profileId: 'p1' })
+    expect(mgr.renameSection(c.id, 'A', '   ')).toBeNull()
+    expect(mgr.renameSection(c.id, 'ghost', 'New')!.sections).toEqual([])
+    expect(mgr.renameSection('nope', 'A', 'B')).toBeNull()
+  })
+
+  it('deleteSection removes the section and unsections only its links', () => {
+    const c = mgr.create({ name: 'X', profileId: 'p1' })
+    mgr.setSections(c.id, ['A', 'B'])
+    mgr.addLink(c.id, { title: 'a', url: 'https://a', section: 'A' })
+    mgr.addLink(c.id, { title: 'b', url: 'https://b', section: 'B' })
+    const after = mgr.deleteSection(c.id, 'A')!
+    expect(after.sections).toEqual(['B'])
+    expect(after.links[0].section).toBeUndefined()
+    expect(after.links[1].section).toBe('B')
+  })
+
+  it('deleteSection tolerates a collection without sections', () => {
+    const c = mgr.create({ name: 'X', profileId: 'p1' })
+    expect(mgr.deleteSection(c.id, 'ghost')!.sections).toEqual([])
+    expect(mgr.deleteSection('nope', 'A')).toBeNull()
+  })
+
+  it('export carries the sections list and per-link sections', () => {
+    const c = mgr.create({ name: 'X', profileId: 'p1' })
+    mgr.setSections(c.id, ['A'])
+    mgr.addLink(c.id, { title: 'a', url: 'https://a', section: 'A' })
+    const decoded = decodeExport(mgr.export(c.id)!)
+    expect(decoded.sections).toEqual(['A'])
+    expect(decoded.links[0].section).toBe('A')
+  })
+
+  it('import sanitizes sections (non-strings and blanks dropped, trimmed, capped) and keeps link sections', () => {
+    const payload = {
+      version: 1,
+      name: 'x',
+      source: 'user',
+      sections: ['  A  ', '', 123, 'B'],
+      links: [
+        { title: 'a', url: 'https://a', pinned: false, section: '  A  ' },
+        { title: 'b', url: 'https://b', pinned: false, section: '   ' },
+      ],
+    } as unknown as CollectionExport
+    const c = mgr.import(b64(payload), 'p1')!
+    expect(c.sections).toEqual(['A', 'B'])
+    expect(c.links[0].section).toBe('A')
+    expect(c.links[1].section).toBeUndefined()
+
+    const many = Array.from({ length: MAX_COLLECTION_SECTIONS + 5 }, (_, i) => `s${i}`)
+    const capped = mgr.import(b64({ version: 1, name: 'x', source: 'user', sections: many, links: [] }), 'p1')!
+    expect(capped.sections).toHaveLength(MAX_COLLECTION_SECTIONS)
+  })
+})
+
+describe('CollectionsManager — moveLink', () => {
+  /** Collection with links a (section 'S'), b (unsorted), c (unsorted). */
+  function seed(): { id: string; a: Collection['links'][0]; b: Collection['links'][0]; cc: Collection['links'][0] } {
+    const c = mgr.create({ name: 'X', profileId: 'p1' })
+    mgr.addLink(c.id, { title: 'a', url: 'https://a', section: 'S' })
+    mgr.addLink(c.id, { title: 'b', url: 'https://b' })
+    const full = mgr.addLink(c.id, { title: 'c', url: 'https://c' })!
+    const [a, b, cc] = full.links
+    return { id: c.id, a, b, cc }
+  }
+
+  it('moves a link into a section before the given link and re-indexes order', () => {
+    const { id, a, cc } = seed()
+    const after = mgr.moveLink(id, cc.id, 'S', a.id)!
+    expect(after.links.map((l) => l.title)).toEqual(['c', 'a', 'b'])
+    expect(after.links[0].section).toBe('S')
+    expect(after.links.map((l) => l.order)).toEqual([0, 1, 2])
+  })
+
+  it('appends to the end of the (sanitized) target section when insertBeforeLinkId is null', () => {
+    const { id, cc } = seed()
+    const after = mgr.moveLink(id, cc.id, '  S  ', null)!
+    expect(after.links.map((l) => l.title)).toEqual(['a', 'c', 'b'])
+    expect(after.links[1].section).toBe('S')
+  })
+
+  it('moves a link to unsorted when targetSection is null, appending after the last unsorted link', () => {
+    const { id, a } = seed()
+    const after = mgr.moveLink(id, a.id, null, null)!
+    expect(after.links.map((l) => l.title)).toEqual(['b', 'c', 'a'])
+    expect(after.links[2].section).toBeUndefined()
+  })
+
+  it('treats a blank targetSection as unsorted', () => {
+    const { id, a } = seed()
+    const after = mgr.moveLink(id, a.id, '   ', null)!
+    expect(after.links[2].title).toBe('a')
+    expect(after.links[2].section).toBeUndefined()
+  })
+
+  it('appends at the very end when insertBeforeLinkId is unknown', () => {
+    const { id, a } = seed()
+    const after = mgr.moveLink(id, a.id, 'S', 'ghost')!
+    expect(after.links.map((l) => l.title)).toEqual(['b', 'c', 'a'])
+  })
+
+  it('appends at the very end when the target section has no links yet', () => {
+    const { id, cc } = seed()
+    const after = mgr.moveLink(id, cc.id, 'Empty', null)!
+    expect(after.links.map((l) => l.title)).toEqual(['a', 'b', 'c'])
+    expect(after.links[2].section).toBe('Empty')
+  })
+
+  it('returns the collection unchanged for an unknown link id, and null for an unknown collection', () => {
+    const { id } = seed()
+    const after = mgr.moveLink(id, 'ghost', 'S', null)!
+    expect(after.links.map((l) => l.title)).toEqual(['a', 'b', 'c'])
+    expect(mgr.moveLink('nope', 'x', null, null)).toBeNull()
   })
 })
 

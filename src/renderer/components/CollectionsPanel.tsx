@@ -16,6 +16,7 @@ import { DEFAULT_PROFILE_ID } from '@shared/types'
 import type { Profile } from '@shared/types'
 import { cn } from '../lib/cn'
 import { sanitizeIconUrl } from '../lib/url'
+import { bannerImageStyle } from '../lib/bannerFocusStyle'
 import { useAppStore } from '../store/appStore'
 import { useMissionsStore } from '../store/missionsStore'
 import { useDebounce } from '../hooks/useDebounce'
@@ -565,7 +566,9 @@ export function CollectionsPanel({
                       className={cn('w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-muted/40 focus-visible:outline-none focus-visible:bg-muted/40 focus-visible:ring-1 focus-visible:ring-ring text-left', isSelected && 'bg-muted/20', draggedCollId === c.id && 'opacity-50')}
                       onClick={() => { setSelectedCollectionId(c.id); setLevel('links') }}>
                       {c.iconUrl
-                        ? <img src={c.iconUrl} alt="" className="h-5 w-5 shrink-0 rounded-sm object-contain" onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                        ? <span className="h-5 w-5 shrink-0 rounded-sm overflow-hidden">
+                            <img src={c.iconUrl} alt="" className="h-full w-full object-cover" style={bannerImageStyle(c.iconFocus)} onError={(e) => { e.currentTarget.style.display = 'none' }} />
+                          </span>
                         : <div className="h-5 w-5 shrink-0 rounded-sm bg-muted/60 flex items-center justify-center"><Globe size={10} className="text-muted-foreground" /></div>
                       }
                       <div className="flex-1 min-w-0">

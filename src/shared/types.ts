@@ -194,6 +194,15 @@ export interface Link {
   section?: string
 }
 
+/** Reposition/zoom applied to `bannerUrl` at render time — a few numbers, never a re-encoded image. */
+export interface BannerFocus {
+  /** Focal point as a percentage of the image, matching CSS object-position semantics. */
+  x: number
+  y: number
+  /** Zoom multiplier on top of the cover-fit scale. 1 = no zoom. */
+  zoom: number
+}
+
 export interface Collection {
   id: string
   name: string
@@ -206,6 +215,10 @@ export interface Collection {
   links: Link[]
   iconUrl?: string
   bannerUrl?: string
+  /** Pan/zoom applied to bannerUrl. Undefined = centered, no zoom. */
+  bannerFocus?: BannerFocus
+  /** Pan/zoom applied to iconUrl. Undefined = centered, no zoom. */
+  iconFocus?: BannerFocus
   createdAt: number
   updatedAt: number
   /** Ordered list of section names for creator collections. Undefined = sections not activated. */
@@ -219,7 +232,11 @@ export interface CollectionExport {
   source: CollectionSource
   author?: CollectionAuthor
   iconUrl?: string
+  /** Pan/zoom applied to iconUrl — travels with the share so the page looks identical on import. */
+  iconFocus?: BannerFocus
   bannerUrl?: string
+  /** Pan/zoom applied to bannerUrl — travels with the share so the page looks identical on import. */
+  bannerFocus?: BannerFocus
   sections?: string[]
   links: Array<Pick<Link, 'title' | 'url' | 'note' | 'pinned' | 'favicon' | 'section'>>
 }

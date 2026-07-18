@@ -2,6 +2,7 @@ import { useId, useMemo, useState, useEffect } from 'react'
 import { Check, X, BookOpen, Globe } from 'lucide-react'
 import type { Collection, CollectionPickerPayload } from '@shared/types'
 import { cn } from '../lib/cn'
+import { bannerImageStyle } from '../lib/bannerFocusStyle'
 
 function collectionStorageKey(profileId: string): string {
   return `bookmarkBar:collectionId:${profileId}`
@@ -80,7 +81,9 @@ export function CollectionPickerPopup({ payload }: Props): JSX.Element {
                   {isSelected
                     ? <Check size={12} className="text-primary" aria-hidden="true" />
                     : c.iconUrl
-                      ? <img src={c.iconUrl} alt="" aria-hidden="true" className="h-4 w-4 rounded-sm object-contain" />
+                      ? <span className="h-4 w-4 rounded-sm overflow-hidden">
+                          <img src={c.iconUrl} alt="" aria-hidden="true" className="h-full w-full object-cover" style={bannerImageStyle(c.iconFocus)} />
+                        </span>
                       : <Globe size={11} className="text-muted-foreground" aria-hidden="true" />
                   }
                 </div>

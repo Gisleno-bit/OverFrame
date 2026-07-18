@@ -5,6 +5,7 @@ import { cn } from '../../lib/cn'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
 import { Favicon } from './atoms'
+import { bannerImageStyle } from '../../lib/bannerFocusStyle'
 import { DiscordIcon } from '../icons/DiscordIcon'
 import {
   TwitchIcon,
@@ -28,7 +29,7 @@ function WebsiteIcon({ size = 14, className }: { size?: number; className?: stri
   return <Globe size={size} className={className} />
 }
 
-const PLATFORM_META: Record<CreatorPlatform, PlatformMeta> = {
+export const PLATFORM_META: Record<CreatorPlatform, PlatformMeta> = {
   twitch:  { label: 'Twitch',   color: '#9146FF', textColor: '#c4a3ff', Icon: TwitchIcon  },
   youtube: { label: 'YouTube',  color: '#FF0000', textColor: '#ff7070', Icon: ({ size, className }) => (
     <svg width={size ?? 14} height={size ?? 14} viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -100,7 +101,7 @@ function CreatorLinkGroup({ title, links }: { title: string; links: CreatorLink[
   if (links.length === 0) return null
   return (
     <section className="px-5 py-3.5 border-b border-border/60">
-      <p className="text-[10px] uppercase tracking-[0.1em] font-semibold text-muted-foreground mb-2.5">{title}</p>
+      <p className="text-[11px] uppercase tracking-[0.1em] font-semibold text-muted-foreground mb-2.5">{title}</p>
       <div className="flex flex-wrap gap-1.5">
         {links.map((l) => <PlatformButton key={l.platform} link={l} />)}
       </div>
@@ -171,12 +172,13 @@ export function CreatorCollectionView({ collection, onEdit, onExport }: CreatorC
 
       {/* ── Hero: banner + icon ───────────────────────────────────────────────── */}
       <div className="relative shrink-0">
-        <div className="h-24 w-full overflow-hidden">
+        <div className="w-full aspect-[3/1] max-h-40 overflow-hidden">
           {collection.bannerUrl ? (
             <img
               src={collection.bannerUrl}
               alt=""
               className="h-full w-full object-cover"
+              style={bannerImageStyle(collection.bannerFocus)}
               onError={(e) => { e.currentTarget.style.display = 'none' }}
             />
           ) : (
@@ -187,16 +189,19 @@ export function CreatorCollectionView({ collection, onEdit, onExport }: CreatorC
           )}
         </div>
 
-        {/* Icon overlaps the banner — ring matches the page background so it cuts
-            out cleanly instead of blending into whatever the banner image is. */}
+        {/* Icon overlaps the banner — a solid background-coloured backing sits behind
+            it so a transparent PNG shows the page background, not the banner. */}
         <div className="absolute -bottom-6 left-4">
           {iconUrl ? (
-            <img
-              src={iconUrl}
-              alt={name}
-              className="h-14 w-14 rounded-2xl object-contain shadow-lg ring-4 ring-background"
-              onError={(e) => { e.currentTarget.style.display = 'none' }}
-            />
+            <div className="h-14 w-14 rounded-2xl bg-background shadow-lg ring-4 ring-background overflow-hidden">
+              <img
+                src={iconUrl}
+                alt={name}
+                className="h-full w-full object-cover"
+                style={bannerImageStyle(collection.iconFocus)}
+                onError={(e) => { e.currentTarget.style.display = 'none' }}
+              />
+            </div>
           ) : (
             <div
               className="h-14 w-14 rounded-2xl flex items-center justify-center text-2xl font-bold text-white/80 shadow-lg ring-4 ring-background"
@@ -239,7 +244,7 @@ export function CreatorCollectionView({ collection, onEdit, onExport }: CreatorC
 
       {/* ── Links header ───────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-5 py-2.5 shrink-0">
-        <span className="text-[10px] uppercase tracking-[0.1em] font-semibold text-muted-foreground flex-1">
+        <span className="text-[11px] uppercase tracking-[0.1em] font-semibold text-muted-foreground flex-1">
           Links · {links.length}
         </span>
         <Tooltip label="Edit links">
@@ -276,17 +281,16 @@ export function CreatorCollectionView({ collection, onEdit, onExport }: CreatorC
         <div className="flex-1">
           {(sections ?? []).map((sectionName) => {
             const sectionLinks = groupedLinks.bySection.get(sectionName) ?? []
+            // A published page never shows empty shelves — skip sections with no links.
+            if (sectionLinks.length === 0) return null
             return (
               <div key={sectionName}>
                 <div className="px-5 py-2 bg-muted/10 border-y border-border/20">
-                  <p className="text-[10px] uppercase tracking-[0.08em] font-semibold text-muted-foreground">
+                  <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-muted-foreground">
                     {sectionName}
                   </p>
                 </div>
                 <ul className="divide-y divide-border/30" role="list">
-                  {sectionLinks.length === 0 && (
-                    <li className="px-5 py-2 text-[11px] text-muted-foreground/50 italic">Empty section</li>
-                  )}
                   {sectionLinks.map((link) => (
                     <li key={link.id} className="px-5 py-2.5">
                       <LinkItem link={link} />
@@ -299,7 +303,7 @@ export function CreatorCollectionView({ collection, onEdit, onExport }: CreatorC
           {groupedLinks.unsorted.length > 0 && (
             <div>
               <div className="px-5 py-2 bg-muted/10 border-y border-border/20">
-                <p className="text-[10px] uppercase tracking-[0.08em] font-semibold text-muted-foreground/60">
+                <p className="text-[11px] uppercase tracking-[0.08em] font-semibold text-muted-foreground">
                   Other
                 </p>
               </div>

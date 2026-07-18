@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { deflateSync, inflateSync } from 'node:zlib'
 import { store } from '../store'
 import type {
+  BannerFocus,
   Collection,
   CollectionAuthor,
   CollectionExport,
@@ -24,6 +25,7 @@ const MAX_NOTE_LEN = 500
 const MAX_NAME_LEN = 200
 const MAX_TITLE_LEN = 500
 const MAX_ICON_URL_LEN = 65536
+const MAX_BANNER_ZOOM = 4
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
 
 /** Strip control chars, collapse whitespace, trim, cap length. Returns undefined when empty. */
@@ -100,6 +102,19 @@ function sanitizeIconUrl(raw: unknown): string | undefined {
     }
   }
   return undefined
+}
+
+/** Clamp a focal point + zoom (banner or icon) to sane, tiny numeric ranges — never an image blob. */
+function sanitizeFocus(raw: unknown): BannerFocus | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const { x, y, zoom } = raw as Record<string, unknown>
+  if (typeof x !== 'number' || typeof y !== 'number' || typeof zoom !== 'number') return undefined
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(zoom)) return undefined
+  return {
+    x: Math.min(100, Math.max(0, x)),
+    y: Math.min(100, Math.max(0, y)),
+    zoom: Math.min(MAX_BANNER_ZOOM, Math.max(1, zoom)),
+  }
 }
 
 export class CollectionsManager {
@@ -187,12 +202,34 @@ export class CollectionsManager {
     })
   }
 
+  /** Pan/zoom applied to iconUrl at render time — plain numbers, never a re-encoded image. */
+  setIconFocus(id: string, focus: BannerFocus | null): Collection | null {
+    return this.mutate(id, (c) => {
+      const updated = { ...c }
+      const clean = focus ? sanitizeFocus(focus) : undefined
+      if (clean) updated.iconFocus = clean
+      else delete updated.iconFocus
+      return updated
+    })
+  }
+
   setBannerUrl(id: string, bannerUrl: string | null): Collection | null {
     return this.mutate(id, (c) => {
       const updated = { ...c }
       const clean = bannerUrl ? sanitizeIconUrl(bannerUrl) : undefined
       if (clean) updated.bannerUrl = clean
       else delete updated.bannerUrl
+      return updated
+    })
+  }
+
+  /** Pan/zoom applied to bannerUrl at render time — plain numbers, never a re-encoded image. */
+  setBannerFocus(id: string, focus: BannerFocus | null): Collection | null {
+    return this.mutate(id, (c) => {
+      const updated = { ...c }
+      const clean = focus ? sanitizeFocus(focus) : undefined
+      if (clean) updated.bannerFocus = clean
+      else delete updated.bannerFocus
       return updated
     })
   }
@@ -226,15 +263,18 @@ export class CollectionsManager {
   updateLink(
     collectionId: string,
     linkId: string,
-    patch: Partial<Pick<Link, 'title' | 'url' | 'note' | 'pinned' | 'favicon' | 'order' | 'section'>> & { section?: string | null }
+    patch: Partial<Pick<Link, 'title' | 'url' | 'note' | 'pinned' | 'favicon' | 'order'>> & { section?: string | null }
   ): Collection | null {
     return this.mutate(collectionId, (c) => ({
       ...c,
       links: c.links.map((l) => {
         if (l.id !== linkId) return l
-        const updated = { ...l, ...patch, id: l.id }
+        // `section` is handled separately: `null` means "clear", so it must not
+        // reach the spread where it would violate Link's `section?: string`.
+        const { section: rawSection, ...rest } = patch
+        const updated = { ...l, ...rest, id: l.id }
         if ('section' in patch) {
-          const section = sanitizeText(patch.section, MAX_NAME_LEN)
+          const section = sanitizeText(rawSection, MAX_NAME_LEN)
           if (section) updated.section = section
           else delete updated.section
         }
@@ -265,6 +305,9 @@ export class CollectionsManager {
       ...(c.description ? { description: c.description } : {}),
       ...(c.author ? { author: c.author } : {}),
       ...(c.iconUrl ? { iconUrl: c.iconUrl } : {}),
+      ...(c.iconFocus ? { iconFocus: c.iconFocus } : {}),
+      ...(c.bannerUrl ? { bannerUrl: c.bannerUrl } : {}),
+      ...(c.bannerFocus ? { bannerFocus: c.bannerFocus } : {}),
       ...(c.sections ? { sections: c.sections } : {}),
       links: c.links.map((l) => ({
         title: l.title,
@@ -320,6 +363,9 @@ export class CollectionsManager {
       : 'user'
 
     const iconUrl = sanitizeIconUrl(parsed.iconUrl)
+    const iconFocus = sanitizeFocus(parsed.iconFocus)
+    const bannerUrl = sanitizeIconUrl(parsed.bannerUrl)
+    const bannerFocus = sanitizeFocus(parsed.bannerFocus)
     const description = sanitizeText(parsed.description, MAX_DESCRIPTION_LEN)
     const author = sanitizeAuthor(parsed.author)
 
@@ -361,6 +407,9 @@ export class CollectionsManager {
       ...(description ? { description } : {}),
       ...(author ? { author } : {}),
       ...(iconUrl ? { iconUrl } : {}),
+      ...(iconFocus ? { iconFocus } : {}),
+      ...(bannerUrl ? { bannerUrl } : {}),
+      ...(bannerFocus ? { bannerFocus } : {}),
       ...(sections ? { sections } : {}),
       links
     }
@@ -385,6 +434,9 @@ export class CollectionsManager {
       ...(parsed.description ? { description: parsed.description } : {}),
       ...(parsed.author ? { author: parsed.author } : {}),
       ...(parsed.iconUrl ? { iconUrl: parsed.iconUrl } : {}),
+      ...(parsed.iconFocus ? { iconFocus: parsed.iconFocus } : {}),
+      ...(parsed.bannerUrl ? { bannerUrl: parsed.bannerUrl } : {}),
+      ...(parsed.bannerFocus ? { bannerFocus: parsed.bannerFocus } : {}),
       ...(parsed.sections ? { sections: parsed.sections } : {}),
       links: parsed.links.map((l, i) => ({
         id: randomUUID(),
