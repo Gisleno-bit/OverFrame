@@ -728,7 +728,8 @@ export function registerIpcHandlers(deps: Deps): void {
   })
   ipcMain.handle(IPC.AppGetVersion, () => app.getVersion())
   ipcMain.handle(IPC.AppCheckForUpdates, () => {
-    if (!app.isPackaged) {
+    // Store (MSIX) builds: updates belong to the Store, never to the app.
+    if (!app.isPackaged || process.windowsStore) {
       broadcastUpdateStatus({ status: 'up-to-date' })
       return
     }

@@ -80,7 +80,10 @@ app.on('second-instance', () => {
 app.setAppUserModelId('app.overframe')
 
 // Auto-update from GitHub releases — only runs in packaged builds.
-if (app.isPackaged) {
+// Microsoft Store (MSIX) builds must NOT self-update: the Store owns updates
+// there, and self-updating is a certification failure. process.windowsStore is
+// true when running from an AppX/MSIX package.
+if (app.isPackaged && !process.windowsStore) {
   updateElectronApp({ updateInterval: '1 hour', notifyUser: false })
   // Attach the UI status listeners + downloaded-notification right away, so the
   // silent hourly cycle above is actually visible to the user (home footer state
