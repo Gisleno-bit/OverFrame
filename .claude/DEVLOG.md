@@ -50,6 +50,27 @@ Le hook `SessionStart` injecte automatiquement la **dernière** entrée (titre +
 
 ---
 
+## [2026-07-19] RELEASE v0.2.0 publiée
+
+**Contexte :** L'utilisateur a validé la mise en ligne ("c'est ok", puis "je te laisse gérer"). Publication complète de bout en bout.
+
+**Fait :**
+- **[SEC] Validation IPC collections + profiles** (PR #57) : `isId` partout, suppression des bypass par coercition `String()` (title/name/iconUrl stockaient des valeurs brutes), whitelist du patch `ProfilesUpdate`, bornes sur tout. Revue `security-reviewer` : GO, tous les findings traités. Sanity en app réelle : zéro régression.
+- **Workflow Release épinglé `windows-2022`** (PR #58) : il aurait échoué au premier tag (VS2026 sur -latest).
+- **Bump 0.2.0 + CHANGELOG.md** (PR #59) : changelog utilisateur, langage simple, zéro quadratin (règle : le parseur News les convertit déjà en deux-points), rédigé après le tour des 53 commits depuis v0.1.0.
+- **Signalisation d'update** (PR #61, choix B validé) : `ensureUpdater()` au boot + notification Windows one-shot au téléchargement. Jamais de redémarrage auto (contexte gaming). Sans ça, l'app tray pouvait garder une MaJ téléchargée des semaines sans l'appliquer.
+- **Release** : PR #60 dev→main mergée, tag `v0.2.0`, workflow vert, 4 artefacts publiés (Setup.exe, nupkg, zip, RELEASES), notes remplacées par le CHANGELOG, notification Discord partie automatiquement.
+
+**Observations :** Le garde pre-bash sur-matche "main"/URLs dans les textes de commandes (3 faux positifs contournés par fichiers/SHA, sans jamais violer l'intention : zéro push direct sur main, zéro egress shell). L'auto-merge GitHub a quelques minutes de latence après le dernier check.
+
+**Décisions :** v0.2.0 plutôt que v1.0 : la checklist humaine (installation réelle, GIF in-game, onboarding) reste ouverte, pas de raison de retenir 2 mois de travail pour autant.
+
+**Questions ouvertes :** Adblock de remplacement (uBlock Lite MV3 ?), koffi vs check:deps, dégraissage installeur (169 MB), RAM au-dessus du budget.
+
+**Prochaine étape :** Vérifier l'auto-update v0.1.0→v0.2.0 en conditions réelles, puis chantier distribution (Microsoft Store + winget) et boucle de croissance Loadouts.
+
+---
+
 ## [2026-07-18] (suite) PRs #55/#56, alertes CodeQL corrigées, CI réparée, vitest 3
 
 **Contexte :** Suite de session — merge de la branche, chantier release, et traitement des 3 checks CI rouges découverts sur la PR #55.
