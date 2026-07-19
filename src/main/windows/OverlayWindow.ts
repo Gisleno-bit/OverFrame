@@ -37,6 +37,12 @@ export class OverlayWindow {
   private visuallyHidden = false
   /** State saved before hiding, so CT mode survives a hide/show cycle. */
   private stateBeforeHide: OverlayState | null = null
+  /** Delay between hide() and the real OS-level hide. Quick Alt+B toggles stay
+   *  instant (opacity path); only a sustained hide pays the win.show() cost. */
+  private static readonly DEEP_HIDE_DELAY_MS = 30_000
+  private deepHideTimer: NodeJS.Timeout | null = null
+  /** Fired when the deferred OS-level hide actually happens. */
+  private deepHideListeners = new Set<() => void>()
 
   constructor(initialBounds: WindowBounds) {
     const safeBounds = this.clampToDisplay(initialBounds)
@@ -81,6 +87,8 @@ export class OverlayWindow {
     this.win.setMinimumSize(500, CHROME_HEIGHT + RESIZE_BORDER * 2 + 1)
 
     this.win.on('closed', () => {
+      this.cancelDeepHide()
+      this.deepHideListeners.clear()
       this.listeners.clear()
     })
   }
@@ -101,7 +109,14 @@ export class OverlayWindow {
     const restoreClickThrough = this.state === 'HIDDEN' && this.stateBeforeHide === 'CLICK_THROUGH'
     this.stateBeforeHide = null
 
+    this.cancelDeepHide()
     if (this.state === 'HIDDEN') {
+      // Undo the deep-hide throttling BEFORE the window paints again, so the
+      // first visible frame is rendered at full speed. No-op if the grace
+      // timer never fired (win.show() below is then a cheap no-op too).
+      if (!this.win.webContents.isDestroyed()) {
+        this.win.webContents.setBackgroundThrottling(false)
+      }
       this.visuallyHidden = false
       this.win.setOpacity(this.currentOpacity)
       this.win.setIgnoreMouseEvents(false)
@@ -163,6 +178,37 @@ export class OverlayWindow {
     // Undo any CT ignoring so the hidden window is fully non-interactive.
     if (this.state === 'CLICK_THROUGH') this.applyClickThrough(false)
     this.setState('HIDDEN')
+    // Opacity=0 keeps the window composited: the GPU process holds its surfaces
+    // (~150 MB) and the renderer keeps painting at full rate, invisible, for the
+    // whole gaming session. After a grace period, hide for real at the OS level
+    // so those resources are actually released. show() cancels the timer and
+    // undoes the throttling, so a quick Alt+B round-trip never pays this cost.
+    this.armDeepHide()
+  }
+
+  private armDeepHide(): void {
+    this.cancelDeepHide()
+    this.deepHideTimer = setTimeout(() => {
+      this.deepHideTimer = null
+      if (this.state !== 'HIDDEN' || this.win.isDestroyed()) return
+      this.win.webContents.setBackgroundThrottling(true)
+      this.win.hide()
+      for (const cb of this.deepHideListeners) cb()
+    }, OverlayWindow.DEEP_HIDE_DELAY_MS)
+  }
+
+  private cancelDeepHide(): void {
+    if (this.deepHideTimer) {
+      clearTimeout(this.deepHideTimer)
+      this.deepHideTimer = null
+    }
+  }
+
+  /** Registers a callback fired when the deferred OS-level hide happens —
+   *  the moment to release anything else only needed while visible. */
+  onDeepHide(cb: () => void): () => void {
+    this.deepHideListeners.add(cb)
+    return () => this.deepHideListeners.delete(cb)
   }
 
   enterClickThrough(): void {
