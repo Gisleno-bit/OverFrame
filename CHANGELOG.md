@@ -44,6 +44,7 @@ Tabs are now rendered by Microsoft Edge WebView2, a full browser engine running 
 - Sharper text and better contrast across every panel
 - Faster startup: tab sessions restore only when you actually need them
 - Smoother window resizing, with a visible resize ring
+- Overframe now tells you when an update is ready: a Windows notification plus a "Restart to update" button on the home page. Nothing restarts on its own, especially not during a game
 
 ### Supporting Overframe (always optional)
 

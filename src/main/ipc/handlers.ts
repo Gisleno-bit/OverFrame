@@ -1,4 +1,4 @@
-import { ipcMain, shell, app, dialog, autoUpdater, webContents, nativeTheme } from 'electron'
+import { ipcMain, shell, app, dialog, autoUpdater, webContents, nativeTheme, Notification } from 'electron'
 import { spawn } from 'child_process'
 import fs from 'fs'
 import path from 'path'
@@ -36,7 +36,18 @@ function broadcastUpdateStatus(payload: UpdateStatus): void {
 }
 
 let updaterReady = false
-function ensureUpdater(): void {
+let updateNotified = false
+
+/**
+ * Attach the update-status listeners (and the one-shot Windows notification)
+ * to Electron's autoUpdater singleton. update-electron-app drives the actual
+ * check/download cycle (hourly, silent) on this same singleton, so this must
+ * run at boot — not only on a manual "Check for updates" click — otherwise the
+ * background updater downloads new versions without the UI ever hearing of it.
+ * Overframe lives in the tray and rarely gets restarted: without a signal, a
+ * downloaded update can sit unapplied for weeks.
+ */
+export function ensureUpdater(): void {
   if (updaterReady || !app.isPackaged) return
   updaterReady = true
   const feedUrl = `https://update.electronjs.org/overframeApp-arch/Overframe/win32/${app.getVersion()}`
@@ -44,9 +55,19 @@ function ensureUpdater(): void {
   autoUpdater.on('checking-for-update', () => broadcastUpdateStatus({ status: 'checking' }))
   autoUpdater.on('update-not-available', () => broadcastUpdateStatus({ status: 'up-to-date' }))
   autoUpdater.on('update-available', () => broadcastUpdateStatus({ status: 'available', version: '' }))
-  autoUpdater.on('update-downloaded', (_e, _notes, releaseName) =>
+  autoUpdater.on('update-downloaded', (_e, _notes, releaseName) => {
     broadcastUpdateStatus({ status: 'downloaded', version: releaseName ?? '' })
-  )
+    // Inform, never interrupt: no click action and no auto-restart — the user
+    // may be mid-game. Applying the update stays a deliberate act (the
+    // "Restart to update" button in the home footer, or the next app restart).
+    if (!updateNotified && Notification.isSupported()) {
+      updateNotified = true
+      new Notification({
+        title: releaseName ? `Overframe ${releaseName} is ready` : 'Overframe update ready',
+        body: 'The new version is downloaded. Restart Overframe whenever you want to apply it.',
+      }).show()
+    }
+  })
   autoUpdater.on('error', (err: Error) =>
     broadcastUpdateStatus({ status: 'error', message: err.message })
   )

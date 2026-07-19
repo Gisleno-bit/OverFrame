@@ -20,7 +20,7 @@ import { CollectionsManager } from './managers/CollectionsManager'
 import { SessionManager } from './managers/SessionManager'
 import { startGlobalHooks, stopGlobalHooks } from './managers/uiohook'
 import { store, migrateStore } from './store'
-import { registerIpcHandlers } from './ipc/handlers'
+import { registerIpcHandlers, ensureUpdater } from './ipc/handlers'
 import { installChromeCsp } from './lifecycle/csp'
 import { buildShortcutActions } from './lifecycle/shortcutActions'
 import { IPC } from '@shared/ipc'
@@ -82,6 +82,11 @@ app.setAppUserModelId('app.overframe')
 // Auto-update from GitHub releases — only runs in packaged builds.
 if (app.isPackaged) {
   updateElectronApp({ updateInterval: '1 hour', notifyUser: false })
+  // Attach the UI status listeners + downloaded-notification right away, so the
+  // silent hourly cycle above is actually visible to the user (home footer state
+  // and a one-shot Windows notification). Before this, the UI only heard about
+  // updates after a manual "Check for updates" click.
+  ensureUpdater()
 }
 
 app.whenReady().then(() => {
