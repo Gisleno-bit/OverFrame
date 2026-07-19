@@ -8,9 +8,9 @@
 
 ## État actuel du projet
 
-**Version en cours :** v0.6 → v1.0 (Beta Polish → Release)
-**Branche active :** `feat/game-detection` — prête pour merge vers `dev` après cette session
-**Dernière session :** 2026-07-18 — Diagnostic attribution IG (adblock in-app hors de cause), découverte adblock mort (MV2 tué par WebView2 150) + toggle Settings rendu honnête, fix smoke flaky, couverture ramenée à 100% (+24 tests), fixes `updateLink`/`migrateStore`. Pipelines vertes (typecheck/lint/coverage 100%/build/smoke ×3).
+**Version en cours :** v0.2.0 **PUBLIÉE** (2026-07-19) → cap sur v1.0
+**Branche active :** `dev`
+**Dernière session :** 2026-07-19 — **Release v0.2.0 publiée** (53 commits depuis v0.1.0) : merge dev→main (PR #60), tag, workflow Release vert, notes de release soignées (CHANGELOG.md). Avant le tag : signalisation d'update ajoutée (updater branché au boot + notification Windows), validation IPC complète (PR #57, revue security-reviewer GO), CI/Release épinglées windows-2022, vitest 3.2.7. Les utilisateurs v0.1.0 recevront la mise à jour automatiquement à leur prochain redémarrage.
 
 Le cœur du produit est fonctionnel : overlay, tabs, profils, collections, sessions, raccourcis globaux, tray, auto-update, onboarding. L'objectif immédiat est de solidifier pour la release publique v1.0.
 
