@@ -299,10 +299,37 @@ app.whenReady().then(() => {
 
   // ── Overlay state changes ──────────────────────────────────────────────────
 
+  // The 1 Hz memory snapshot only feeds UI (tab-bar badge, memory popup) that is
+  // invisible while the overlay is hidden — the interval was the main process's
+  // single biggest idle-CPU consumer, running getAppMetrics() every second for
+  // nobody. Run it only while the overlay is visible.
+  const startMemorySnapshots = (): void => {
+    if (memorySnapshotInterval) return
+    memorySnapshotInterval = setInterval(() => {
+      if (!tabs || !overlay || overlay.win.isDestroyed()) return
+      const snapshot = tabs.getMemorySnapshot()
+      overlay.win.webContents.send(IPC.TabsMemoryUpdated, snapshot)
+      popup?.getWebContents()?.send(IPC.TabsMemoryUpdated, snapshot)
+    }, 1_000)
+  }
+  const stopMemorySnapshots = (): void => {
+    if (memorySnapshotInterval) {
+      clearInterval(memorySnapshotInterval)
+      memorySnapshotInterval = null
+    }
+  }
+
+  // After the deep hide (overlay OS-hidden for a while), also reclaim the
+  // companion renderer processes — they are recreated lazily on next show.
+  overlay.onDeepHide(() => {
+    popup?.releaseCompanionWindows()
+  })
+
   overlay.onStateChange((state) => {
     if (!overlay) return
     overlay.win.webContents.send(IPC.EventOverlayStateChanged, state)
     if (state === 'HIDDEN') {
+      stopMemorySnapshots()
       // Dismiss any floating achievement notification so it never appears above the game.
       popup?.dismissAchievements()
       // Pause media before suspending/unloading so pages receive the pause event
@@ -316,6 +343,7 @@ app.whenReady().then(() => {
         profiles.setPollMode('idle')
       }
     } else {
+      startMemorySnapshots()
       // Return to fast-poll so auto-detection toasts appear without delay.
       profiles?.setPollMode('active')
       // Apply deferred session restore before resumeAll so closeAll() clears
@@ -381,12 +409,9 @@ app.whenReady().then(() => {
 
   sessionManager.startAutoSave(() => profiles!.getActive().id)
 
-  memorySnapshotInterval = setInterval(() => {
-    if (!tabs || !overlay || overlay.win.isDestroyed()) return
-    const snapshot = tabs.getMemorySnapshot()
-    overlay.win.webContents.send(IPC.TabsMemoryUpdated, snapshot)
-    popup?.getWebContents()?.send(IPC.TabsMemoryUpdated, snapshot)
-  }, 1_000)
+  // The overlay may already be visible at this point (first-run show); the
+  // hidden→visible transitions above handle every later start/stop.
+  if (overlay.getState() !== 'HIDDEN') startMemorySnapshots()
 }).catch((err) => {
   console.error('[overframe] fatal during app.whenReady():', err)
   app.exit(1)

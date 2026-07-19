@@ -50,6 +50,25 @@ Le hook `SessionStart` injecte automatiquement la **dernière** entrée (titre +
 
 ---
 
+## [2026-07-19] [PERF] Audit RAM (pas de fuite) + deep-hide, compagnes, broadcast
+
+**Contexte :** 544 MB observés avec 0 onglet après ~6 h de session dev. Audit complet par le subagent perf-auditor (protocole : baseline build sans HMR, soak idle 4 h 20, churn onglets, phases ciblées screenshots/switches).
+
+**Verdict de l'audit :** PAS de fuite continue dans le code produit (+3.4 MB/h, attribuable à la variance du process GPU et au churn V8 du polling). Les 544 MB = artefacts dev (HMR Vite, DevTools) empilés sur une base déjà hors budget PAR DESIGN : ~325 MB caché (budget 150). Hors de cause, mesuré propre : polling koffi (bitmaps GDI libérés), churn d'onglets, capturePage, listeners renderer.
+
+**3 causes structurelles, 3 fixes (branche `perf/idle-memory`) :**
+- `OverlayWindow.hide()` ne cachait rien : `setOpacity(0)` + `backgroundThrottling: false` → renderer peint à plein régime et GPU garde ses surfaces, invisibles, toute la session de jeu. Fix : deep-hide OS (`win.hide()` + throttling) après 30 s de grâce — les toggles Alt+B rapides restent instantanés ; `show()` annule le timer et rétablit tout avant le premier paint. Nouveau hook `onDeepHide()`.
+- Fenêtres compagnes immortelles (IG promo + achievement, ~30 MB privés chacune, `backgroundThrottling: false`) : détruites au deep-hide via `releaseCompanionWindows()` — la recréation lazy existait déjà (`ensureIGPromoWin`/`ensureAchievementWin`, état "wanted" hors fenêtre).
+- Broadcast mémoire 1 Hz permanent (getAppMetrics chaque seconde, seul consommateur = UI invisible ; c'était le seul CPU idle non nul) : démarré/stoppé avec la visibilité de l'overlay.
+
+**Mesures (scripts/measure-idle.mjs, conservé comme harnais) :** caché avant deep-hide 274.6 → après 256.3 MB (-18 côté Electron ; le GPU ne rend PAS ses ~150 MB au win.hide(), contrairement à l'hypothèse). Gains réels non capturés par /metrics : compositing GPU éliminé pendant le jeu (FPS), process WebView2 des onglets OS-cachés, dérive de session stoppée par le throttling, CPU idle broadcast à zéro. Bonus : corrige un bug latent — un timer de settle pouvait re-révéler le promo (fenêtre native enfant) AU-DESSUS DU JEU pendant le hide par opacité, car `isVisible()` restait true ; avec le vrai hide, la garde fonctionne.
+
+**Question ouverte (nouvelle tâche TASKS) :** le budget 150 MB idle est-il tenable ? Plancher architectural mesuré ~256 MB (GPU 150 + main 87 + renderer 54 + utility 15). Trancher : budget réaliste ou travaux profonds.
+
+**Prochaine étape :** PR vers dev, puis chantier dégraissage du package (169 MB, deps dev embarquées).
+
+---
+
 ## [2026-07-19] RELEASE v0.2.0 publiée
 
 **Contexte :** L'utilisateur a validé la mise en ligne ("c'est ok", puis "je te laisse gérer"). Publication complète de bout en bout.

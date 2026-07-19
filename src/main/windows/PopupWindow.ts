@@ -710,6 +710,20 @@ export class PopupWindow {
   }
 
   /**
+   * Destroy the reusable companion windows (IG promo, achievement toast) to
+   * reclaim their renderer processes (~30 MB private each) while the overlay is
+   * OS-hidden. Both are recreated lazily by their ensure*() on next use — the
+   * overlay's show handler already runs restoreIGPromo(), and the achievement
+   * queue re-drains on did-finish-load — and their 'closed' handlers reset all
+   * companion state, so destroying here is indistinguishable from first boot.
+   * "wanted" flags and payloads live outside the windows and survive.
+   */
+  releaseCompanionWindows(): void {
+    if (this.igPromoWin && !this.igPromoWin.isDestroyed()) this.igPromoWin.destroy()
+    if (this.achievementWin && !this.achievementWin.isDestroyed()) this.achievementWin.destroy()
+  }
+
+  /**
    * (Re)arm the debounce that restores the promo once resize activity stops.
    * Also clears the drag-hold flag so a lost mouseup can never strand the
    * promo hidden.
