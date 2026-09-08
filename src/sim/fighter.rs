@@ -134,6 +134,10 @@ pub struct Fighter {
     pub ground_stun: bool,
     /// Stick as of the previous frame (for SDI pulse detection).
     pub prev_stick: Vec2,
+    /// A launch waiting for the end of hitlag: (knockback, base angle in
+    /// radians). Directional influence is read from the stick on the last
+    /// freeze frame, so the victim can react during the freeze.
+    pub pending_launch: Option<(f32, f32)>,
     /// Position at the start of this tick (hitboxes are swept between the two
     /// so fast movement can't tunnel through a hurtbox).
     pub prev_pos: Vec2,
@@ -202,6 +206,7 @@ impl Fighter {
             kb_fall: 0.0,
             ground_stun: false,
             prev_stick: Vec2::ZERO,
+            pending_launch: None,
             prev_pos: spawn,
             anim_flash: 0,
         }
@@ -310,6 +315,15 @@ impl Fighter {
             // half as far. Only while being hit, never into the ground.
             if matches!(self.state, State::Hitstun { .. }) {
                 let st = input.stick;
+                if self.hitlag == 0 {
+                    if let Some((kb, base)) = self.pending_launch.take() {
+                        // DI: rotate the launch by up to DI_MAX toward the
+                        // stick's perpendicular component.
+                        let angle = super::knockback::apply_di(base, st);
+                        self.kb_vel = super::knockback::launch_velocity(kb, angle);
+                        self.vel = self.kb_vel;
+                    }
+                }
                 let hard = st.length() > HARD;
                 let was_hard = self.prev_stick.length() > HARD;
                 let turned = hard
@@ -494,6 +508,7 @@ impl Fighter {
         self.kb_vel = Vec2::ZERO;
         self.kb_fall = 0.0;
         self.ground_stun = false;
+        self.pending_launch = None;
         self.facing = if s.x <= 0.0 { 1.0 } else { -1.0 };
         self.set_state(State::Air);
     }
@@ -1215,6 +1230,7 @@ impl Fighter {
     /// upward component keeps them on the ground (grounded flinch/slide).
     pub fn apply_launch(&mut self, kb_vel: Vec2, hitstun: u32, tumble: bool, hitlag: u32) {
         let stay_grounded = self.grounded && !tumble && kb_vel.y <= 0.001;
+        self.pending_launch = None;
         self.kb_vel = kb_vel;
         self.kb_fall = 0.0;
         self.vel = kb_vel;

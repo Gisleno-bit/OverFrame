@@ -477,14 +477,14 @@ impl GameState {
         }
 
         // World launch angle (Sakurai angle resolved here; mirror by facing).
+        // DI is applied by the victim on the last hitlag frame (see
+        // `Fighter::pending_launch`), not here.
         let angle_deg = knockback::resolve_angle(hitbox.angle_deg, kb, victim_grounded);
         let mut angle = angle_deg.to_radians();
         if attacker_facing < 0.0 {
             angle = std::f32::consts::PI - angle;
         }
-        // Victim DI.
-        let di_stick = inputs.get(j).copied().unwrap_or_default().stick;
-        let angle = knockback::apply_di(angle, di_stick);
+        let _ = inputs;
 
         let hitlag_attacker = knockback::hitlag(hitbox.damage, electric, false);
         let hitlag_victim = knockback::hitlag(hitbox.damage, electric, crouch_cancel);
@@ -516,6 +516,9 @@ impl GameState {
         let tumble = knockback::causes_tumble(kb);
 
         self.fighters[j].apply_launch(launch, hitstun, tumble, hitlag_victim);
+        if !self.fighters[j].ground_stun {
+            self.fighters[j].pending_launch = Some((kb, angle));
+        }
         self.fighters[i].hitlag = hitlag_attacker;
 
         let vp = self.fighters[j].body_center();
