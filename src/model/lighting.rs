@@ -69,6 +69,9 @@ pub struct Light {
     /// Rim light strength (0..1) — a pale edge on surfaces facing away from
     /// the camera's view axis, separating fighters from the background.
     pub rim: f32,
+    /// Fill light from the camera (+Z), unbanded, so front faces never go
+    /// muddy whatever the key direction.
+    pub fill: f32,
     /// Toon banding: number of shade bands on the key light (0 = smooth).
     pub bands: u32,
 }
@@ -83,12 +86,13 @@ impl Light {
             ]
         };
         Light {
-            dir: v3(-0.45, 0.85, 0.55).norm(),
-            key: [1.05, 1.0, 0.92],
-            sky: f(sky, 0.55).map(|x| x + 0.18),
-            ground: f(ground, 0.35).map(|x| x + 0.08),
-            rim: 0.35,
-            bands: 3,
+            dir: v3(-0.35, 0.8, 0.6).norm(),
+            key: [1.1, 1.05, 0.98],
+            sky: f(sky, 0.35).map(|x| x + 0.42),
+            ground: f(ground, 0.3).map(|x| x + 0.2),
+            rim: 0.3,
+            fill: 0.3,
+            bands: 4,
         }
     }
 }
@@ -139,10 +143,11 @@ pub fn shade(albedo: [u8; 3], n: V3, _pos: V3, light: &Light, tint: &Tint, slot:
         }
         // Rim: surfaces whose normal points away from +Z get a pale edge.
         let rim = light.rim * (1.0 - n.z.max(0.0)).powi(3) * (0.4 + 0.6 * up);
+        let fill = light.fill * n.z.max(0.0);
         let mut c = [0.0f32; 3];
         for i in 0..3 {
             let amb = light.sky[i] * up + light.ground[i] * (1.0 - up);
-            c[i] = a[i] * (amb + light.key[i] * diff * 0.85) + rim * 0.9;
+            c[i] = a[i] * (amb + light.key[i] * diff * 0.8 + fill) + rim * 0.9;
         }
         c
     };

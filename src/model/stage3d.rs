@@ -25,6 +25,96 @@ pub struct StageModel {
     pub light: Light,
     /// Vertical position of the "floor" plane (sea, ground, void) if any.
     pub floor_y: Option<f32>,
+    pub look: Look,
+}
+
+/// The 3D art direction of a stage: sky gradient, material palette and the
+/// texture style. Independent of the 2D `Theme` used by the classic view.
+#[derive(Clone, Copy, Debug)]
+pub struct Look {
+    pub sky_top: [u8; 3],
+    pub sky_bottom: [u8; 3],
+    /// Horizon haze colour (fog target for distant geometry).
+    pub haze: [u8; 3],
+    pub palette: Palette,
+    /// Key light direction (toward the light).
+    pub light_dir: V3,
+    pub key: [f32; 3],
+    /// Surface texture style for the slab (see `TexStyle`).
+    pub tex: TexStyle,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TexStyle {
+    /// Machined panels with seams.
+    Panels,
+    /// Sandstone: soft noise and strata lines.
+    Stone,
+    /// Basalt: coarse noise and cracks.
+    Basalt,
+}
+
+/// The look of each stage.
+pub fn look(id: StageId) -> Look {
+    match id {
+        StageId::Lattice => Look {
+            sky_top: [10, 10, 26],
+            sky_bottom: [66, 44, 104],
+            haze: [70, 54, 110],
+            palette: Palette::new(
+                "The Lattice",
+                [126, 134, 178],
+                [70, 74, 112],
+                [170, 226, 255],
+                [116, 138, 214],
+                [46, 48, 74],
+                [150, 220, 255],
+                [92, 96, 140],
+                [52, 54, 88],
+            ),
+            light_dir: v3(-0.35, 0.8, 0.6),
+            key: [1.1, 1.08, 1.05],
+            tex: TexStyle::Panels,
+        },
+        StageId::Meridian => Look {
+            sky_top: [24, 34, 74],
+            sky_bottom: [236, 150, 96],
+            haze: [220, 150, 110],
+            palette: Palette::new(
+                "Meridian",
+                [206, 170, 118],
+                [150, 110, 72],
+                [255, 214, 140],
+                [172, 142, 104],
+                [96, 68, 48],
+                [255, 226, 160],
+                [190, 134, 108],
+                [130, 84, 84],
+            ),
+            light_dir: v3(0.45, 0.78, 0.5),
+            key: [1.2, 1.0, 0.85],
+            tex: TexStyle::Stone,
+        },
+        StageId::Tidegate => Look {
+            sky_top: [12, 10, 34],
+            sky_bottom: [78, 46, 96],
+            haze: [80, 60, 110],
+            palette: Palette::new(
+                "Tidegate",
+                [84, 80, 98],
+                [52, 48, 64],
+                [150, 240, 200],
+                [110, 82, 122],
+                [34, 30, 44],
+                [180, 255, 225],
+                [76, 66, 104],
+                [40, 34, 60],
+            ),
+            light_dir: v3(-0.5, 0.7, 0.5),
+            key: [0.95, 1.0, 1.1],
+            tex: TexStyle::Basalt,
+        },
+    }
 }
 
 fn c(t: (u8, u8, u8)) -> [u8; 3] {
@@ -36,7 +126,9 @@ fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
     [m(a[0], b[0]), m(a[1], b[1]), m(a[2], b[2])]
 }
 
-/// The stage's material palette from its theme.
+/// A material palette derived from the 2D theme (fallback for stages that
+/// have no dedicated [`Look`]; the shipped stages all do).
+#[allow(dead_code)]
 pub fn palette(stage: &Stage) -> Palette {
     let th = &stage.theme;
     let slab = c(th.slab);
@@ -232,14 +324,79 @@ pub fn build(stage: &Stage) -> StageModel {
         );
     }
 
-    let th = &stage.theme;
+    let lk = look(stage.id);
+    let mut light = Light::default_for(
+        (lk.sky_top[0], lk.sky_top[1], lk.sky_top[2]),
+        (lk.sky_bottom[0], lk.sky_bottom[1], lk.sky_bottom[2]),
+    );
+    light.dir = lk.light_dir.norm();
+    light.key = lk.key;
+    // Stage surfaces: smoother shading than the fighters.
+    light.bands = 0;
+    light.rim = 0.12;
+    let near = near.box_uv(1.0 / 24.0);
     StageModel {
         near,
         far,
-        palette: palette(stage),
-        light: Light::default_for(th.bg_top, th.bg_bottom),
+        palette: lk.palette,
+        light,
         floor_y,
+        look: lk,
     }
+}
+
+/// A tileable RGBA texture for the stage surfaces (multiplied over the vertex
+/// colour, so it only needs to carry brightness variation).
+pub fn texture(style: TexStyle, size: usize) -> Vec<u8> {
+    let mut out = vec![255u8; size * size * 4];
+    let n = size as f32;
+    // Tileable value noise from a few sine octaves (cheap, deterministic).
+    let noise = |x: f32, y: f32| -> f32 {
+        let mut v = 0.0;
+        let mut amp = 0.5;
+        let mut f = 1.0;
+        for _ in 0..4 {
+            v += amp
+                * ((x * f * std::f32::consts::TAU + (y * f * 1.7).sin() * 2.0).sin()
+                    * (y * f * std::f32::consts::TAU * 0.7 + (x * f * 2.3).cos() * 1.5).cos());
+            amp *= 0.5;
+            f *= 2.0;
+        }
+        v * 0.5 + 0.5
+    };
+    for y in 0..size {
+        for x in 0..size {
+            let u = x as f32 / n;
+            let v = y as f32 / n;
+            let base = noise(u, v);
+            let b = match style {
+                TexStyle::Panels => {
+                    // 2×2 panels per tile with dark seams and a faint grain.
+                    let seam_u = ((u * 2.0).fract() - 0.5).abs() > 0.47;
+                    let seam_v = ((v * 2.0).fract() - 0.5).abs() > 0.47;
+                    let seam = if seam_u || seam_v { 0.72 } else { 1.0 };
+                    seam * (0.92 + 0.10 * base)
+                }
+                TexStyle::Stone => {
+                    // Horizontal strata + soft mottling.
+                    let strata =
+                        0.94 + 0.06 * ((v * 6.0 + base * 0.8) * std::f32::consts::TAU).sin();
+                    strata * (0.9 + 0.12 * base)
+                }
+                TexStyle::Basalt => {
+                    let crack = if base > 0.78 { 0.7 } else { 1.0 };
+                    crack * (0.84 + 0.2 * base)
+                }
+            };
+            let i = (y * size + x) * 4;
+            let c = (b.clamp(0.0, 1.0) * 255.0) as u8;
+            out[i] = c;
+            out[i + 1] = c;
+            out[i + 2] = c;
+            out[i + 3] = 255;
+        }
+    }
+    out
 }
 
 /// Fog factor for a point (0 = none, 1 = fully the sky colour), by depth.

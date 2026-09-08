@@ -56,7 +56,7 @@ impl CharacterId {
 }
 
 /// Number of colour palettes each character offers.
-pub const PALETTES: u8 = 4;
+pub const PALETTES: u8 = 6;
 
 /// Kestrel — the Fase 1 fighter. Agile fast-faller: the movement-tech character.
 pub const KESTREL: Character = Character {

@@ -29,6 +29,8 @@ pub struct Settings {
     pub host_port: u16,
     /// GGRS input delay in frames (1–4 is typical; 2 is a good default).
     pub input_delay: u8,
+    /// Draw matches with the 3D renderer (false = classic 2D placeholder view).
+    pub render_3d: bool,
     /// Display name shown to the peer (ASCII, short).
     pub name: String,
     /// Gamepad bindings for player slots 1 and 2.
@@ -43,6 +45,7 @@ impl Default for Settings {
             player_id: generate_player_id(),
             host_port: 7777,
             input_delay: 2,
+            render_3d: true,
             name: "PLAYER".to_owned(),
             pad: [PadBindings::default(), PadBindings::default()],
             last_character: 0,
@@ -91,6 +94,10 @@ impl Settings {
         s.push_str(&format!("player_id = {:016x}\n", self.player_id));
         s.push_str(&format!("host_port = {}\n", self.host_port));
         s.push_str(&format!("input_delay = {}\n", self.input_delay));
+        s.push_str(&format!(
+            "render_3d = {}\n",
+            if self.render_3d { 1 } else { 0 }
+        ));
         s.push_str(&format!("name = {}\n", sanitize_name(&self.name)));
         s.push_str(&format!("last_character = {}\n", self.last_character));
         for (i, b) in self.pad.iter().enumerate() {
@@ -130,6 +137,9 @@ impl Settings {
         }
         if let Some(v) = kv.get("input_delay").and_then(|v| v.parse::<u8>().ok()) {
             s.input_delay = v.clamp(0, 8);
+        }
+        if let Some(v) = kv.get("render_3d") {
+            s.render_3d = v.trim() != "0" && v.trim() != "false";
         }
         if let Some(v) = kv.get("name") {
             s.name = sanitize_name(v);

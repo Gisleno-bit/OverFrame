@@ -18,18 +18,22 @@ pub const DEMO_LEN: u64 = 300;
 /// Build the demo's starting position: two fighters on the ground, the target
 /// pre-damaged so a clean hit shows a satisfying high-percent KO.
 pub fn match_state() -> GameState {
-    let mut gs = GameState::new(
-        2,
-        MatchConfig {
-            stocks: 4,
-            seed: 0xC0FFEE,
-            ..MatchConfig::default()
-        },
-    );
-    gs.fighters[0].pos = Vec2::new(-34.0, 0.0);
+    match_state_with(MatchConfig {
+        stocks: 4,
+        seed: 0xC0FFEE,
+        ..MatchConfig::default()
+    })
+}
+
+/// The demo starting position with custom rules (characters, stage, palettes).
+/// The choreography is tuned for the default cast but plays on any.
+pub fn match_state_with(config: MatchConfig) -> GameState {
+    let mut gs = GameState::new(2, config);
+    let floor = gs.stage.main().y;
+    gs.fighters[0].pos = Vec2::new(-34.0, floor);
     gs.fighters[0].facing = 1.0;
     gs.fighters[0].grounded = true;
-    gs.fighters[1].pos = Vec2::new(52.0, 0.0);
+    gs.fighters[1].pos = Vec2::new(52.0, floor);
     gs.fighters[1].facing = -1.0;
     gs.fighters[1].grounded = true;
     gs.fighters[1].percent = 74.0;

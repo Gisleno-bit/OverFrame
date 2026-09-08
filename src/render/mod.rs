@@ -4,6 +4,7 @@
 //! same bitmap font so nothing needs a font file.
 
 mod input;
+mod scene3d;
 mod widgets;
 
 use macroquad::prelude::*;
@@ -17,6 +18,7 @@ use crate::sim::stage::StageId;
 use crate::sim::{GameState, MatchConfig, PlayerInput};
 use crate::viz::{self, font, Color as VColor, Painter, SceneOpts};
 use input::InputHub;
+use scene3d::Scene3D;
 use widgets::*;
 
 /// Adapts macroquad's immediate-mode drawing to the [`Painter`] trait.
@@ -42,16 +44,96 @@ impl Painter for MqPainter {
     }
 }
 
-/// Command-line options (`overframe --host [port]`, `overframe --join <code>`).
+/// Command-line options (`overframe --host [port]`, `overframe --join <code>`,
+/// `--versus`, `--demo`, `--screenshot`).
 #[derive(Clone, Debug, Default)]
 pub struct LaunchOpts {
     pub host: Option<u16>,
     pub join: Option<String>,
+    /// Jump straight into a local versus match with these rules.
+    pub versus: Option<MatchSpec>,
+    /// Play the attract-mode demo (optionally with these rules).
+    pub demo: Option<MatchSpec>,
+    /// Save a PNG of the window after `at` drawn frames, then quit.
+    pub screenshot: Option<(String, u64)>,
+}
+
+/// A match description parsed from the command line:
+/// `p1[,p2[,stage[,pal1[,pal2]]]]`, e.g. `kestrel,viper,tidegate,0,2`.
+#[derive(Clone, Copy, Debug)]
+pub struct MatchSpec {
+    pub p1: CharacterId,
+    pub p2: CharacterId,
+    pub stage: StageId,
+    pub pal1: u8,
+    pub pal2: u8,
+}
+
+impl MatchSpec {
+    pub fn parse(text: &str) -> Result<MatchSpec, String> {
+        let mut spec = MatchSpec {
+            p1: CharacterId::Kestrel,
+            p2: CharacterId::Boulder,
+            stage: StageId::Lattice,
+            pal1: 0,
+            pal2: 1,
+        };
+        let ch = |n: &str| {
+            CharacterId::ALL
+                .iter()
+                .copied()
+                .find(|c| c.name().eq_ignore_ascii_case(n))
+                .ok_or_else(|| format!("unknown character '{n}'"))
+        };
+        let st = |n: &str| {
+            StageId::ALL
+                .iter()
+                .copied()
+                .find(|c| {
+                    let full = c.name().replace(' ', "");
+                    full.eq_ignore_ascii_case(n)
+                        || full
+                            .strip_prefix("The")
+                            .map_or(false, |rest| rest.eq_ignore_ascii_case(n))
+                })
+                .ok_or_else(|| format!("unknown stage '{n}'"))
+        };
+        for (i, part) in text
+            .split(',')
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .enumerate()
+        {
+            match i {
+                0 => spec.p1 = ch(part)?,
+                1 => spec.p2 = ch(part)?,
+                2 => spec.stage = st(part)?,
+                3 => spec.pal1 = part.parse().map_err(|_| "bad palette".to_string())?,
+                4 => spec.pal2 = part.parse().map_err(|_| "bad palette".to_string())?,
+                _ => return Err("too many fields".into()),
+            }
+        }
+        Ok(spec)
+    }
+
+    fn rules(&self) -> Rules {
+        Rules {
+            p1: self.p1,
+            p2: self.p2,
+            p1_pal: self.pal1,
+            p2_pal: self.pal2,
+            stage: self.stage,
+            stocks: 4,
+            time_secs: 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Screen {
     Menu,
+    /// Full-screen scripted demo match (attract mode).
+    Attract,
     LocalSetup,
     TrainSetup,
     Versus,
@@ -65,12 +147,13 @@ enum Screen {
     OnlineEnded,
 }
 
-const MENU_ITEMS: [&str; 6] = [
+const MENU_ITEMS: [&str; 7] = [
     "VERSUS  2P LOCAL",
     "ONLINE",
     "TRAINING",
     "OPTIONS",
     "CONTROLS",
+    "WATCH DEMO",
     "QUIT",
 ];
 const ONLINE_ITEMS: [&str; 3] = ["HOST GAME", "JOIN GAME", "BACK"];
@@ -124,6 +207,7 @@ impl Rules {
 struct App {
     settings: Settings,
     hub: InputHub,
+    scene: Scene3D,
     screen: Screen,
     frame_no: u64,
 
@@ -152,6 +236,8 @@ struct App {
     rebind: Option<(usize, PadAction)>,
     rebind_started: u64,
     nav_cd: f32,
+    screenshot: Option<(String, u64)>,
+    drawn: u64,
 }
 
 impl App {
@@ -161,6 +247,7 @@ impl App {
         let mut app = App {
             settings,
             hub: InputHub::new(),
+            scene: Scene3D::new(),
             screen: Screen::Menu,
             frame_no: 0,
             menu_idx: 0,
@@ -193,7 +280,21 @@ impl App {
             rebind: None,
             rebind_started: 0,
             nav_cd: 0.0,
+            screenshot: opts.screenshot.clone(),
+            drawn: 0,
         };
+        // The menu plays the demo in the background.
+        app.gs = crate::demo::match_state();
+        if let Some(spec) = opts.versus {
+            app.rules = spec.rules();
+            app.gs = GameState::new(2, app.rules.to_config());
+            app.scene.reset();
+            app.screen = Screen::Versus;
+        } else if let Some(spec) = opts.demo {
+            app.rules = spec.rules();
+            app.start_demo();
+            app.screen = Screen::Attract;
+        }
         if let Some(port) = opts.host {
             app.start_host(port);
         } else if let Some(code) = opts.join {
@@ -306,7 +407,16 @@ impl App {
         self.hub.poll();
         let nav = self.nav();
         match self.screen {
-            Screen::Menu => self.update_menu(nav),
+            Screen::Menu => {
+                self.step_demo();
+                self.update_menu(nav);
+            }
+            Screen::Attract => {
+                self.step_demo();
+                if nav.back || nav.confirm {
+                    self.screen = Screen::Menu;
+                }
+            }
             Screen::LocalSetup => self.update_setup(nav, false),
             Screen::TrainSetup => self.update_setup(nav, true),
             Screen::Controls => {
@@ -350,11 +460,44 @@ impl App {
                     self.screen = Screen::Options;
                 }
                 4 => self.screen = Screen::Controls,
+                5 => {
+                    self.start_demo();
+                    self.screen = Screen::Attract;
+                }
                 _ => std::process::exit(0),
             }
         }
         if nav.back {
             std::process::exit(0);
+        }
+    }
+
+    /// (Re)start the scripted demo with the current rules' characters/stage.
+    fn start_demo(&mut self) {
+        let mut cfg = self.rules.to_config();
+        cfg.seed = 0xC0FFEE;
+        self.gs = crate::demo::match_state_with(cfg);
+        self.demo_frame = 0;
+        self.acc = 0.0;
+        self.scene.reset();
+    }
+
+    /// Advance the demo match at 60 Hz, looping when the script ends.
+    fn step_demo(&mut self) {
+        self.acc += get_frame_time().min(0.1);
+        let dt = 1.0 / 60.0;
+        let mut steps = 0;
+        while self.acc >= dt && steps < 5 {
+            if self.demo_frame >= crate::demo::DEMO_LEN + 90 || self.gs.match_over.is_some() {
+                let rules = self.rules;
+                self.rules = rules;
+                self.start_demo();
+            }
+            let d = crate::demo::inputs(&self.gs, self.demo_frame);
+            self.demo_frame += 1;
+            self.gs.step(&[d[0], d[1]]);
+            self.acc -= dt;
+            steps += 1;
         }
     }
 
@@ -375,6 +518,7 @@ impl App {
                 3 if nav.confirm => {
                     self.gs = GameState::new(2, self.rules.training_config());
                     self.acc = 0.0;
+                    self.scene.reset();
                     self.screen = Screen::Training;
                 }
                 _ => {}
@@ -391,6 +535,7 @@ impl App {
                     let _ = self.settings.save();
                     self.gs = GameState::new(2, self.rules.to_config());
                     self.acc = 0.0;
+                    self.scene.reset();
                     self.screen = Screen::Versus;
                 }
                 _ => {}
@@ -502,6 +647,7 @@ impl App {
                 self.gs = net.initial_state();
                 self.acc = 0.0;
                 self.waiting_ticks = 0;
+                self.scene.reset();
                 self.screen = Screen::OnlineMatch;
                 return;
             }
@@ -607,6 +753,14 @@ impl App {
         let mut rows = vec![
             format!("INPUT DELAY   {} FRAMES", self.settings.input_delay),
             format!("HOST PORT     {}", self.settings.host_port),
+            format!(
+                "RENDERER      {}",
+                if self.settings.render_3d {
+                    "3D"
+                } else {
+                    "2D CLASSIC"
+                }
+            ),
         ];
         for slot in 0..2 {
             for a in PadAction::ALL {
@@ -660,15 +814,19 @@ impl App {
                     (self.settings.host_port as i32 + nav.h * step).clamp(1024, 65535) as u16;
                 let _ = self.settings.save();
             }
-            i if (2..2 + 2 * pad_rows).contains(&i) && nav.confirm => {
-                self.rebind = Some(((i - 2) / pad_rows, PadAction::ALL[(i - 2) % pad_rows]));
+            2 if nav.h != 0 || nav.confirm => {
+                self.settings.render_3d = !self.settings.render_3d;
+                let _ = self.settings.save();
+            }
+            i if (3..3 + 2 * pad_rows).contains(&i) && nav.confirm => {
+                self.rebind = Some(((i - 3) / pad_rows, PadAction::ALL[(i - 3) % pad_rows]));
                 self.rebind_started = self.frame_no;
             }
-            i if i == 2 + 2 * pad_rows && nav.confirm => {
+            i if i == 3 + 2 * pad_rows && nav.confirm => {
                 self.settings.pad = Default::default();
                 let _ = self.settings.save();
             }
-            i if i == 3 + 2 * pad_rows && nav.confirm => {
+            i if i == 4 + 2 * pad_rows && nav.confirm => {
                 let _ = self.settings.save();
                 self.screen = Screen::Menu;
             }
@@ -678,11 +836,33 @@ impl App {
 
     // ------------------------------------------------------------ draw
 
-    fn draw(&self) {
+    fn draw(&mut self) {
         clear_background(col(VColor::rgb(12, 12, 20)));
         let mut p = MqPainter;
         match self.screen {
-            Screen::Menu => self.draw_menu(&mut p),
+            Screen::Menu => {
+                // Live demo match behind the menu, dimmed.
+                let opts = SceneOpts {
+                    training: false,
+                    watermark: false,
+                    local_player: None,
+                    hud: false,
+                };
+                self.draw_match(&mut p, opts);
+                let (w, h) = p.dims();
+                p.fill_rect(0.0, 0.0, w, h, VColor::rgba(8, 8, 16, 165));
+                self.draw_menu(&mut p);
+            }
+            Screen::Attract => {
+                let opts = SceneOpts {
+                    training: false,
+                    watermark: true,
+                    local_player: None,
+                    hud: true,
+                };
+                self.draw_match(&mut p, opts);
+                hint(&mut p, "DEMO   ENTER / ESC BACK");
+            }
             Screen::LocalSetup => self.draw_setup(&mut p, false),
             Screen::TrainSetup => self.draw_setup(&mut p, true),
             Screen::Controls => widgets::draw_controls(&mut p),
@@ -692,20 +872,44 @@ impl App {
             Screen::Lobby => self.draw_lobby(&mut p),
             Screen::OnlineEnded => self.draw_ended(&mut p),
             Screen::Versus => {
-                viz::draw_scene(&mut p, &self.gs, self.scene_opts(false, None));
+                let opts = self.scene_opts(false, None);
+                self.draw_match(&mut p, opts);
                 self.draw_clock(&mut p);
             }
             Screen::Training => {
-                viz::draw_scene(&mut p, &self.gs, self.scene_opts(self.show_boxes, None));
+                let opts = self.scene_opts(self.show_boxes, None);
+                self.draw_match(&mut p, opts);
                 hint(&mut p, "TAB BOXES   BACKSPACE RESET   ESC BACK");
             }
             Screen::OnlineMatch => {
                 let local = self.net.as_ref().map(|n| n.local_handle());
-                viz::draw_scene(&mut p, &self.gs, self.scene_opts(false, local));
+                let opts = self.scene_opts(false, local);
+                self.draw_match(&mut p, opts);
                 self.draw_clock(&mut p);
                 self.draw_online_overlay(&mut p);
             }
         }
+    }
+
+    /// The match view: 3D scene by default, the classic 2D view if disabled
+    /// in Options (or wanted for debugging).
+    fn draw_match(&mut self, p: &mut MqPainter, opts: SceneOpts) {
+        if self.settings.render_3d {
+            self.scene.draw(&self.gs, opts);
+        } else {
+            viz::draw_scene(p, &self.gs, opts);
+        }
+    }
+
+    fn lobby_preview(&mut self, x: f32, y: f32, id: CharacterId, palette: u8) {
+        let (px, py, pw, ph) = widgets::LOBBY_PREVIEW;
+        self.scene.draw_preview(id, palette, x + px, y + py, pw, ph);
+    }
+
+    /// 3D model preview inside a character card (see `widgets::CARD_PREVIEW`).
+    fn card_preview(&mut self, x: f32, y: f32, id: CharacterId, palette: u8) {
+        let (px, py, pw, ph) = widgets::CARD_PREVIEW;
+        self.scene.draw_preview(id, palette, x + px, y + py, pw, ph);
     }
 
     fn scene_opts(&self, training: bool, local: Option<usize>) -> SceneOpts {
@@ -713,6 +917,7 @@ impl App {
             training,
             watermark: true,
             local_player: local,
+            hud: true,
         }
     }
 
@@ -776,7 +981,7 @@ impl App {
         self.footer(p);
     }
 
-    fn draw_setup(&self, p: &mut MqPainter, training: bool) {
+    fn draw_setup(&mut self, p: &mut MqPainter, training: bool) {
         let (w, h) = p.dims();
         title(p, if training { "TRAINING" } else { "VERSUS SETUP" }, 40.0);
 
@@ -789,6 +994,7 @@ impl App {
             self.rules.p1_pal,
             self.setup_idx == 0,
         );
+        self.card_preview(w * 0.10, h * 0.28, self.rules.p1, self.rules.p1_pal);
         if training {
             draw_char_card(
                 p,
@@ -810,6 +1016,7 @@ impl App {
                 self.setup_idx == 1,
             );
         }
+        self.card_preview(w * 0.55, h * 0.28, self.rules.p2, self.rules.p2_pal);
 
         let stage_row = if training { 1 } else { 2 };
         draw_stage_card(
@@ -957,17 +1164,21 @@ impl App {
         }
     }
 
-    fn draw_lobby(&self, p: &mut MqPainter) {
+    fn draw_lobby(&mut self, p: &mut MqPainter) {
         let (w, h) = p.dims();
-        let Some(net) = &self.net else {
-            return;
+        let (lv, hosting, room_code, can_start) = match &self.net {
+            Some(net) => (
+                net.lobby_view(),
+                net.role() == Role::Host,
+                net.room_code.clone(),
+                net.can_start(),
+            ),
+            None => return,
         };
-        let lv = net.lobby_view();
-        let hosting = net.role() == Role::Host;
         title(p, if hosting { "HOSTING" } else { "LOBBY" }, 36.0);
 
         if hosting {
-            let code = format!("CODE {}", net.room_code);
+            let code = format!("CODE {}", room_code);
             font::draw_text(
                 p,
                 &code,
@@ -988,6 +1199,7 @@ impl App {
             true,
             hosting,
         );
+        self.lobby_preview(w * 0.05, 110.0, lv.my.character, lv.my.palette);
         if lv.peer_present {
             draw_lobby_pick(
                 p,
@@ -999,6 +1211,7 @@ impl App {
                 false,
                 false,
             );
+            self.lobby_preview(w * 0.05 + 300.0, 110.0, lv.peer.character, lv.peer.palette);
         } else {
             font::draw_text(
                 p,
@@ -1039,7 +1252,7 @@ impl App {
 
         if hosting {
             let sel = self.lobby_idx == 6;
-            let can = net.can_start();
+            let can = can_start;
             let label = if can {
                 "START MATCH"
             } else {
@@ -1230,6 +1443,15 @@ async fn amain(opts: LaunchOpts) {
     loop {
         app.update();
         app.draw();
+        app.drawn += 1;
+        if let Some((path, at)) = app.screenshot.clone() {
+            if app.drawn >= at {
+                let img = get_screen_data();
+                img.export_png(&path);
+                eprintln!("screenshot saved to {path}");
+                std::process::exit(0);
+            }
+        }
         next_frame().await;
     }
 }

@@ -104,7 +104,7 @@ impl View {
 }
 
 /// Options controlling the extra information drawn.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct SceneOpts {
     /// Draw hurtboxes, hitboxes and per-fighter state text (training mode).
     pub training: bool,
@@ -112,6 +112,19 @@ pub struct SceneOpts {
     pub watermark: bool,
     /// Online: which fighter is controlled locally (its HUD panel says "YOU").
     pub local_player: Option<usize>,
+    /// Draw the HUD (percent panels, port tags, match-over banner).
+    pub hud: bool,
+}
+
+impl Default for SceneOpts {
+    fn default() -> Self {
+        SceneOpts {
+            training: false,
+            watermark: false,
+            local_player: None,
+            hud: true,
+        }
+    }
 }
 
 /// Player accent colours (P1..P4).
@@ -127,39 +140,21 @@ fn t2c(t: (u8, u8, u8)) -> Color {
     Color::rgb(t.0, t.1, t.2)
 }
 
-/// Per-character palette tints. `character.index()` picks the row, the palette
-/// index picks the column. Original colours; the first column is each fighter's
-/// signature look.
-pub const CHAR_PALETTES: [[Color; 4]; 3] = [
-    // Kestrel — warm.
-    [
-        Color::rgb(255, 92, 74),
-        Color::rgb(120, 200, 120),
-        Color::rgb(120, 150, 255),
-        Color::rgb(240, 210, 90),
-    ],
-    // Boulder — earthy/heavy.
-    [
-        Color::rgb(150, 130, 100),
-        Color::rgb(120, 120, 140),
-        Color::rgb(90, 140, 130),
-        Color::rgb(190, 110, 80),
-    ],
-    // Viper — cool/acid.
-    [
-        Color::rgb(90, 220, 200),
-        Color::rgb(200, 90, 220),
-        Color::rgb(230, 230, 120),
-        Color::rgb(90, 160, 255),
-    ],
-];
-
-/// The accent colour for a fighter (character palette, falling back to port).
+/// The accent colour for a fighter: the primary colour of its palette (see
+/// `model::palettes`), falling back to the port colour.
 pub fn fighter_color(character_index: usize, palette: u8) -> Color {
-    CHAR_PALETTES
-        .get(character_index)
-        .map(|row| row[(palette as usize) % row.len()])
-        .unwrap_or(PORT_COLORS[0])
+    match crate::sim::roster::CharacterId::from_u8(character_index as u8) {
+        Some(id) => {
+            let p = crate::model::palettes::get(id, palette).primary();
+            Color::rgb(p[0], p[1], p[2])
+        }
+        None => PORT_COLORS[character_index % 4],
+    }
+}
+
+/// The name of a fighter's palette (for menus).
+pub fn palette_name(id: crate::sim::roster::CharacterId, palette: u8) -> &'static str {
+    crate::model::palettes::get(id, palette).name
 }
 
 /// Draw a whole frame.
@@ -177,6 +172,9 @@ pub fn draw_scene<P: Painter>(p: &mut P, gs: &GameState, opts: SceneOpts) {
 
     draw_projectiles(p, &view, gs);
     draw_fx(p, &view, gs);
+    if !opts.hud {
+        return;
+    }
     draw_hud(p, w, h, gs, opts.local_player);
 
     if opts.training {
@@ -458,7 +456,7 @@ fn draw_fx<P: Painter>(p: &mut P, v: &View, gs: &GameState) {
     }
 }
 
-fn draw_hud<P: Painter>(p: &mut P, w: f32, h: f32, gs: &GameState, local: Option<usize>) {
+pub fn draw_hud<P: Painter>(p: &mut P, w: f32, h: f32, gs: &GameState, local: Option<usize>) {
     let n = gs.fighters.len().max(1);
     let panel_w = 150.0f32.min(w / n as f32 - 20.0);
     let gap = (w - panel_w * n as f32) / (n as f32 + 1.0);
@@ -519,7 +517,7 @@ fn percent_color(pct: f32) -> Color {
     }
 }
 
-fn draw_match_over<P: Painter>(p: &mut P, w: f32, h: f32, winner: usize) {
+pub fn draw_match_over<P: Painter>(p: &mut P, w: f32, h: f32, winner: usize) {
     p.fill_rect(0.0, 0.0, w, h, Color::rgba(0, 0, 0, 120));
     let (title, col) = if winner == usize::MAX {
         ("DRAW".to_string(), Color::rgb(230, 230, 230))
@@ -531,7 +529,7 @@ fn draw_match_over<P: Painter>(p: &mut P, w: f32, h: f32, winner: usize) {
     font::draw_text(p, &title, w * 0.5 - tw * 0.5, h * 0.4, sc, col);
 }
 
-fn state_name(s: &State) -> &'static str {
+pub fn state_name(s: &State) -> &'static str {
     match s {
         State::Stand => "STAND",
         State::Walk => "WALK",

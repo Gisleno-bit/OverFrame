@@ -134,7 +134,7 @@ pub fn render_demo_gif(
     let opts = SceneOpts {
         training: false,
         watermark: true,
-        local_player: None,
+        ..SceneOpts::default()
     };
 
     let total = crate::demo::DEMO_LEN;
@@ -175,7 +175,7 @@ pub fn render_demo_png(
         SceneOpts {
             training,
             watermark: true,
-            local_player: None,
+            ..SceneOpts::default()
         },
     );
     canvas.to_image().save(path)?;

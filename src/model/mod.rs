@@ -10,6 +10,7 @@ pub mod characters;
 pub mod lighting;
 pub mod math3;
 pub mod mesh;
+pub mod palettes;
 pub mod rig;
 pub mod stage3d;
 

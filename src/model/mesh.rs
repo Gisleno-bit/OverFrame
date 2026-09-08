@@ -129,6 +129,24 @@ impl MeshData {
         self.nrm = acc.into_iter().map(|n| n.norm()).collect();
     }
 
+    /// Planar-per-axis ("box") texture coordinates from world position: each
+    /// vertex is projected along its normal's dominant axis, scaled by `scale`
+    /// texture repeats per unit. Good enough for tiled stage materials.
+    pub fn box_uv(mut self, scale: f32) -> Self {
+        for (i, p) in self.pos.iter().enumerate() {
+            let n = self.nrm[i];
+            let (ax, ay, az) = (n.x.abs(), n.y.abs(), n.z.abs());
+            self.uv[i] = if ay >= ax && ay >= az {
+                [p.x * scale, p.z * scale]
+            } else if ax >= az {
+                [p.z * scale, p.y * scale]
+            } else {
+                [p.x * scale, p.y * scale]
+            };
+        }
+        self
+    }
+
     /// Axis-aligned bounds (min, max).
     pub fn bounds(&self) -> (V3, V3) {
         let mut lo = v3(f32::MAX, f32::MAX, f32::MAX);

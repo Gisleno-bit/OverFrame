@@ -104,24 +104,14 @@ pub fn time_label(secs: u32) -> String {
 
 // ---- preview cards ----
 
-fn draw_capsule(p: &mut MqPainter, cx: f32, feet_y: f32, height: f32, hw: f32, c: VColor) {
-    let top = feet_y - height;
-    p.fill_rect(cx - hw, top + hw, hw * 2.0, height - hw * 2.0, c);
-    p.fill_circle(cx, top + hw, hw, c);
-    p.fill_circle(cx, feet_y - hw, hw, c);
-    let head = hw * 0.9;
-    p.fill_circle(cx, top - head * 0.2, head, c);
-    // facing beak
-    p.fill_circle(
-        cx + head,
-        top - head * 0.2,
-        head * 0.45,
-        c.lerp(VColor::rgb(255, 255, 255), 0.5),
-    );
-}
-
 /// A character preview card: capsule in its palette colour, name, archetype and
 /// signature trait — the 2D stand-in for a model preview.
+/// Where the 3D model preview goes inside a character card (relative x, y,
+/// width, height).
+pub const CARD_PREVIEW: (f32, f32, f32, f32) = (6.0, 30.0, 110.0, 150.0);
+/// Same for a lobby slot.
+pub const LOBBY_PREVIEW: (f32, f32, f32, f32) = (85.0, 72.0, 110.0, 130.0);
+
 pub fn draw_char_card(
     p: &mut MqPainter,
     x: f32,
@@ -152,17 +142,24 @@ pub fn draw_char_card(
         if selected { ACCENT } else { MUTED },
     );
 
-    // Capsule preview on the left.
-    draw_capsule(p, x + 60.0, y + 150.0, 74.0, 22.0, c);
-    // palette swatches
+    // (The 3D preview is drawn by the app into CARD_PREVIEW.)
+    // palette swatches + name
     for i in 0..PALETTES {
         let sw = fighter_color(id.index(), i);
-        let sx = x + 20.0 + i as f32 * 18.0;
-        p.fill_rect(sx, y + 170.0, 14.0, 14.0, sw);
+        let sx = x + 12.0 + i as f32 * 17.0;
+        p.fill_rect(sx, y + 182.0, 13.0, 13.0, sw);
         if i == palette {
-            p.fill_rect(sx - 1.0, y + 185.0, 16.0, 2.0, VColor::rgb(255, 255, 255));
+            p.fill_rect(sx - 1.0, y + 197.0, 15.0, 2.0, VColor::rgb(255, 255, 255));
         }
     }
+    font::draw_text(
+        p,
+        &crate::viz::palette_name(id, palette).to_uppercase(),
+        x + 12.0 + PALETTES as f32 * 17.0 + 6.0,
+        y + 184.0,
+        1.2,
+        MUTED,
+    );
 
     // Text on the right.
     let tx = x + 120.0;
@@ -261,7 +258,7 @@ pub fn draw_lobby_pick(
         2.0,
         if is_me { ACCENT } else { DIM },
     );
-    draw_capsule(p, x + bw * 0.5, y + 150.0, 84.0, 24.0, c);
+    // (3D preview drawn by the app into LOBBY_PREVIEW.)
     font::draw_text(p, &ch.name.to_uppercase(), x + 12.0, y + 40.0, 2.5, c);
 
     // Row markers when this is the editable (my) card.
