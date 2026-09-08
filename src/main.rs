@@ -104,6 +104,14 @@ fn main() {
                     }
                 }
             }
+            "--record" => {
+                // --record <dir> [<from> <count>]
+                let dir = args.get(i + 1).cloned().unwrap_or_else(|| "frames".into());
+                let from = args.get(i + 2).and_then(|a| a.parse::<u64>().ok()).unwrap_or(60);
+                let count = args.get(i + 3).and_then(|a| a.parse::<u64>().ok()).unwrap_or(180);
+                opts.record = Some((dir, from, count));
+                i += if args.get(i + 3).is_some() { 3 } else { 1 };
+            }
             "--screenshot" => {
                 let path = args.get(i + 1).cloned().unwrap_or_else(|| {
                     eprintln!("--screenshot needs a file path");

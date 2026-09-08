@@ -301,17 +301,54 @@ count and an optional time limit; a timed match ends on the clock with a
 most-stocks-then-lowest-percent tiebreak. All of it is part of the saved state,
 so it is rollback- and lobby-safe.
 
-### 3D asset pipeline (planned)
+### 3D rendering and the asset pipeline (implemented)
 
-The 2D capsules are placeholders. The planned path to models keeps the data
-model intact: author original rigged models in Blender → export glTF 2.0 →
-load with a Rust glTF loader → drive with the existing per-move frame data
-(startup/active/endlag windows become animation events; the hitboxes stay in
-`attacks.rs`). Because gameplay reads a character purely through `Character` +
-the move table, the renderer can move from capsules to skinned meshes without
-changing the simulation or the netcode. If no artist is available, models must
-be CC0/CC-BY (credited) and visibly unlike any existing franchise character —
-see `docs/LEGAL.md`.
+The renderer is a **pure function of the sim state**. `src/model/` is a CPU
+content layer with no GPU dependency (so it is unit-tested in the fast CI job);
+`src/render/scene3d.rs` is the thin macroquad side that uploads what it
+produces.
+
+**Segmented rigs, not skinning.** A fighter is a bone hierarchy where every
+bone owns a rigid mesh (`model/rig.rs`). A `Pose` is a per-bone Euler
+rotation + offset + scale; `Rig::world` composes it and `Rig::skin` emits lit
+vertices. This was chosen over skinned meshes on purpose:
+
+* cheap (no weights, ~1.5–2.5k triangles per fighter, all lit on the CPU in
+  well under a millisecond);
+* rollback-friendly — render-only state (camera smoothing, eased turns, strike
+  trails) lives in the renderer and is never saved or re-simulated;
+* maps 1:1 onto a Blender scene of parented objects, so the art pipeline is
+  just glTF export, no add-ons (`docs/ART_PIPELINE.md`).
+
+**Animation is derived from frame data** (`model/anim.rs`). Every `State`
+maps to a pose; attacks use the move's own `startup/active/endlag`: the first
+45 % of startup pulls into a wind-up, the rest accelerates into the strike pose
+so it lands exactly on the first active frame, active frames hold with a
+slight overshoot, endlag eases back. The striking limb (a per-move `Strike`
+spec: which limb, how much wind-up, lean, crouch, twist) is **aimed at the
+hitbox offset**, so a low sweep is low and an up-tilt is up for every character
+without hand-keying. Gait cycles key off the global frame; jump squat and
+landing squash-and-stretch the root; rolls, air-dodges and tumbles spin the
+body about its centre. Per-character `secondary` functions animate the extras
+from velocity and time (scarf drag, tail waves, orbiting stones).
+
+**Lighting** (`model/lighting.rs`): hemisphere ambient (sky/ground) + one
+banded key light + an unbanded fill from the camera + a rim term, quantised
+into a toon look, with palettes resolving 8 material *slots* to colours. An
+inverted-hull outline pass (the only custom shader) pushes vertices along their
+normals and culls front faces.
+
+**Stages** (`model/stage3d.rs`) take their gameplay geometry from
+`sim::stage` — the slab top *is* the platform, so collision can never drift
+from art — and add a per-stage `Look` (sky gradient, palette, light, procedural
+tiled texture style) plus decor in a fogged far layer.
+
+**Pipeline**: `overframe --export-glb <fighter|stage>` writes the exact rig as
+`.glb`; an artist models over it in Blender and exports `.glb`; the game loads
+`assets/characters/<name>.glb` / `assets/stages/<name>.glb` at start
+(`model/assets.rs`) and drives it with the same animation. `model/gltf_io.rs`
+handles node → bone, material name → slot, rest-transform baking and height
+fitting; the export → import round trip of every shipped fighter is a test.
 
 ## Steam integration (Fase 3 plan)
 

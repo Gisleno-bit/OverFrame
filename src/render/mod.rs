@@ -56,6 +56,9 @@ pub struct LaunchOpts {
     pub demo: Option<MatchSpec>,
     /// Save a PNG of the window after `at` drawn frames, then quit.
     pub screenshot: Option<(String, u64)>,
+    /// Save every drawn frame from `at` for `count` frames as
+    /// `<dir>/frame_NNNN.png`, then quit (for making GIFs).
+    pub record: Option<(String, u64, u64)>,
     /// Open the animation viewer on this character, optionally at a clip
     /// index and frame (paused): `--anim viper:15:20`.
     pub anim: Option<(CharacterId, Option<usize>, Option<u32>)>,
@@ -243,6 +246,7 @@ struct App {
     rebind_started: u64,
     nav_cd: f32,
     screenshot: Option<(String, u64)>,
+    record: Option<(String, u64, u64)>,
     drawn: u64,
     viewer: Viewer,
 }
@@ -378,6 +382,7 @@ impl App {
             rebind_started: 0,
             nav_cd: 0.0,
             screenshot: opts.screenshot.clone(),
+            record: opts.record.clone(),
             drawn: 0,
             viewer: Viewer {
                 fighter: None,
@@ -1748,6 +1753,18 @@ async fn amain(opts: LaunchOpts) {
                 img.export_png(&path);
                 eprintln!("screenshot saved to {path}");
                 std::process::exit(0);
+            }
+        }
+        if let Some((dir, at, count)) = app.record.clone() {
+            if app.drawn >= at {
+                let n = app.drawn - at;
+                if n >= count {
+                    eprintln!("recorded {count} frames to {dir}");
+                    std::process::exit(0);
+                }
+                let _ = std::fs::create_dir_all(&dir);
+                let img = get_screen_data();
+                img.export_png(&format!("{dir}/frame_{n:04}.png"));
             }
         }
         next_frame().await;

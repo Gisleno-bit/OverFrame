@@ -3,6 +3,65 @@
 All notable changes to OVERFRAME. Format follows *Keep a Changelog*; versions
 follow SemVer once `v1.0.0` ships.
 
+## [0.4.0] — Fase 3 (in progress): 3D models, stages and art pipeline
+
+### Added
+- **3D renderer** (`render/scene3d.rs`): the match is drawn in 3D with a
+  tournament-style camera (frames both fighters, zooms with the spread, smooth,
+  shake on hits), CPU toon lighting, inverted-hull outlines, soft blob shadows,
+  billboard hit / shield / blast / dust effects, strike trails, per-stage sky.
+  The classic 2D view stays available (Options → RENDERER, `render_3d` in the
+  settings file) and remains what the headless GIF tool uses.
+- **Original 3D fighters** (`model/characters.rs`): Kestrel, Boulder and Viper
+  as segmented low-poly models on a shared humanoid skeleton with signature
+  extras (crest, scarf and tail feathers; orbiting stones and a glowing core;
+  hood and a five-segment tail). **Six palettes each** (`model/palettes.rs`),
+  shared with the HUD and menus.
+- **Procedural animation** (`model/anim.rs`) driven by the simulation's own
+  frame data: stance/breathing, walk and run cycles, crouch, jump-squat squash
+  and take-off stretch, rising/falling/fast-fall, shield, rolls, spot-dodge,
+  air-dodge, hitstun flinch and tumble, knockdown, ledge hang, grabs/throws;
+  every attack is a wind-up → strike → recover timeline with the striking limb
+  aimed at the move's hitbox. Per-character secondary motion for the extras.
+  Turns are eased over a few frames instead of mirroring.
+- **3D stages** (`model/stage3d.rs`) built from the sim's platform data plus
+  per-stage art direction (`Look`): **The Lattice** redesigned as a violet
+  void of hexagonal pylons and orbital rings, **Meridian** a desert arena at
+  dawn with monoliths and a low sun, **Tidegate** a basalt sea gate with a
+  broken arch under the moon. Procedural tiled surface textures (panels,
+  sandstone strata, cracked basalt), fog on distant geometry, glow strips.
+- **Select screen** with large rotating 3D model previews on pedestals, stat
+  bars, palette names, and an orbiting 3D stage preview; 3D previews in the
+  online lobby too.
+- **Blender pipeline** (`model/gltf_io.rs`, `model/assets.rs`,
+  `docs/ART_PIPELINE.md`): `.glb` import of segmented rigs (node names = bones,
+  material names = palette slots, rest rotation/scale baked, auto height fit)
+  and stage dressing; `.glb` export of any in-engine rig
+  (`overframe --export-glb kestrel k.glb`) as the artist's starting point.
+  Drop `assets/characters/<name>.glb` or `assets/stages/<name>.glb` next to
+  the game (or `OVERFRAME_ASSETS`) and it is used with the same animation.
+  Export → import round-trips in tests.
+- **Animation viewer** (`overframe --anim viper[:clip[:frame]]`): every state
+  and move on a pedestal with hitboxes, palette/fighter cycling, pause, orbit.
+- **Attract mode**: the main menu plays the demo match in 3D behind the items;
+  WATCH DEMO shows it full screen.
+- CLI: `--versus p1,p2,stage[,pal1,pal2]`, `--demo [spec]`,
+  `--screenshot file.png --at N`, `--record dir from count`.
+- `model` unit tests (18) covering primitives, rig maths, animation aims,
+  character/stage models, camera and the glTF round trip.
+
+### Changed
+- `PALETTES` is 6 (was 4); `viz::fighter_color` reads the shared palettes.
+- `SceneOpts` gained `hud` and `hitboxes`.
+- `gui` feature now includes `gltf`; new `gltf` feature (crate `gltf`, no
+  image decoding).
+
+### Known limitations
+- Models are procedural placeholders in an original style; the pipeline is
+  ready for artist-made replacements. No skinning by design (see
+  `docs/ART_PIPELINE.md`).
+- Stage dressing from `.glb` is drawn with the stage's palette slots only.
+
 ## [0.3.0] — Fase 3 (in progress): roster, stages, online lobbies
 
 ### Added

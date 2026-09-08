@@ -2,14 +2,16 @@
 
 **An open, tournament-ready platform fighter.** Fast, precise, rollback-ready — and 100% original, free, and MIT-licensed.
 
-![OVERFRAME demo](docs/media/overframe-demo.gif)
+![OVERFRAME demo](docs/media/overframe-3d.gif)
 
-![Roster](docs/media/roster.png)
+![Select screen](docs/media/select-3d.png)
 
-*The clip above is rendered by the actual game engine (not a pre-baked animation): dash-dance → wavedash → walk-in → tilt → forward smash → KO.*
+![Stages](docs/media/stages-3d.png)
+
+*The clip above is the actual game engine playing its scripted demo (not a pre-baked animation): dash-dance → wavedash → walk-in → tilt → forward smash → KO, rendered by the 3D renderer.*
 
 [![CI](https://github.com/Gisleno-bit/overframe/actions/workflows/ci.yml/badge.svg)](https://github.com/Gisleno-bit/overframe/actions/workflows/ci.yml)
-&nbsp;License: MIT &nbsp;•&nbsp; Language: Rust &nbsp;•&nbsp; Status: **Fase 3 (in progress) — roster, stages, online lobbies**
+&nbsp;License: MIT &nbsp;•&nbsp; Language: Rust &nbsp;•&nbsp; Status: **Fase 3 (in progress) — 3D models & stages, roster, online lobbies**
 
 ---
 
@@ -31,11 +33,21 @@ stages**:
 | **Boulder** | Heavyweight | *Bulwark* — super armour while charging a smash |
 | **Viper** | Lightweight | *Skyline* — two air jumps, best air control |
 
-Stages: **The Lattice** (floating-platform standard), **Meridian** (flat
-neutral), **Tidegate** (asymmetric). Characters, stages, names, colours and
-frame data are all original; the fighters are 2D placeholder art (an original,
-labelled art style, not lookalikes) with a documented path to original 3D models
-(`docs/DESIGN.md`).
+Stages: **The Lattice** (floating-platform standard, a violet void of pylons
+and rings), **Meridian** (flat neutral, a desert arena at dawn), **Tidegate**
+(asymmetric, a basalt sea gate under the moon). Characters, stages, names,
+colours and frame data are all original.
+
+**Everything is rendered in 3D** by the game's own renderer: each fighter is
+an original low-poly *segmented* model (rigid parts on a bone hierarchy) with
+six colour palettes, toon lighting and outlines, soft shadows, particles and a
+tournament-style camera. Animation is **procedural and driven by the
+simulation's frame data** — a move winds up during its startup, snaps to the
+strike pose on its first active frame with the limb aimed at the hitbox, and
+recovers during endlag — so what you see is exactly what hits. Artists can
+replace any model with a Blender-made `.glb` without touching code
+([`docs/ART_PIPELINE.md`](docs/ART_PIPELINE.md)); a classic 2D view remains
+available in Options.
 
 ## Is this legal? (short version)
 
@@ -145,9 +157,17 @@ Three cleanly separated layers, which is what makes the game testable, replayabl
 src/
   sim/        Deterministic, engine-agnostic simulation. No rendering, window,
               audio or wall-clock. GameState::step(inputs) -> next tick.
-  viz/        Backend-agnostic drawing: a Painter trait + one draw_scene().
-  render/     macroquad front-end: window, menus, options, online screens, the
-              fixed-timestep loop; input.rs merges keyboard + gilrs gamepads.
+  viz/        Backend-agnostic 2D drawing: a Painter trait + one draw_scene()
+              (HUD, menus, the classic 2D view, the headless GIF tool).
+  model/      3D content layer, pure CPU: mesh primitives, segmented rigs,
+              procedural animation from sim state (anim.rs), the three fighter
+              models (characters.rs) and palettes, stage models with per-stage
+              looks (stage3d.rs), the match camera, glTF import/export
+              (gltf_io.rs) and the assets/ override (assets.rs).
+  render/     macroquad front-end: window, menus with 3D previews, options,
+              online screens, the fixed-timestep loop, the animation viewer;
+              scene3d.rs is the 3D match renderer (lighting baked on the CPU,
+              one small outline shader); input.rs merges keyboard + gilrs.
   netcode/    GGRS rollback: mod.rs (Config, SyncTest, request handling),
               session.rs (host/join state machine on P2PSession), socket.rs
               (one UDP socket for handshake + GGRS), handshake.rs, roomcode.rs,
@@ -158,7 +178,14 @@ src/
   demo.rs     The scripted showcase match used by the GIF tool and attract mode.
 ```
 
-Because the simulation is pure and input-driven, the **exact same `draw_scene`** powers both the game window and the headless GIF, and the **exact same `step`** runs locally and over the network.
+Because the simulation is pure and input-driven, the renderer is a *function of the sim state*: the 3D scene, the classic 2D view and the headless GIF all read the same `GameState`, and the **exact same `step`** runs locally and over the network. Render-only state (camera smoothing, eased turns, trails) lives in the renderer and is never saved or rolled back.
+
+### 3D pipeline at a glance
+
+- **Models**: `src/model/characters.rs` builds Kestrel, Boulder and Viper from primitives on a shared humanoid skeleton plus signature extras (crest/scarf/tail feathers, orbiting stones, hood/tail). 1.4–2.5k triangles each.
+- **Animation**: `src/model/anim.rs` — stance, walk/run cycles, crouch, jump squash & stretch, air poses, shield, rolls, tumbles, ledge hang, knockdown, throws, and a wind-up → strike → recover timeline for every move driven by its own startup/active/endlag with the striking limb aimed at the hitbox. Per-character secondary motion for the extras.
+- **Look**: CPU toon lighting (hemisphere ambient + banded key + fill + rim) with 6 palettes per fighter; per-stage art direction (sky, materials, procedural tiled texture, light); inverted-hull outlines; soft blob shadows; billboard hit/dust/blast effects; strike trails; smooth tournament camera.
+- **Artist path**: `overframe --export-glb kestrel k.glb` → model over it in Blender → export `.glb` → drop into `assets/characters/` → the game uses it with the same animation. Import ↔ export round-trips in CI. Check any model with `overframe --anim kestrel`.
 
 ### Determinism & rollback
 
@@ -176,9 +203,20 @@ cargo test --no-default-features --features netcode
 cargo test
 ```
 
+Handy flags while working on visuals:
+
+```bash
+overframe --versus kestrel,viper,tidegate      # straight into a local match
+overframe --demo boulder,kestrel,meridian      # attract-mode demo
+overframe --anim viper                         # animation viewer (every state and move)
+overframe --demo --screenshot shot.png --at 90 # save a frame and quit
+overframe --demo --record frames 60 300        # save 300 frames for a GIF
+overframe --export-glb kestrel kestrel.glb     # rig for Blender
+```
+
 `tests/mechanics.rs` asserts the *relationships* that make it feel right — a full hop clears a short hop, fast-falling lands sooner, dashing outruns walking, an angled air-dodge wavedashes, L-cancel cuts landing lag, knockback grows with percent, and the sim is deterministic. `tests/determinism.rs` is the GGRS `SyncTest` rollback check.
 
-`tests/content.rs` checks every character has a complete, sane moveset and a genuinely distinct archetype, and that stages are well-formed. `tests/netcode_flow.rs` covers the online layer end to end: room-code and handshake round-trips, the ban-list format, and — the important one — **a real host and guest connecting over loopback UDP, synchronising through GGRS, playing 300 frames with deliberately uneven pacing so rollbacks actually happen, and finishing on byte-identical states**. It also checks that a banned id is refused. `tests/gamepad_map.rs` covers the gamepad mapping, deadzones, rebinding and persistence without hardware.
+`tests/content.rs` checks every character has a complete, sane moveset and a genuinely distinct archetype, and that stages are well-formed. The `model` module carries its own unit tests (closed, outward-facing primitives; bone hierarchy maths; strike poses aim where the hitbox is; gait cycles are periodic; every fighter model fits its collision size; stage models sit on the sim's platforms; camera framing; glTF export → import round trip of every fighter). `tests/netcode_flow.rs` covers the online layer end to end: room-code and handshake round-trips, the ban-list format, and — the important one — **a real host and guest connecting over loopback UDP, synchronising through GGRS, playing 300 frames with deliberately uneven pacing so rollbacks actually happen, and finishing on byte-identical states**. It also checks that a banned id is refused. `tests/gamepad_map.rs` covers the gamepad mapping, deadzones, rebinding and persistence without hardware.
 
 ## Roadmap
 
@@ -186,9 +224,11 @@ cargo test
 - **Fase 2 — online (this release).** GGRS P2P rollback netcode over direct UDP with room codes, host/join UI, live ping/rollback HUD, gamepad support with in-game rebinding, persistent player identity and the ban-list data format. ✅ Still open from Fase 2: fixed-point determinism hardening (see below).
 - **Fase 3 — content + Steam (in progress).** 3 fighters across archetypes, 3
   stages, character/stage select, match rules (stocks/time), LAN lobbies with a
-  room browser + chat, Steam-ID-ready ban list. ✅ Remaining: more fighters/stages
-  toward 8-10, original 3D models + animation, and the Steam integration
-  (matchmaking, invites, SDR transport) planned in `docs/STEAM.md`.
+  room browser + chat, Steam-ID-ready ban list ✅. **Original 3D models,
+  procedural animation, 3D stages, toon look and the Blender `.glb` pipeline**
+  ✅ (this release). Remaining: more fighters/stages toward 8-10, artist-made
+  models through the pipeline, and the Steam integration (matchmaking, invites,
+  SDR transport) planned in `docs/STEAM.md`.
 - **Fase 4 — launch.** Ship free on Steam (Early Access); community tournament
   support.
 
