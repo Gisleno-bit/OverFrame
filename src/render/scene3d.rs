@@ -68,7 +68,7 @@ impl Scene3D {
     pub fn new() -> Self {
         let models = CharacterId::ALL
             .iter()
-            .map(|id| crate::model::characters::build(*id))
+            .map(|id| crate::model::characters::build_with_assets(*id))
             .collect();
         Scene3D {
             models,
@@ -109,7 +109,8 @@ impl Scene3D {
         if self.stage_id == Some(gs.stage.id) {
             return;
         }
-        let model: StageModel = stage3d::build(&gs.stage);
+        let dressing = crate::model::assets::stage_dressing(gs.stage.id);
+        let model: StageModel = stage3d::build_with_dressing(&gs.stage, dressing);
         let lk = model.look;
         // Fighters are lit by a neutral, bright version of the stage light so
         // they read on every stage; the stage itself uses its own.
@@ -193,7 +194,7 @@ impl Scene3D {
             self.draw_shadow(f, gs);
         }
         for f in &gs.fighters {
-            self.draw_fighter(f, gs, opts);
+            self.draw_fighter(f, gs.frame);
         }
         self.draw_projectiles(gs);
         for f in &gs.fighters {
@@ -314,13 +315,13 @@ impl Scene3D {
         t
     }
 
-    fn draw_fighter(&mut self, f: &Fighter, gs: &GameState, _opts: SceneOpts) {
+    fn draw_fighter(&mut self, f: &Fighter, frame: u64) {
         if matches!(f.state, State::Dead) {
             return;
         }
         let model = &self.models[f.character.id.index()];
-        let mut pose = anim::fighter_pose(&model.rig, f, &model.style, gs.frame);
-        (model.secondary)(&model.rig, &mut pose, f, gs.frame);
+        let mut pose = anim::fighter_pose(&model.rig, f, &model.style, frame);
+        (model.secondary)(&model.rig, &mut pose, f, frame);
         let world = model.rig.world(&pose, &Self::fighter_root(f));
         let tint = Self::tint_for(f);
         self.verts.clear();
@@ -617,6 +618,115 @@ impl Scene3D {
                 VColor::rgba(220, 240, 220, 200),
             );
         }
+    }
+
+    // ------------------------------------------------------------ viewer
+
+    /// Animation viewer: one fighter on a pedestal in a neutral studio,
+    /// orbiting slowly. `f` is a synthetic fighter whose state the caller
+    /// drives; `label` is drawn under it.
+    pub fn draw_viewer(&mut self, f: &Fighter, frame: u64, angle_deg: f32, label: &str, sub: &str) {
+        let (w, h) = (screen_width(), screen_height());
+        // Studio backdrop.
+        let top = VColor::rgb(34, 36, 56);
+        let bottom = VColor::rgb(12, 12, 20);
+        let bands = 24;
+        for i in 0..bands {
+            let t = i as f32 / bands as f32;
+            draw_rectangle(
+                0.0,
+                h * t,
+                w,
+                h / bands as f32 + 1.0,
+                col(top.lerp(bottom, t)),
+            );
+        }
+        let height = f.character.height;
+        let a = angle_deg.to_radians();
+        let dist = height * 3.4;
+        let cam = Camera3D {
+            position: vec3(a.sin() * dist, height * 0.75, a.cos() * dist),
+            target: vec3(0.0, height * 0.5, 0.0),
+            up: vec3(0.0, 1.0, 0.0),
+            fovy: 30.0f32.to_radians(),
+            aspect: Some(w / h.max(1.0)),
+            projection: Projection::Perspective,
+            ..Default::default()
+        };
+        self.view_proj = cam.matrix();
+        set_camera(&cam);
+        self.light = Light::default_for((120, 130, 170), (40, 40, 60));
+        // Pedestal + floor grid.
+        let disc = MeshData::cylinder(height * 1.3, height * 1.35, 1.6, 28, slot::SECONDARY)
+            .flat()
+            .translate(v3(0.0, -0.8, 0.0));
+        let pal = crate::model::lighting::Palette::new(
+            "studio",
+            [60, 64, 90],
+            [52, 56, 82],
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+        );
+        for m in upload_static(&disc, &pal, &self.light, [30, 30, 40], false, None) {
+            draw_mesh(&m);
+        }
+        for i in -6..=6 {
+            let x = i as f32 * height * 0.2;
+            let c = Color::from_rgba(120, 130, 170, 40);
+            draw_line_3d(vec3(x, 0.05, -height * 1.2), vec3(x, 0.05, height * 1.2), c);
+            draw_line_3d(vec3(-height * 1.2, 0.05, x), vec3(height * 1.2, 0.05, x), c);
+        }
+        // Shadow on the pedestal.
+        let hw = f.character.half_width;
+        let c = [0u8, 0, 10, 110];
+        let q = |x: f32, z: f32, u: f32, v: f32| Vertex {
+            position: vec3(f.pos.x + x, 0.15, z),
+            uv: vec2(u, v),
+            color: c,
+            normal: vec4(0.0, 1.0, 0.0, 0.0),
+        };
+        let (sx, sz) = (hw * 3.6, hw * 2.6);
+        draw_mesh(&Mesh {
+            vertices: vec![
+                q(-sx, sz, 0.0, 0.0),
+                q(sx, sz, 1.0, 0.0),
+                q(sx, -sz, 1.0, 1.0),
+                q(-sx, -sz, 0.0, 1.0),
+            ],
+            indices: vec![0, 1, 2, 0, 2, 3],
+            texture: Some(self.tex_soft.clone()),
+        });
+        self.draw_fighter(f, frame);
+        self.draw_overlays(
+            f,
+            SceneOpts {
+                hitboxes: true,
+                ..SceneOpts::default()
+            },
+        );
+        set_default_camera();
+        let mut p = MqPainter;
+        let sc = 3.0;
+        font::draw_text(
+            &mut p,
+            label,
+            w * 0.5 - font::text_width(label, sc) * 0.5,
+            h - 96.0,
+            sc,
+            VColor::rgb(255, 220, 120),
+        );
+        font::draw_text(
+            &mut p,
+            sub,
+            w * 0.5 - font::text_width(sub, 1.6) * 0.5,
+            h - 62.0,
+            1.6,
+            VColor::rgba(200, 210, 230, 200),
+        );
     }
 
     // ------------------------------------------------------------ preview

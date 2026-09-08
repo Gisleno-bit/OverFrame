@@ -12,6 +12,8 @@
 //! overframe --versus kestrel,viper,tidegate   # straight into a local match
 //! overframe --demo boulder,kestrel,meridian   # attract-mode demo
 //! overframe --demo --screenshot shot.png --at 180   # save a frame, quit
+//! overframe --export-glb kestrel kestrel.glb   # rig for Blender (docs/ART_PIPELINE.md)
+//! overframe --anim viper        # animation viewer: every state and move
 //! ```
 
 #[cfg(feature = "gui")]
@@ -64,6 +66,44 @@ fn main() {
                     opts.demo = Some(spec);
                 }
             }
+            "--anim" => {
+                let spec = args.get(i + 1).cloned().unwrap_or_else(|| "kestrel".into());
+                let mut parts = spec.split(':');
+                let name = parts.next().unwrap_or("kestrel");
+                let clip = parts.next().and_then(|c| c.parse::<usize>().ok());
+                let frame = parts.next().and_then(|c| c.parse::<u32>().ok());
+                let id = overframe::sim::roster::CharacterId::ALL
+                    .iter()
+                    .copied()
+                    .find(|c| c.name().eq_ignore_ascii_case(name));
+                match id {
+                    Some(id) => opts.anim = Some((id, clip, frame)),
+                    None => {
+                        eprintln!("--anim: unknown character '{name}' (kestrel, boulder, viper)");
+                        std::process::exit(2);
+                    }
+                }
+                if args.get(i + 1).is_some() {
+                    i += 1;
+                }
+            }
+            "--export-glb" => {
+                let what = args.get(i + 1).cloned().unwrap_or_default();
+                let out = args
+                    .get(i + 2)
+                    .cloned()
+                    .unwrap_or_else(|| format!("{what}.glb"));
+                match export_glb(&what, &out) {
+                    Ok(msg) => {
+                        println!("{msg}");
+                        return;
+                    }
+                    Err(e) => {
+                        eprintln!("--export-glb: {e}");
+                        std::process::exit(2);
+                    }
+                }
+            }
             "--screenshot" => {
                 let path = args.get(i + 1).cloned().unwrap_or_else(|| {
                     eprintln!("--screenshot needs a file path");
@@ -105,6 +145,53 @@ fn main() {
         i += 1;
     }
     overframe::render::launch(opts);
+}
+
+/// Write a fighter's rig or a stage's geometry as `.glb` for Blender.
+#[cfg(feature = "gui")]
+fn export_glb(what: &str, out: &str) -> Result<String, String> {
+    use overframe::model::{characters, gltf_io, stage3d};
+    use overframe::sim::roster::CharacterId;
+    use overframe::sim::stage::{Stage, StageId};
+    let w = what.to_ascii_lowercase();
+    if let Some(id) = CharacterId::ALL
+        .iter()
+        .copied()
+        .find(|c| c.name().eq_ignore_ascii_case(&w))
+    {
+        let m = characters::build(id);
+        let bytes = gltf_io::export_rig(&m.rig, m.palette(0));
+        std::fs::write(out, &bytes).map_err(|e| e.to_string())?;
+        return Ok(format!(
+            "wrote {out}: {} ({} bones, {} triangles). Open in Blender; see docs/ART_PIPELINE.md",
+            id.name(),
+            m.rig.len(),
+            m.rig.triangle_count()
+        ));
+    }
+    if let Some(id) = StageId::ALL.iter().copied().find(|s| {
+        let n = s.name().replace(' ', "");
+        n.eq_ignore_ascii_case(&w) || n.trim_start_matches("The").eq_ignore_ascii_case(&w)
+    }) {
+        let stage = Stage::by_id(id);
+        let model = stage3d::build(&stage);
+        // Pack the stage as a two-node rig: slab geometry + far decor.
+        let mut rig = overframe::model::Rig::new();
+        rig.add("slab", "", overframe::model::math3::V3::ZERO);
+        rig.add("decor", "slab", overframe::model::math3::V3::ZERO);
+        rig.attach("slab", model.near);
+        rig.attach("decor", model.far);
+        let bytes = gltf_io::export_rig(&rig, &model.palette);
+        std::fs::write(out, &bytes).map_err(|e| e.to_string())?;
+        return Ok(format!(
+            "wrote {out}: {} ({} triangles)",
+            id.name(),
+            rig.triangle_count()
+        ));
+    }
+    Err(format!(
+        "unknown '{what}'. Characters: kestrel, boulder, viper. Stages: lattice, meridian, tidegate."
+    ))
 }
 
 #[cfg(not(feature = "gui"))]

@@ -15,7 +15,9 @@ pub mod rig;
 pub mod stage3d;
 
 #[cfg(feature = "gltf")]
-pub mod gltf_import;
+pub mod assets;
+#[cfg(feature = "gltf")]
+pub mod gltf_io;
 
 pub use camera::MatchCamera;
 pub use characters::CharacterModel;

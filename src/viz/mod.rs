@@ -114,6 +114,8 @@ pub struct SceneOpts {
     pub local_player: Option<usize>,
     /// Draw the HUD (percent panels, port tags, match-over banner).
     pub hud: bool,
+    /// Draw active hitboxes only (no hurtboxes / labels) — the anim viewer.
+    pub hitboxes: bool,
 }
 
 impl Default for SceneOpts {
@@ -123,6 +125,7 @@ impl Default for SceneOpts {
             watermark: false,
             local_player: None,
             hud: true,
+            hitboxes: false,
         }
     }
 }

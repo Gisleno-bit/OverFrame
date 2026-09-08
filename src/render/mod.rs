@@ -56,6 +56,9 @@ pub struct LaunchOpts {
     pub demo: Option<MatchSpec>,
     /// Save a PNG of the window after `at` drawn frames, then quit.
     pub screenshot: Option<(String, u64)>,
+    /// Open the animation viewer on this character, optionally at a clip
+    /// index and frame (paused): `--anim viper:15:20`.
+    pub anim: Option<(CharacterId, Option<usize>, Option<u32>)>,
 }
 
 /// A match description parsed from the command line:
@@ -134,6 +137,9 @@ enum Screen {
     Menu,
     /// Full-screen scripted demo match (attract mode).
     Attract,
+    /// Animation viewer (`--anim <character>`): every state and move on a
+    /// pedestal, for checking models.
+    AnimViewer,
     LocalSetup,
     TrainSetup,
     Versus,
@@ -238,6 +244,97 @@ struct App {
     nav_cd: f32,
     screenshot: Option<(String, u64)>,
     drawn: u64,
+    viewer: Viewer,
+}
+
+/// Animation-viewer state: a synthetic fighter driven through every state.
+struct Viewer {
+    fighter: Option<crate::sim::fighter::Fighter>,
+    clip: usize,
+    frame: u64,
+    angle: f32,
+    paused: bool,
+    orbit: bool,
+}
+
+/// One showcase clip: a label and how to put the fighter into it.
+struct Clip {
+    label: &'static str,
+    state: crate::sim::fighter::State,
+    grounded: bool,
+    vel_y: f32,
+    /// Frames to show (0 = the move's own length + a hold).
+    len: u32,
+}
+
+fn viewer_clips() -> Vec<Clip> {
+    use crate::sim::attacks::MoveId as M;
+    use crate::sim::fighter::State as S;
+    let g = |label, state, len| Clip {
+        label,
+        state,
+        grounded: true,
+        vel_y: 0.0,
+        len,
+    };
+    let a = |label, state, vel_y| Clip {
+        label,
+        state,
+        grounded: false,
+        vel_y,
+        len: 60,
+    };
+    let atk = |label, id, aerial| Clip {
+        label,
+        state: S::Attack { id, aerial },
+        grounded: !aerial,
+        vel_y: if aerial { -1.0 } else { 0.0 },
+        len: 0,
+    };
+    vec![
+        g("STAND", S::Stand, 90),
+        g("WALK", S::Walk, 90),
+        g("RUN", S::Run, 90),
+        g("CROUCH", S::Crouch, 60),
+        g("JUMP SQUAT", S::JumpSquat, 30),
+        a("AIR (RISING)", S::Air, 3.0),
+        a("AIR (FALLING)", S::Air, -2.0),
+        g("SHIELD", S::Shield, 60),
+        g(
+            "ROLL",
+            S::Roll { dir: 1.0 },
+            crate::sim::constants::ROLL_DURATION,
+        ),
+        g(
+            "SPOTDODGE",
+            S::Spotdodge,
+            crate::sim::constants::SPOTDODGE_DURATION,
+        ),
+        a("AIRDODGE", S::Airdodge, 0.0),
+        atk("JAB", M::Jab, false),
+        atk("FORWARD TILT", M::Ftilt, false),
+        atk("UP TILT", M::Utilt, false),
+        atk("DOWN TILT", M::Dtilt, false),
+        atk("FORWARD SMASH", M::Fsmash, false),
+        atk("UP SMASH", M::Usmash, false),
+        atk("DOWN SMASH", M::Dsmash, false),
+        atk("DASH ATTACK", M::DashAttack, false),
+        atk("NEUTRAL AIR", M::Nair, true),
+        atk("FORWARD AIR", M::Fair, true),
+        atk("BACK AIR", M::Bair, true),
+        atk("UP AIR", M::Uair, true),
+        atk("DOWN AIR", M::Dair, true),
+        atk("NEUTRAL SPECIAL", M::SpecialN, false),
+        atk("UP SPECIAL", M::SpecialUp, true),
+        atk("SIDE SPECIAL", M::SpecialSide, false),
+        atk("DOWN SPECIAL", M::SpecialDown, false),
+        g("GRAB", S::Grab, 40),
+        g("FORWARD THROW", S::Throw { id: M::ThrowF }, 0),
+        g("FLINCH", S::Hitstun { tumble: false }, 40),
+        a("TUMBLE", S::Hitstun { tumble: true }, 1.0),
+        g("KNOCKDOWN", S::Knockdown, 60),
+        a("LEDGE HANG", S::LedgeGrab, 0.0),
+    ]
 }
 
 impl App {
@@ -282,6 +379,14 @@ impl App {
             nav_cd: 0.0,
             screenshot: opts.screenshot.clone(),
             drawn: 0,
+            viewer: Viewer {
+                fighter: None,
+                clip: 0,
+                frame: 0,
+                angle: 25.0,
+                paused: false,
+                orbit: true,
+            },
         };
         // The menu plays the demo in the background.
         app.gs = crate::demo::match_state();
@@ -294,6 +399,21 @@ impl App {
             app.rules = spec.rules();
             app.start_demo();
             app.screen = Screen::Attract;
+        } else if let Some((id, clip, frame)) = opts.anim {
+            app.rules.p1 = id;
+            if let Some(c) = clip {
+                app.viewer.clip = c;
+            }
+            app.viewer_set_character(id);
+            if let Some(fr) = frame {
+                app.viewer.paused = true;
+                app.viewer.orbit = false;
+                app.viewer.frame = fr as u64;
+                if let Some(f) = app.viewer.fighter.as_mut() {
+                    f.state_frame = fr;
+                }
+            }
+            app.screen = Screen::AnimViewer;
         }
         if let Some(port) = opts.host {
             app.start_host(port);
@@ -417,6 +537,7 @@ impl App {
                     self.screen = Screen::Menu;
                 }
             }
+            Screen::AnimViewer => self.update_viewer(nav),
             Screen::LocalSetup => self.update_setup(nav, false),
             Screen::TrainSetup => self.update_setup(nav, true),
             Screen::Controls => {
@@ -470,6 +591,157 @@ impl App {
         if nav.back {
             std::process::exit(0);
         }
+    }
+
+    // ------------------------------------------------------------ viewer
+
+    fn viewer_set_character(&mut self, id: CharacterId) {
+        let mut f = crate::sim::fighter::Fighter::new(id.data(), 0, crate::sim::math::Vec2::ZERO);
+        f.palette = self.rules.p1_pal;
+        f.facing = 1.0;
+        self.viewer.fighter = Some(f);
+        self.viewer.frame = 0;
+        self.viewer_apply_clip();
+    }
+
+    /// Put the synthetic fighter into the current clip's state.
+    fn viewer_apply_clip(&mut self) {
+        let clips = viewer_clips();
+        let c = &clips[self.viewer.clip % clips.len()];
+        if let Some(f) = self.viewer.fighter.as_mut() {
+            f.state = c.state;
+            f.state_frame = 0;
+            f.grounded = c.grounded;
+            f.vel = crate::sim::math::Vec2::new(0.0, c.vel_y);
+            f.fastfalling = false;
+            f.already_hit = false;
+            f.pos = crate::sim::math::Vec2::new(0.0, if c.grounded { 0.0 } else { 8.0 });
+            f.anim_flash = 0;
+        }
+        self.viewer.frame = 0;
+    }
+
+    fn viewer_clip_len(&self) -> u32 {
+        let clips = viewer_clips();
+        let c = &clips[self.viewer.clip % clips.len()];
+        if c.len > 0 {
+            return c.len;
+        }
+        match c.state {
+            crate::sim::fighter::State::Attack { id, .. }
+            | crate::sim::fighter::State::Throw { id } => {
+                let ch = self
+                    .viewer
+                    .fighter
+                    .as_ref()
+                    .map(|f| f.character.id)
+                    .unwrap_or(CharacterId::Kestrel);
+                crate::sim::attacks::data(ch, id).total() + 24
+            }
+            _ => 60,
+        }
+    }
+
+    fn update_viewer(&mut self, nav: Nav) {
+        if nav.back {
+            self.screen = Screen::Menu;
+            return;
+        }
+        let n = viewer_clips().len();
+        if nav.h != 0 {
+            self.viewer.clip = (self.viewer.clip as i32 + nav.h).rem_euclid(n as i32) as usize;
+            self.viewer_apply_clip();
+        }
+        if nav.v != 0 {
+            let idx =
+                (self.rules.p1.index() as i32 - nav.v).rem_euclid(CharacterId::ALL.len() as i32);
+            self.rules.p1 = CharacterId::ALL[idx as usize];
+            self.viewer_set_character(self.rules.p1);
+        }
+        if is_key_pressed(KeyCode::P) {
+            self.rules.p1_pal = (self.rules.p1_pal + 1) % crate::sim::roster::PALETTES;
+            if let Some(f) = self.viewer.fighter.as_mut() {
+                f.palette = self.rules.p1_pal;
+            }
+        }
+        if is_key_pressed(KeyCode::Space) {
+            self.viewer.paused = !self.viewer.paused;
+        }
+        if is_key_pressed(KeyCode::O) {
+            self.viewer.orbit = !self.viewer.orbit;
+        }
+        if is_key_pressed(KeyCode::F) {
+            if let Some(f) = self.viewer.fighter.as_mut() {
+                f.facing = -f.facing;
+            }
+        }
+        if self.viewer.orbit {
+            self.viewer.angle += 0.35;
+        }
+        // Advance at 60 Hz (one state frame per drawn frame at 60 fps).
+        let step = if self.viewer.paused { 0 } else { 1 };
+        let len = self.viewer_clip_len();
+        for _ in 0..step {
+            self.viewer.frame += 1;
+            let total = len as u64;
+            if self.viewer.frame >= total {
+                // Loop the clip.
+                self.viewer_apply_clip();
+                continue;
+            }
+            if let Some(f) = self.viewer.fighter.as_mut() {
+                let sf = self.viewer.frame as u32;
+                // Hold the last frame of a move so the recovery pose reads.
+                f.state_frame = match f.state {
+                    crate::sim::fighter::State::Attack { id, .. }
+                    | crate::sim::fighter::State::Throw { id } => sf.min(
+                        crate::sim::attacks::data(f.character.id, id)
+                            .total()
+                            .saturating_sub(1),
+                    ),
+                    _ => sf,
+                };
+                if matches!(
+                    f.state,
+                    crate::sim::fighter::State::Walk | crate::sim::fighter::State::Run
+                ) {
+                    // Gait cycles key off the global frame.
+                }
+            }
+        }
+    }
+
+    fn draw_viewer(&mut self) {
+        let clips = viewer_clips();
+        let c = &clips[self.viewer.clip % clips.len()];
+        let Some(f) = self.viewer.fighter.clone() else {
+            return;
+        };
+        let len = self.viewer_clip_len();
+        let phase = match f.state {
+            crate::sim::fighter::State::Attack { id, .. } => {
+                let md = crate::sim::attacks::data(f.character.id, id);
+                if md.is_active(f.state_frame) {
+                    "ACTIVE"
+                } else if f.state_frame < md.startup {
+                    "STARTUP"
+                } else {
+                    "ENDLAG"
+                }
+            }
+            _ => "",
+        };
+        let sub = format!(
+            "{}  {}  FRAME {:>2}/{}  {}   <> STATE  UP/DOWN FIGHTER  P PALETTE  F FLIP  O ORBIT  SPACE PAUSE  ESC",
+            f.character.name.to_uppercase(),
+            viz::palette_name(f.character.id, f.palette).to_uppercase(),
+            self.viewer.frame.min(len as u64),
+            len,
+            phase
+        );
+        let frame = self.viewer.frame;
+        let angle = self.viewer.angle;
+        self.scene.draw_viewer(&f, frame, angle, c.label, &sub);
     }
 
     /// (Re)start the scripted demo with the current rules' characters/stage.
@@ -845,6 +1117,7 @@ impl App {
                     watermark: false,
                     local_player: None,
                     hud: false,
+                    hitboxes: false,
                 };
                 self.draw_match(&mut p, opts);
                 let (w, h) = p.dims();
@@ -857,10 +1130,12 @@ impl App {
                     watermark: true,
                     local_player: None,
                     hud: true,
+                    hitboxes: false,
                 };
                 self.draw_match(&mut p, opts);
                 hint(&mut p, "DEMO   ENTER / ESC BACK");
             }
+            Screen::AnimViewer => self.draw_viewer(),
             Screen::LocalSetup => self.draw_setup(&mut p, false),
             Screen::TrainSetup => self.draw_setup(&mut p, true),
             Screen::Controls => widgets::draw_controls(&mut p),
@@ -922,6 +1197,7 @@ impl App {
             watermark: true,
             local_player: local,
             hud: true,
+            hitboxes: false,
         }
     }
 

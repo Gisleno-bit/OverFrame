@@ -40,6 +40,18 @@ pub fn build(id: CharacterId) -> CharacterModel {
     }
 }
 
+/// The procedural model, unless an artist-made `.glb` is installed under
+/// `assets/characters/` (see `model::assets`), in which case that rig is used
+/// with the same motion style, palettes and secondary animation.
+#[cfg(feature = "gltf")]
+pub fn build_with_assets(id: CharacterId) -> CharacterModel {
+    let mut m = build(id);
+    if let Some(rig) = super::assets::character_rig(id) {
+        m.rig = rig;
+    }
+    m
+}
+
 // ----------------------------------------------------------------- helpers
 
 /// A limb segment hanging from its joint: a joint ball plus a tapered shaft

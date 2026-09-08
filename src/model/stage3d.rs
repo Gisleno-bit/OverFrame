@@ -151,13 +151,27 @@ pub fn palette(stage: &Stage) -> Palette {
 }
 
 pub fn build(stage: &Stage) -> StageModel {
+    build_with_dressing(stage, None)
+}
+
+/// Build with optional artist dressing (`assets/stages/*.glb`): the mesh is
+/// added to the near layer; if it declares a `slab` node the procedural main
+/// platform is omitted (the collision stays the sim's).
+pub fn build_with_dressing(stage: &Stage, dressing: Option<(MeshData, bool)>) -> StageModel {
     let mut near = MeshData::new();
     let mut far = MeshData::new();
+    let (dressing, has_slab) = match dressing {
+        Some((m, s)) => (Some(m), s),
+        None => (None, false),
+    };
 
     // ---- gameplay geometry
     for p in &stage.platforms {
         let w = p.right - p.left;
         let cx = (p.left + p.right) * 0.5;
+        if p.solid && has_slab {
+            continue;
+        }
         if p.solid {
             // Slab with a bevelled edge, a lip strip along the front, and a
             // tapered keel below so it reads as a floating mass.
@@ -315,6 +329,10 @@ pub fn build(stage: &Stage) -> StageModel {
             Some(stage.blast_bottom + 30.0)
         }
     };
+
+    if let Some(d) = dressing {
+        near.append(&d);
+    }
 
     // Floor plane (sea / ground / void grid).
     if let Some(y) = floor_y {
