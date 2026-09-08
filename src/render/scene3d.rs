@@ -62,6 +62,81 @@ pub struct Scene3D {
     /// Last view-projection matrix, for projecting labels onto the screen.
     view_proj: Mat4,
     preview_angle: f32,
+    /// Inverted-hull outline material (None if the shader failed to build).
+    outline: Option<Material>,
+    /// Render-only per-port state: smoothed facing and strike trails.
+    ports: Vec<PortFx>,
+}
+
+/// Per-fighter render state that is *not* part of the simulation (so it is
+/// never saved/rolled back; it just eases visuals between sim frames).
+#[derive(Clone, Debug)]
+struct PortFx {
+    /// Eased facing in -1..1 (the sim's is ±1); turns take a few frames.
+    facing: f32,
+    /// Recent world positions of the striking limb's tip while a hitbox is
+    /// active, newest last. Drawn as a fading ribbon.
+    trail: Vec<(V3, V3)>,
+    last_frame: u64,
+}
+
+impl Default for PortFx {
+    fn default() -> Self {
+        PortFx {
+            facing: 1.0,
+            trail: Vec::new(),
+            last_frame: u64::MAX,
+        }
+    }
+}
+
+const OUTLINE_VERTEX: &str = r#"#version 100
+attribute vec3 position;
+attribute vec2 texcoord;
+attribute vec4 color0;
+attribute vec4 normal;
+varying lowp vec4 color;
+uniform mat4 Model;
+uniform mat4 Projection;
+uniform float Width;
+void main() {
+    vec3 n = normal.xyz;
+    float l = length(n);
+    if (l > 0.0001) { n = n / l; }
+    gl_Position = Projection * Model * vec4(position + n * Width, 1);
+    color = color0 / 255.0;
+}"#;
+
+const OUTLINE_FRAGMENT: &str = r#"#version 100
+varying lowp vec4 color;
+void main() {
+    gl_FragColor = color;
+}"#;
+
+fn make_outline_material() -> Option<Material> {
+    load_material(
+        ShaderSource::Glsl {
+            vertex: OUTLINE_VERTEX,
+            fragment: OUTLINE_FRAGMENT,
+        },
+        MaterialParams {
+            pipeline_params: PipelineParams {
+                cull_face: miniquad::CullFace::Front,
+                depth_test: miniquad::Comparison::LessOrEqual,
+                depth_write: true,
+                color_blend: Some(miniquad::BlendState::new(
+                    miniquad::Equation::Add,
+                    miniquad::BlendFactor::Value(miniquad::BlendValue::SourceAlpha),
+                    miniquad::BlendFactor::OneMinusValue(miniquad::BlendValue::SourceAlpha),
+                )),
+                ..Default::default()
+            },
+            uniforms: vec![UniformDesc::new("Width", UniformType::Float1)],
+            textures: vec![],
+        },
+    )
+    .map_err(|e| eprintln!("outline shader unavailable: {e:?}"))
+    .ok()
 }
 
 impl Scene3D {
@@ -95,6 +170,8 @@ impl Scene3D {
             generation: 1,
             view_proj: Mat4::IDENTITY,
             preview_angle: 0.0,
+            outline: make_outline_material(),
+            ports: Vec::new(),
         }
     }
 
@@ -296,8 +373,39 @@ impl Scene3D {
 
     // ------------------------------------------------------------ fighters
 
-    fn fighter_root(f: &Fighter) -> Xf {
-        Xf::new(M3::scale(v3(f.facing, 1.0, 1.0)), v3(f.pos.x, f.pos.y, 0.0))
+    /// Root transform: the model faces +X and turns about Y to face left
+    /// (a real turn, not a mirror — a few frames long, purely visual).
+    fn fighter_root(f: &Fighter, eased_facing: f32) -> Xf {
+        // facing +1 → 0°, -1 → 180°; in between the fighter faces the camera.
+        let deg = (1.0 - eased_facing) * 90.0;
+        Xf::new(M3::rot_y(deg), v3(f.pos.x, f.pos.y, 0.0))
+    }
+
+    /// Update per-port render state for this frame and return the eased
+    /// facing.
+    fn port_state(&mut self, f: &Fighter, frame: u64) -> f32 {
+        let i = f.port.min(7);
+        if self.ports.len() <= i {
+            self.ports.resize(i + 1, PortFx::default());
+        }
+        let p = &mut self.ports[i];
+        let fresh = p.last_frame == u64::MAX || frame < p.last_frame || frame > p.last_frame + 30;
+        if fresh {
+            p.facing = f.facing;
+            p.trail.clear();
+        } else if frame != p.last_frame {
+            // Ease toward the sim facing over ~5 frames (per sim frame, so
+            // rollback re-simulation does not speed it up).
+            let steps = (frame - p.last_frame).min(6);
+            for _ in 0..steps {
+                p.facing += (f.facing - p.facing) * 0.42;
+            }
+            if (p.facing - f.facing).abs() < 0.02 {
+                p.facing = f.facing;
+            }
+        }
+        p.last_frame = frame;
+        p.facing
     }
 
     fn tint_for(f: &Fighter) -> Tint {
@@ -319,10 +427,11 @@ impl Scene3D {
         if matches!(f.state, State::Dead) {
             return;
         }
+        let eased = self.port_state(f, frame);
         let model = &self.models[f.character.id.index()];
         let mut pose = anim::fighter_pose(&model.rig, f, &model.style, frame);
         (model.secondary)(&model.rig, &mut pose, f, frame);
-        let world = model.rig.world(&pose, &Self::fighter_root(f));
+        let world = model.rig.world(&pose, &Self::fighter_root(f, eased));
         let tint = Self::tint_for(f);
         self.verts.clear();
         self.idx.clear();
@@ -334,7 +443,104 @@ impl Scene3D {
             &mut self.verts,
             &mut self.idx,
         );
+        // Strike trail: remember the striking limb's tip while active.
+        let limb_tip = f.active_hitbox().map(|_| {
+            let spec = anim::strike_spec(match f.state {
+                State::Attack { id, .. } | State::Throw { id } => id,
+                _ => crate::sim::attacks::MoveId::Jab,
+            });
+            let (tip, base) = match spec.limb {
+                anim::Limb::ArmL => ("hand_l", "forearm_l"),
+                anim::Limb::LegR | anim::Limb::BothLegs => ("foot_r", "shin_r"),
+                anim::Limb::LegL => ("foot_l", "shin_l"),
+                anim::Limb::Body => ("chest", "hips"),
+                _ => ("hand_r", "forearm_r"),
+            };
+            (
+                model
+                    .rig
+                    .joint(&world, tip)
+                    .unwrap_or(v3(f.pos.x, f.pos.y, 0.0)),
+                model
+                    .rig
+                    .joint(&world, base)
+                    .unwrap_or(v3(f.pos.x, f.pos.y, 0.0)),
+            )
+        });
+        let accent = model.palette(f.palette).color(slot::ACCENT);
+        let dark = model.palette(f.palette).color(slot::DARK);
+        {
+            let i = f.port.min(7);
+            let p = &mut self.ports[i];
+            match limb_tip {
+                Some(t) => {
+                    if p.trail.last().map_or(true, |l| (l.0 - t.0).len() > 0.01) {
+                        p.trail.push(t);
+                    }
+                    if p.trail.len() > 10 {
+                        p.trail.remove(0);
+                    }
+                }
+                None => {
+                    if !p.trail.is_empty() {
+                        p.trail.remove(0);
+                    }
+                }
+            }
+        }
         self.flush_tris(None);
+        // Toon outline: inverted hull, pushed out along normals in the shader.
+        if let Some(mat) = self.outline.clone() {
+            let dist = (self.camera.pos - self.camera.target).len();
+            mat.set_uniform("Width", (dist * 0.0011).clamp(0.18, 0.7));
+            let oc = [
+                (dark[0] as f32 * 0.45) as u8,
+                (dark[1] as f32 * 0.45) as u8,
+                (dark[2] as f32 * 0.5) as u8,
+                tint.alpha,
+            ];
+            for v in &mut self.verts {
+                v.rgba = oc;
+            }
+            gl_use_material(&mat);
+            self.flush_tris(None);
+            gl_use_default_material();
+        }
+        // Trail ribbon.
+        let trail = self.ports[f.port.min(7)].trail.clone();
+        if trail.len() >= 2 {
+            let n = trail.len();
+            let mut verts = Vec::with_capacity(n * 2);
+            let mut idx = Vec::with_capacity((n - 1) * 6);
+            for (k, (tip, base)) in trail.iter().enumerate() {
+                let a = (k as f32 / (n - 1) as f32).powi(2) * 0.55;
+                let c = [accent[0], accent[1], accent[2], (a * 255.0) as u8];
+                let mid = tip.lerp(*base, 0.45);
+                verts.push(Vertex {
+                    position: mq(*tip),
+                    uv: vec2(0.0, 0.0),
+                    color: c,
+                    normal: vec4(0.0, 0.0, 1.0, 0.0),
+                });
+                verts.push(Vertex {
+                    position: mq(mid),
+                    uv: vec2(0.0, 1.0),
+                    color: c,
+                    normal: vec4(0.0, 0.0, 1.0, 0.0),
+                });
+            }
+            for k in 0..(n as u16 - 1) {
+                let a = k * 2;
+                idx.extend_from_slice(&[a, a + 1, a + 3, a, a + 3, a + 2]);
+                // both windings so it is visible from either side
+                idx.extend_from_slice(&[a, a + 3, a + 1, a, a + 2, a + 3]);
+            }
+            draw_mesh(&Mesh {
+                vertices: verts,
+                indices: idx,
+                texture: None,
+            });
+        }
     }
 
     /// Soft shadow on the platform below the fighter.
