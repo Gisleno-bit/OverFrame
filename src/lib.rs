@@ -21,6 +21,11 @@
 pub mod sim;
 pub mod viz;
 
+/// Persistent local settings (player id, port, gamepad bindings).
+pub mod config;
+/// Gamepad → simulation input mapping, independent of any input library.
+pub mod gamepad;
+
 #[cfg(feature = "gui")]
 pub mod render;
 

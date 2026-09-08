@@ -1,17 +1,23 @@
-//! Rollback networking glue (GGRS).
+//! Rollback networking (GGRS).
 //!
-//! The simulation is already pure and save/load-able, so wiring it to GGRS is
-//! small: describe the [`ggrs::Config`], then service the requests GGRS hands
-//! back (save state, load state, advance frame). This module provides:
+//! The simulation is pure and save/load-able, so wiring it to GGRS is small:
+//! describe the [`ggrs::Config`], then service the requests GGRS hands back
+//! (save state, load state, advance frame). Around that core this module adds
+//! everything a real online match needs:
 //!
-//! * [`GgrsConfig`] — the compile-time type bundle GGRS needs.
-//! * [`advance_with_requests`] — apply a batch of [`ggrs::GgrsRequest`]s to a
-//!   [`GameState`], the exact same call whether the session is a local
-//!   `SyncTestSession` (Fase 1 determinism validation) or a networked
-//!   `P2PSession` (Fase 2).
-//!
-//! Fase 1 ships local play; this module is what makes "add real online" a small,
-//! well-defined step rather than a rewrite.
+//! * [`GgrsConfig`] / [`advance_with_requests`] — the GGRS glue, shared by the
+//!   local `SyncTestSession` (determinism proof) and the networked `P2PSession`.
+//! * [`session::NetMatch`] — host/join state machine: handshake → sync → running.
+//! * [`socket::OfSocket`] — one UDP socket carrying handshake + GGRS traffic.
+//! * [`handshake`] — the tiny pre-session protocol (versions, ids, match seed).
+//! * [`roomcode`] — shareable `XXXXX-XXXXX` codes for `ip:port`.
+//! * [`banlist`] — the Fase-3-ready ban list format and lookup.
+
+pub mod banlist;
+pub mod handshake;
+pub mod roomcode;
+pub mod session;
+pub mod socket;
 
 use std::net::SocketAddr;
 
@@ -19,6 +25,8 @@ use ggrs::{Config, GgrsRequest};
 
 use crate::sim::input::NetInput;
 use crate::sim::{GameState, MatchConfig, PlayerInput};
+
+pub use session::{Advance, NetMatch, NetStats, Phase, Role};
 
 // The wire input must be Plain-Old-Data for GGRS. Assert it here so a mistake in
 // the layout is a compile error rather than a silent desync.
