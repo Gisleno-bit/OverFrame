@@ -14,6 +14,7 @@ cargo test --no-default-features --features netcode
 
 | Suite | What it proves |
 |---|---|
+| `tests/feel.rs` (15) | The **game-feel contract** (`docs/GAME_FEEL.md`): hitlag = `⌊d/3+3⌋` on both fighters and nobody moves while frozen; a weak grounded hit slides along the floor; strong hits launch at `0.03×kb` (scaled) with uniform decay and capped gravity; crouch cancel takes a third off; SDI pulses move the victim during hitlag; shieldstun and pushback follow the block formulas; powershield in the first 2 frames; 15-frame shield drop with jump/grab/up-smash cancels; air-dodge ends helpless but still wavedashes; landing lag 4 / full / `⌊lag/2⌋` / autocancel; late hits are weaker and moves end at IASA; dash attack carries momentum, jab plants; run crosses 240 u in ≤ 60 frames; dash-dance window is per character; swept hitboxes don't tunnel. |
 | `tests/mechanics.rs` (9) | Movement *feel*: full hop > short hop, fast-fall lands sooner, dash > walk, angled air-dodge wavedashes, L-cancel cuts landing lag, knockback grows with percent, sim is deterministic. |
 | `tests/determinism.rs` (1) | GGRS `SyncTest`: save→load→re-simulate reproduces identical checksums over 400 frames of busy input — the engine is rollback-safe. |
 | `tests/content.rs` (7) | Every character has a complete, sane moveset; archetypes are actually distinct (weight/air/armour/jumps ordering; Boulder fsmash > Kestrel, Viper jab faster than Boulder); stages well-formed; timed match ends on the clock. |
@@ -41,6 +42,28 @@ builds the GUI on Windows/macOS/Linux.
 
 ## Manual — matches & feel
 
+- [ ] **Hitstop reads**: a jab is a short tick, a smash a clear freeze (8
+      frames at 15 %) with a flash, a rattle on the victim, impact lines along
+      the launch, a camera shake and rumble on both pads (victim stronger).
+      Jabs must *not* shake the camera.
+- [ ] **Weak hits shove, strong hits launch**: jab at 0 % slides the victim
+      along the floor; forward-smash at 40 %+ tumbles. Crouching into a dash
+      attack visibly shortens the knockback and the freeze.
+- [ ] **DI during the freeze**: hold up-and-in on a forward-smash at 100 %
+      from the edge and survive; hold nothing and die. Tapping the stick in a
+      multi-hit nudges you out.
+- [ ] **Shield**: raise shield as a smash lands → powershield ping and no
+      push; hold shield, release → 15 frames before you can attack, but a
+      jump / grab / up-smash comes out immediately.
+- [ ] **Movement**: dash-dance feels different on Kestrel (11), Boulder (13)
+      and Viper (7); a wavedash slides and an air-dodge that doesn't land
+      leaves you helpless; L-cancelled nair → up-tilt links at 20–60 %,
+      un-cancelled it doesn't; landing outside the hit window (autocancel) is
+      as fast as an empty landing.
+- [ ] **Sound**: tap / thud / crack scale with damage; shield tock, KO boom,
+      landing thump, jump and swing whooshes; Options → SFX VOLUME 0 silences
+      everything and RUMBLE OFF stops the pads. No audio device → the game
+      still runs (silent).
 - [ ] Each of the 3 fighters: land every normal, tilt, smash, aerial, special,
       grab and all four throws; confirm none softlock and all deal damage.
 - [ ] Boulder super armour: get hit by a jab mid-smash-startup → armour absorbs

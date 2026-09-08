@@ -3,6 +3,77 @@
 All notable changes to OVERFRAME. Format follows *Keep a Changelog*; versions
 follow SemVer once `v1.0.0` ships.
 
+## [0.5.0] — Game feel: reference-calibrated impact and response
+
+The combat engine was re-tuned against public platform-fighter frame data
+(mechanics and formulas only; every per-move number stays original). The
+full record — reference summary, diagnosis, before/after tables, plan,
+pseudocode and measurements — is `docs/GAME_FEEL.md`.
+
+### Added
+- **Hitlag formula** `⌊d/3+3⌋` (×1.5 electric, ×2/3 crouch-cancel, cap 20)
+  for both fighters; **electric** moves; **crouch cancelling**.
+- **SDI / ASDI** during the freeze, and **DI is read on the last hitlag
+  frame** (`pending_launch`), so players react during hitstop like the
+  reference.
+- **Grounded flinch**: hits below the tumble threshold on a grounded victim
+  slide them along the floor instead of lifting them (`ground_stun`).
+- **Sakurai angle** (`361` in move tables): 0° shove at low knockback, 44°
+  launch otherwise.
+- **Shield rules**: additive shieldstun `⌊(0.45d+2)·200/201⌋`, pushback
+  `min(2, 0.09d+0.4)`, **powershield** (first 2 frames), **shield drop**
+  (15 frames; jump / grab / up-smash cancel it), `State::ShieldDrop`.
+- **Helpless** state after air-dodges and aerial up-specials.
+- **Autocancel** windows on aerials; L-cancel is `⌊lag/2⌋`.
+- **Analog walk** (speed follows the stick tilt), **air-dodge scaled by the
+  stick tilt** (a half tilt is a half wavedash), and **doubled traction on
+  release** so walk / run stops are precise while wavedash slides keep their
+  length.
+- **Late hits** (`MoveData::late(frames, scale)`) and per-frame hitbox lookup;
+  dash attack carries 85 % of run speed; per-character **dash-dance window**
+  (`Character::dash_frames`).
+- **Swept hitboxes vs hurt capsules** (`math::segment_distance`) — no
+  tunnelling; crouch / knockdown / shield shrink the capsule. Training view
+  draws the capsule.
+- **Procedural sound** (`render/audio.rs`): tap / thud / crack hits by
+  damage, shield, powershield, KO, landing, jump, swing, tech, dash — all
+  synthesised at start-up, no audio files. Options → SFX VOLUME.
+- **Gamepad rumble** on hits (victim strong, attacker weak) via gilrs force
+  feedback. Options → RUMBLE.
+- **Impact presentation**: hit-frame flash, victim rattle during hitlag,
+  impact-line fan along the launch, powershield ring, dust on dash / land /
+  wavedash, camera shake that scales with knockback (jabs no longer shake).
+- Simulation events (`Fx { born, who, dir }`; land / jump / swing / dash /
+  tech / wavedash) so audio, rumble and VFX are pure functions of the sim
+  state and rollback-safe (de-duplicated by `(born, kind)`).
+- `tests/feel.rs` (15 tests) pinning every rule above; 68 tests total.
+- Animation-viewer clips for HELPLESS and SHIELD DROP; poses in `anim.rs`.
+
+### Changed
+- **Scale**: `REF_UNIT = 2.2` world units per reference unit. Every ground,
+  air, gravity, fall and jump speed in `roster.rs` was rescaled (they were
+  ~2.3× too slow for the world); knockback launch `0.03 × 2.2` per unit,
+  uniform decay `0.051 × 2.2` with a separate capped gravity.
+- Air-dodge 49 frames (intangible 4–29), roll 31 (4–19, 60 u), spot-dodge
+  22 (2–15); shield decay 0.28 / regen 0.07; Boulder weight 118; Kestrel
+  jump-squat 3.
+- Every move table rebuilt as startup / active / late / endlag with
+  class-shaped timings (e.g. Kestrel jab frame 1–2 / 17, nair 3–6 late to
+  30 / 41, landing 15) and reference-class landing lag (15–20).
+- Camera: max distance 840; stage blast zones widened to ~3.1 platform
+  half-widths (Lattice ±486 / 434 / −236, Meridian ±534, Tidegate −440 /
+  470).
+- `[profile.release] panic = "unwind"` so an audio backend that fails to open
+  leaves the game running silent instead of aborting; `macroquad` `audio`
+  feature enabled.
+
+### Fixed
+- Fast hitboxes could pass through a hurtbox between frames.
+- The scripted demo (attract mode / GIF tool) re-timed for the new speeds
+  (shorter wavedash into poking range; the forward smash still KOs off the
+  side).
+- L-cancel rounding (`floor`), autocancel landings.
+
 ## [0.4.0] — Fase 3 (in progress): 3D models, stages and art pipeline
 
 ### Added

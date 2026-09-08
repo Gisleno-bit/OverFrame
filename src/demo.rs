@@ -85,16 +85,17 @@ pub fn inputs(gs: &GameState, frame: u64) -> [PlayerInput; 2] {
     } else if f == 42 {
         // 2) Wavedash toward the target (short hop...).
         press(buttons::JUMP)
-    } else if f == 47 {
-        // (...down-forward air-dodge into the ground).
-        stick_btn(0.92 * dir, -0.45, buttons::SHIELD)
+    } else if f == 46 {
+        // (...down-forward air-dodge into the ground; a half tilt so the
+        // slide stops at poking range instead of crossing the target).
+        stick_btn(0.7 * dir, -0.5, buttons::SHIELD)
     } else if (58..150).contains(&f) {
-        // 3) Walk in to spacing, then poke with tilts.
+        // 3) Walk in to spacing, then poke with a tilt.
         if !a.grounded {
             PlayerInput::default()
         } else if adx > 26.0 {
             stick(dir * 0.6, 0.0)
-        } else if f == 96 || f == 122 {
+        } else if f == 96 {
             stick_btn(dir * 0.9, 0.0, buttons::ATTACK) // ftilt
         } else {
             PlayerInput::default()

@@ -72,7 +72,7 @@ pub const KESTREL: Character = Character {
     run_max: 4.70,          // 2.14
     ground_accel: 0.44,     // dash accel ≈ 0.2
     ground_friction: 0.180, // traction 0.08
-    traction: 0.150,
+    traction: 0.115,        // low: *Momentum* — the longest wavedash
 
     air_max: 1.85,       // 0.84
     air_accel: 0.22,     // 0.10
@@ -155,7 +155,7 @@ pub const VIPER: Character = Character {
     run_max: 4.20,  // 1.9
     ground_accel: 0.48,
     ground_friction: 0.150,
-    traction: 0.120,
+    traction: 0.170,
 
     air_max: 2.15, // 0.98
     air_accel: 0.28,

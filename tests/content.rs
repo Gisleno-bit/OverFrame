@@ -76,6 +76,52 @@ fn archetypes_are_actually_distinct() {
     let vj = attacks::data(CharacterId::Viper, MoveId::Jab).startup;
     let bj = attacks::data(CharacterId::Boulder, MoveId::Jab).startup;
     assert!(vj < bj, "viper jab should be faster ({vj} vs {bj})");
+
+    // Kestrel's *Momentum*: the longest full wavedash in the cast, and the
+    // fastest fall.
+    let wd: Vec<(f32, &str)> = CharacterId::ALL
+        .iter()
+        .map(|&id| (wavedash_length(id), id.data().name))
+        .collect();
+    let (kwd, _) = wd.iter().find(|(_, n)| *n == k.name).unwrap();
+    for (len, name) in &wd {
+        assert!(
+            *name == k.name || *len < *kwd,
+            "{name} wavedash {len:.1} should be shorter than Kestrel's {kwd:.1}"
+        );
+    }
+    assert!(k.fastfall > b.fastfall && k.fastfall > v.fastfall);
+}
+
+/// Distance slid by a perfect full-tilt wavedash from standing.
+fn wavedash_length(id: CharacterId) -> f32 {
+    use overframe::sim::{buttons, PlayerInput};
+    let mut cfg = MatchConfig::default();
+    cfg.chars[0] = id;
+    let mut gs = GameState::new(1, cfg);
+    for _ in 0..90 {
+        gs.step(&[PlayerInput::default()]);
+    }
+    gs.fighters[0].pos.x = 0.0;
+    let js = id.data().jumpsquat as u64;
+    for i in 0..90u64 {
+        let inp = if i == 0 {
+            PlayerInput {
+                buttons: buttons::JUMP,
+                ..Default::default()
+            }
+        } else if i == js {
+            PlayerInput {
+                stick: Vec2::new(0.94, -0.35),
+                buttons: buttons::SHIELD,
+                ..Default::default()
+            }
+        } else {
+            PlayerInput::default()
+        };
+        gs.step(&[inp]);
+    }
+    gs.fighters[0].pos.x
 }
 
 #[test]

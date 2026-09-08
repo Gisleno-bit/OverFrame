@@ -11,7 +11,7 @@
 *The clip above is the actual game engine playing its scripted demo (not a pre-baked animation): dash-dance → wavedash → walk-in → tilt → forward smash → KO, rendered by the 3D renderer.*
 
 [![CI](https://github.com/Gisleno-bit/overframe/actions/workflows/ci.yml/badge.svg)](https://github.com/Gisleno-bit/overframe/actions/workflows/ci.yml)
-&nbsp;License: MIT &nbsp;•&nbsp; Language: Rust &nbsp;•&nbsp; Status: **Fase 3 (in progress) — 3D models & stages, roster, online lobbies**
+&nbsp;License: MIT &nbsp;•&nbsp; Language: Rust &nbsp;•&nbsp; Status: **Fase 3 (in progress) — reference-calibrated game feel, 3D models & stages, roster, online lobbies**
 
 ---
 
@@ -48,6 +48,16 @@ recovers during endlag — so what you see is exactly what hits. Artists can
 replace any model with a Blender-made `.glb` without touching code
 ([`docs/ART_PIPELINE.md`](docs/ART_PIPELINE.md)); a classic 2D view remains
 available in Options.
+
+## How it feels (and why)
+
+The combat engine is calibrated against the public frame data of the classic competitive platform fighter — *behaviour and formulas only*, no assets, no data files:
+
+- **Impact**: hitlag `⌊damage/3 + 3⌋` freezes both fighters (×1.5 electric, ×2/3 crouch-cancelled, cap 20); knockback uses the well-known percent × weight formula, launches at `0.03 × kb` and decays uniformly; hitstun is `0.4 × kb`; weak hits *shove* grounded victims along the floor, strong ones tumble. **DI**, **SDI** and **ASDI** happen *during* the freeze.
+- **Response**: 3-frame jump-squats, per-character dash-dance windows, fast-falls, 4-frame landings, L-cancel and autocancel, 49-frame helpless air-dodges (wavedashing is a commitment), 15-frame shield drop, powershield, additive shieldstun.
+- **Feedback**: every hit is a *tap / thud / crack* (procedurally synthesised — no audio files), a hit-frame flash, a rattle, impact lines, a scaled camera shake and controller rumble. All of it is a pure function of the simulation, so rollbacks never double-fire.
+
+Every number, its reference, the diagnosis of what was wrong before, and how to measure it is in [`docs/GAME_FEEL.md`](docs/GAME_FEEL.md); `tests/feel.rs` pins the rules.
 
 ## Is this legal? (short version)
 
@@ -114,11 +124,13 @@ Gamepads are read with [`gilrs`](https://gitlab.com/gilrs-project/gilrs): XInput
 - **Tilt / smash** — Attack + a *held* stick direction is a tilt; a **C-stick** flick is a smash.
 - **Short hop** — tap jump; **full hop** — hold it.
 - **Fast fall** — flick down while descending.
-- **Wavedash** — jump, then air-dodge (Shield) diagonally down-into the ground; you slide.
-- **L-cancel** — press Shield in the last few frames before landing an aerial to halve its landing lag.
-- **Ledge, roll, spot-dodge, air-dodge, tech** — all present. See the in-game **Controls** screen and [`docs/DESIGN.md`](docs/DESIGN.md).
+- **Wavedash** — jump, then air-dodge (Shield) diagonally down-into the ground; you slide. An air-dodge that doesn't land leaves you **helpless**.
+- **L-cancel** — press Shield in the last few frames before landing an aerial to halve its landing lag; landing outside the hit window **autocancels** to 4 frames.
+- **DI / SDI** — hold the stick during the freeze frames to bend the launch; *tap* it to nudge yourself out of multi-hits. **Crouch-cancel** weak pokes by crouching.
+- **Shield** — powershield in the first 2 frames; dropping it costs 15 frames unless you jump, grab or up-smash out of it.
+- **Ledge, roll, spot-dodge, air-dodge, tech** — all present. See the in-game **Controls** screen, [`docs/DESIGN.md`](docs/DESIGN.md) and the numbers in [`docs/GAME_FEEL.md`](docs/GAME_FEEL.md).
 
-Menu: **Versus** (2P local, with character/stage select and match rules), **Online** (host / join with a LAN room browser and lobby), **Training** (character + stage, hit/hurtbox display — `Tab` toggle, `Backspace` reset), **Options** (input delay, port, gamepad rebinding), **Controls**.
+Menu: **Versus** (2P local, with character/stage select and match rules), **Online** (host / join with a LAN room browser and lobby), **Training** (character + stage, hit/hurtbox display — `Tab` toggle, `Backspace` reset), **Options** (input delay, port, SFX volume, rumble, renderer, gamepad rebinding), **Controls**.
 
 ## Play online
 
@@ -167,7 +179,8 @@ src/
   render/     macroquad front-end: window, menus with 3D previews, options,
               online screens, the fixed-timestep loop, the animation viewer;
               scene3d.rs is the 3D match renderer (lighting baked on the CPU,
-              one small outline shader); input.rs merges keyboard + gilrs.
+              one small outline shader); input.rs merges keyboard + gilrs and
+              drives rumble; audio.rs synthesises every sound at start-up.
   netcode/    GGRS rollback: mod.rs (Config, SyncTest, request handling),
               session.rs (host/join state machine on P2PSession), socket.rs
               (one UDP socket for handshake + GGRS), handshake.rs, roomcode.rs,
@@ -214,7 +227,7 @@ overframe --demo --record frames 60 300        # save 300 frames for a GIF
 overframe --export-glb kestrel kestrel.glb     # rig for Blender
 ```
 
-`tests/mechanics.rs` asserts the *relationships* that make it feel right — a full hop clears a short hop, fast-falling lands sooner, dashing outruns walking, an angled air-dodge wavedashes, L-cancel cuts landing lag, knockback grows with percent, and the sim is deterministic. `tests/determinism.rs` is the GGRS `SyncTest` rollback check.
+`tests/feel.rs` pins the impact and response rules (hitlag by damage, grounded flinch, uniform knockback decay, crouch cancel, SDI, shieldstun and pushback, powershield, shield drop, helpless air-dodge, landing lag / L-cancel / autocancel, late hits, dash-attack momentum, run speed across the stage, per-character dash-dance, swept hitboxes). `tests/mechanics.rs` asserts the *relationships* that make it feel right — a full hop clears a short hop, fast-falling lands sooner, dashing outruns walking, an angled air-dodge wavedashes, L-cancel cuts landing lag, knockback grows with percent, and the sim is deterministic. `tests/determinism.rs` is the GGRS `SyncTest` rollback check.
 
 `tests/content.rs` checks every character has a complete, sane moveset and a genuinely distinct archetype, and that stages are well-formed. The `model` module carries its own unit tests (closed, outward-facing primitives; bone hierarchy maths; strike poses aim where the hitbox is; gait cycles are periodic; every fighter model fits its collision size; stage models sit on the sim's platforms; camera framing; glTF export → import round trip of every fighter). `tests/netcode_flow.rs` covers the online layer end to end: room-code and handshake round-trips, the ban-list format, and — the important one — **a real host and guest connecting over loopback UDP, synchronising through GGRS, playing 300 frames with deliberately uneven pacing so rollbacks actually happen, and finishing on byte-identical states**. It also checks that a banned id is refused. `tests/gamepad_map.rs` covers the gamepad mapping, deadzones, rebinding and persistence without hardware.
 
@@ -226,9 +239,11 @@ overframe --export-glb kestrel kestrel.glb     # rig for Blender
   stages, character/stage select, match rules (stocks/time), LAN lobbies with a
   room browser + chat, Steam-ID-ready ban list ✅. **Original 3D models,
   procedural animation, 3D stages, toon look and the Blender `.glb` pipeline**
-  ✅ (this release). Remaining: more fighters/stages toward 8-10, artist-made
-  models through the pipeline, and the Steam integration (matchmaking, invites,
-  SDR transport) planned in `docs/STEAM.md`.
+  ✅. **Reference-calibrated game feel** — hitlag, knockback, DI/SDI, shield
+  rules, dodge and landing timings, sound and rumble ✅ (this release).
+  Remaining: more fighters/stages toward 8-10, artist-made models through the
+  pipeline, and the Steam integration (matchmaking, invites, SDR transport)
+  planned in `docs/STEAM.md`.
 - **Fase 4 — launch.** Ship free on Steam (Early Access); community tournament
   support.
 

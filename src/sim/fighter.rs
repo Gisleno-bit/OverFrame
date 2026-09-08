@@ -561,8 +561,16 @@ impl Fighter {
                     return false;
                 }
             } else if self.pressed(cur, buttons::SHIELD) {
-                let dir = if input.stick.length() > DEADZONE {
-                    input.stick.normalized_or_zero()
+                // Air-dodge speed scales with how far the stick is tilted (a
+                // full tilt is `airdodge_speed`), so a partial tilt gives a
+                // short wavedash — length is a choice, as in the reference.
+                let len = input.stick.length();
+                let dir = if len > DEADZONE {
+                    if len > 1.0 {
+                        input.stick.normalized_or_zero()
+                    } else {
+                        input.stick
+                    }
                 } else {
                     Vec2::ZERO
                 };
@@ -704,6 +712,10 @@ impl Fighter {
 
         if !controllable {
             let f = match self.state {
+                // Sliding faster than a walk decelerates twice as hard (the
+                // reference's doubled traction), which is what keeps wavedash
+                // and run-stop slides short and controllable.
+                State::Waveland if self.vel.x.abs() > ch.walk_max => ch.traction * 2.0,
                 State::Waveland => ch.traction,
                 State::Attack {
                     id: MoveId::DashAttack,
@@ -737,8 +749,13 @@ impl Fighter {
                         self.vel.x =
                             approach(self.vel.x, want * ch.dash_max, ch.ground_accel * 2.0);
                     } else {
+                        // Analog walk: speed follows the tilt, from a creep at
+                        // the deadzone to `walk_max` just under the dash
+                        // threshold.
+                        let t = ((sx.abs() - DEADZONE) / (HARD - DEADZONE)).clamp(0.0, 1.0);
+                        let speed = ch.walk_max * (0.3 + 0.7 * t);
                         self.set_state(State::Walk);
-                        self.vel.x = approach(self.vel.x, want * ch.walk_max, ch.ground_accel);
+                        self.vel.x = approach(self.vel.x, want * speed, ch.ground_accel);
                     }
                 }
                 State::Dash => {
@@ -761,7 +778,10 @@ impl Fighter {
                 _ => {}
             }
         } else {
-            self.vel.x = approach(self.vel.x, 0.0, ch.ground_friction);
+            // Letting go of the stick stops you at doubled traction: a walk
+            // stop takes ~9 frames, a run stop ~13, so spacing is precise
+            // while wavedash slides (traction, above) keep their length.
+            self.vel.x = approach(self.vel.x, 0.0, ch.ground_friction * 2.0);
             if matches!(self.state, State::Walk | State::Dash | State::Run) {
                 self.set_state(State::Stand);
             }
