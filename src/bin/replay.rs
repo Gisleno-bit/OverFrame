@@ -8,6 +8,16 @@
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
+    if matches!(args.get(1).map(|s| s.as_str()), Some("-h" | "--help")) {
+        println!(
+            "overframe-replay [out.gif] [width] [height]\n\
+             overframe-replay --png out.png <tick> [width] [height] [--training]\n\
+             overframe-replay --diag\n\
+             Renders the scripted demo with the classic 2D view, no GPU needed."
+        );
+        return;
+    }
+
     if args.get(1).map(|s| s.as_str()) == Some("--diag") {
         let mut gs = overframe::demo::match_state();
         for frame in 0..overframe::demo::DEMO_LEN {
