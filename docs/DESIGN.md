@@ -31,7 +31,8 @@ tests in `tests/mechanics.rs`.
   `line`) plus one `draw_scene`. The macroquad window and the headless GIF tool
   are just two `Painter` implementations, so they render pixel-identical scenes.
 - **`netcode`** implements `ggrs::Config` and services GGRS requests. The same
-  code path powers the local `SyncTest` (determinism proof) and, in Fase 2, P2P.
+  code path powers the local `SyncTest` (determinism proof) and the online
+  `P2PSession`. See "Online play" below.
 
 ## The tick
 
@@ -136,8 +137,142 @@ non-determinism or lossy save is a test failure. This runs in CI.
 The simulation uses `f32`. On one architecture with one binary (two Windows
 x86-64 players, the common case) IEEE-754 ops are bit-reproducible, so SyncTest
 passes and same-binary online play is safe. For guaranteed cross-architecture
-determinism, Fase 2 replaces `f32` in `src/sim/math.rs` with a fixed-point type —
-the module boundary is drawn so that change is localized.
+determinism, a later pass replaces `f32` in `src/sim/math.rs` with a
+fixed-point type — the module boundary is drawn so that change is localized.
+
+## Online play (Fase 2)
+
+### Topology: direct P2P, no server
+
+Two peers, one UDP socket each, GGRS rollback between them. There is no
+matchmaking/signalling server: the guest needs the host's address, which the
+host shares as a **room code** (`XXXXX-XXXXX` = 48 bits of IPv4 + port in
+Crockford base-32) or as a plain `ip:port`. This is the simplest thing that
+works for LAN and for internet play with a forwarded port, and it keeps the
+project dependency-free on any hosted service — a deliberate Fase 2 choice.
+
+Trade-off: no NAT traversal. Two players behind home routers need the host to
+forward the UDP port. Options for later, in increasing cost: UPnP-IGD from the
+host (automatic forwarding on most home routers), a tiny community-run STUN/relay
+(hole punching; ~100 lines on the client, one small public server), or a lobby
+service (Slippi-style, needs an account model).
+
+### Connection lifecycle
+
+```
+guest                                   host
+  │  Hello{player_id, version, name}  ─►  │  check version, check ban list
+  │  ◄─  Welcome{player_id, seed, delay}  │  (or Reject{reason})
+  │  build P2PSession(local=1, remote=0)  │  build P2PSession(local=0, remote=1)
+  │  ◄────── GGRS sync packets ────────►  │
+  │  Running: add_local_input / advance_frame, 60 Hz, both sides
+```
+
+* **Handshake before GGRS.** GGRS needs the remote address at session-build
+  time, but the host doesn't know who will connect. `netcode::socket::OfSocket`
+  therefore speaks both protocols on **one** socket: datagrams that start with
+  the `OVERFRHS` magic are handshake messages; anything else is a
+  bincode-serialised `ggrs::Message` (the same encoding as GGRS's own UDP
+  socket, so it is wire-compatible). One port means one NAT mapping.
+* **Seed in `Welcome`.** Both peers construct `GameState::new(2, {seed})`
+  from the host's seed, so the deterministic RNG matches from frame 0.
+* **Protocol version** in `Hello`/`Welcome`. Any change to gameplay-affecting
+  rules bumps `PROTOCOL_VERSION`; mismatched builds are refused instead of
+  desyncing ten seconds in.
+* **Identity.** `player_id` is a random 64-bit value generated once and stored
+  in the settings file. It is exchanged in the handshake and checked against
+  the local ban list (below).
+
+### Frame pacing with a fixed timestep
+
+`render` keeps a 60 Hz accumulator. Each tick it calls `NetMatch::advance`,
+which: honours GGRS `WaitRecommendation` events (skip N ticks so the slower
+peer catches up), skips a tick if `frames_ahead() >= 3`, then
+`add_local_input` + `advance_frame`. A `PredictionThreshold` error (we are
+more than `MAX_PREDICTION = 8` frames ahead of confirmed remote input) simply
+stalls that tick; the HUD shows "WAITING FOR PEER" if that persists.
+`NetMatch::poll` runs every *rendered* frame regardless, so sockets are drained
+and the handshake progresses even when no tick is due.
+
+### Why rollback is cheap here
+
+A rollback re-simulates up to 8 frames. `GameState::step` for two fighters is
+a few thousand floating-point operations and `GameState` is a handful of small
+`Vec`s, so a save is a clone of a few hundred bytes and a worst-case rollback
+is well under 0.2 ms. Rendering is untouched: the window draws whatever state
+the last `advance` left, so 60 FPS is not at risk from the netcode itself. The
+real 60 FPS hazards are the usual macroquad ones — vsync hiccups and the OS
+scheduler — which the accumulator absorbs (capped at 5 ticks per frame to
+avoid a spiral of death).
+
+### Determinism status
+
+`f32` simulation; bit-exact on one architecture with one binary (two Windows
+x86-64 players on the same release: the normal case). GGRS desync detection is
+**on** (checksums every 30 frames) and surfaces as a red banner, so a genuine
+divergence is visible immediately rather than silently corrupting a set.
+Cross-architecture bit-exactness (e.g. x86-64 vs. Apple Silicon) is not
+guaranteed until the fixed-point math pass; the numeric code is isolated in
+`sim/math.rs` and `sim/constants.rs` for exactly that migration.
+
+## Ban system
+
+Goal: tournament organisers can exclude a player from their events' online
+brackets **without a central server** and without the game phoning home.
+
+### Data model (implemented now)
+
+* Every install has a stable random `player_id` (u64). It is not derived from
+  hardware — a hardware hash would be both a privacy problem and trivially
+  spoofable in an open-source client — so the id is an *identity*, not a
+  proof of identity. That is enough for the actual use case (organisers
+  refusing known-bad actors from their own events) and honest about what it
+  can't do (stop a determined person from generating a new id).
+* `netcode::banlist::BanList`: a plain-text file, `bans.txt` in the settings
+  directory:
+
+  ```text
+  # OVERFRAME ban list
+  issuer Madrid Weekly TO
+  ban 3fa9c1d2e4b5a678 until 1767225600 reason repeated no-shows
+  ban 00ddeeff00112233 reason cheating
+  sig <signature, Fase 3>
+  ```
+  Entries can expire (`until`, unix seconds). A host loads the file at match
+  creation and answers `Hello` from a listed id with `Reject{BANNED: reason}`;
+  the guest shows the reason. This is live today and covered by
+  `tests/netcode_flow.rs::host_rejects_banned_guest`.
+
+### Distribution & trust (Fase 3 design)
+
+1. **Signed lists, not trusted servers.** Each organiser (or a regional
+   community) holds an ed25519 keypair. They publish their list at any URL
+   (a GitHub repo, a pastebin, their Discord) with `sig` = signature over the
+   canonical text above the `sig` line. Players who want to *enforce* a list
+   when hosting import it; the client verifies the signature against the
+   issuer's public key, which it learns once (QR/text in the community's
+   rules post) and pins. `BanList::verification()` is the stub where this
+   lands; `Unverified` becomes `Valid(issuer)` / `Invalid`.
+2. **Multiple issuers, local choice.** A player can subscribe to several
+   lists. Enforcement is local and opt-in: a list only affects matches *you
+   host*. Nobody can ban anyone globally — there is no global.
+3. **Tournament mode.** A TO runs the bracket's hosts (or players host with
+   the TO's list enabled); a `Hello` from a listed id is refused with the
+   reason, and the guest sees it. Because the id is in every handshake, a TO
+   can also *log* ids of players in their bracket to build the list in the
+   first place, with consent stated in the event rules.
+4. **Revocation and expiry.** Lists are re-fetched on a schedule the player
+   chooses (or manually); `until` handles temporary bans without republishing.
+5. **What it does not do.** It does not stop id regeneration (delete the
+   settings file → new id). Mitigations if a community needs them: tie ids to
+   a bracket registration (start.gg id in the `Hello` name field, verified by
+   the TO out of band), or a proof-of-work cost on new ids. Both are additive
+   and keep the no-server property.
+
+Implementation plan for Fase 3: add `ed25519-dalek` (pure Rust, small), a
+canonicalisation function for the list text, `Settings.trusted_issuers`,
+signature verification in `BanList::verification`, and a "Ban lists" options
+page (import from URL/file, show issuer + entry count + validity).
 
 ## Extending it
 

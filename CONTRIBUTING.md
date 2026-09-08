@@ -23,7 +23,7 @@ PRs that violate this cannot be merged, no matter how good the code is.
 ```bash
 # Install Rust: https://rustup.rs
 # Linux GUI deps (once):
-sudo apt-get install -y libx11-dev libxi-dev libgl1-mesa-dev libasound2-dev
+sudo apt-get install -y libx11-dev libxi-dev libgl1-mesa-dev libasound2-dev libudev-dev
 
 cargo run --release            # play the game
 cargo test --no-default-features --features netcode   # fast tests + rollback check
@@ -44,11 +44,14 @@ cargo test --no-default-features --features netcode   # fast tests + rollback ch
 
 ## Good first contributions
 
-- Gamepad input mapping in `src/render`.
+- UPnP-IGD port forwarding from the host (`src/netcode/session.rs`).
 - A second stage (add a `Stage` in `src/sim/stage.rs`).
 - Tuning passes on Kestrel's frame data (`src/sim/attacks.rs`) — with tests.
 - Fixed-point math in `src/sim/math.rs` for cross-architecture determinism.
-- Wiring GGRS P2P in `src/netcode.rs` behind a connect/lobby UI.
+- ed25519 signature verification for ban lists (`src/netcode/banlist.rs`, see
+  the design in `docs/DESIGN.md`).
+- 3–4 player online sessions (GGRS supports it; the handshake and UI assume 2).
+- Spectator mode (GGRS `SpectatorSession`) for tournament streams.
 
 ## Architecture at a glance
 
