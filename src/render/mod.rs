@@ -251,6 +251,10 @@ struct App {
     nav_cd: f32,
     screenshot: Option<(String, u64)>,
     record: Option<(String, u64, u64)>,
+    /// One simulation step per drawn frame regardless of wall-clock time —
+    /// set while recording / screenshotting so frame N on disk is sim frame N
+    /// even on a slow software renderer.
+    fixed_step: bool,
     drawn: u64,
     viewer: Viewer,
 }
@@ -395,6 +399,7 @@ impl App {
             nav_cd: 0.0,
             screenshot: opts.screenshot.clone(),
             record: opts.record.clone(),
+            fixed_step: opts.record.is_some() || opts.screenshot.is_some(),
             drawn: 0,
             viewer: Viewer {
                 fighter: None,
@@ -771,9 +776,18 @@ impl App {
         self.scene.reset();
     }
 
+    /// Wall-clock time to feed the fixed-step accumulator this frame.
+    fn frame_dt(&self) -> f32 {
+        if self.fixed_step {
+            1.0 / 60.0
+        } else {
+            get_frame_time().min(0.1)
+        }
+    }
+
     /// Advance the demo match at 60 Hz, looping when the script ends.
     fn step_demo(&mut self) {
-        self.acc += get_frame_time().min(0.1);
+        self.acc += self.frame_dt();
         let dt = 1.0 / 60.0;
         let mut steps = 0;
         while self.acc >= dt && steps < 5 {
@@ -847,7 +861,7 @@ impl App {
             self.gs = GameState::new(2, self.rules.training_config());
             self.acc = 0.0;
         }
-        self.acc += get_frame_time().min(0.1);
+        self.acc += self.frame_dt();
         let dt = 1.0 / 60.0;
         let mut steps = 0;
         while self.acc >= dt && steps < 5 {
@@ -1004,6 +1018,7 @@ impl App {
             self.leave_online();
             return;
         }
+        let frame_dt = self.frame_dt();
         let Some(net) = self.net.as_mut() else {
             self.screen = Screen::Menu;
             return;
@@ -1014,7 +1029,7 @@ impl App {
             self.screen = Screen::OnlineEnded;
             return;
         }
-        self.acc += get_frame_time().min(0.1);
+        self.acc += frame_dt;
         let dt = 1.0 / 60.0;
         let mut steps = 0;
         while self.acc >= dt && steps < 5 {

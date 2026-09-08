@@ -73,6 +73,9 @@ pseudocode and measurements — is `docs/GAME_FEEL.md`.
   (shorter wavedash into poking range; the forward smash still KOs off the
   side).
 - L-cancel rounding (`floor`), autocancel landings.
+- `--record` / `--screenshot` now step the simulation exactly once per drawn
+  frame, so frame N on disk is sim frame N even on a slow software renderer
+  (the demo GIF was regenerated with the new physics).
 
 ## [0.4.0] — Fase 3 (in progress): 3D models, stages and art pipeline
 
