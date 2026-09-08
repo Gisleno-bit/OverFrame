@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Fast, dependency-free checks on the pure simulation: format, lint, tests,
+  # and the GGRS rollback determinism test. No system libraries needed because
+  # these don't build the macroquad GUI.
+  test:
+    name: Test simulation (fmt, clippy, tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Clippy (sim + netcode)
+        run: cargo clippy --no-default-features --features netcode -- -D warnings
+      - name: Unit / property tests
+        run: cargo test --no-default-features --features netcode
+      - name: Rollback determinism (GGRS SyncTest)
+        run: cargo test --no-default-features --features netcode --test determinism
+
+  # Make sure the full game (GUI) builds on every desktop OS, and the headless
+  # replay tool builds too.
+  build:
+    name: Build GUI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux GUI deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxi-dev libgl1-mesa-dev libasound2-dev
+      - name: Build game (release)
+        run: cargo build --release
+      - name: Build headless replay tool
+        run: cargo build --release --no-default-features --features headless --bin overframe-replay

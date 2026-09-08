@@ -1,0 +1,47 @@
+[package]
+name = "overframe"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "OVERFRAME — an open, tournament-ready platform fighter with rollback-ready deterministic simulation."
+license = "MIT"
+repository = "https://github.com/Gisleno-bit/overframe"
+readme = "README.md"
+keywords = ["platform-fighter", "fighting-game", "rollback", "netcode", "game"]
+categories = ["games"]
+
+# The game binary (GUI, macroquad).
+[[bin]]
+name = "overframe"
+path = "src/main.rs"
+
+# Headless tool: play a scripted demo and render it to an animated GIF.
+# Builds without any windowing/OpenGL, so it runs on servers and in CI.
+[[bin]]
+name = "overframe-replay"
+path = "src/bin/replay.rs"
+required-features = ["headless"]
+
+[features]
+default = ["gui"]
+# The interactive game (pulls in macroquad / OpenGL / audio).
+gui = ["dep:macroquad"]
+# Networking via GGRS rollback sessions.
+netcode = ["dep:ggrs", "dep:bytemuck"]
+# CPU rasteriser for the headless GIF tool (no GPU / display needed).
+headless = ["dep:image"]
+
+[dependencies]
+macroquad = { version = "0.4", optional = true }
+ggrs = { version = "0.10", optional = true }
+bytemuck = { version = "1", features = ["derive"], optional = true }
+image = { version = "0.25", default-features = false, features = ["gif", "png"], optional = true }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 1

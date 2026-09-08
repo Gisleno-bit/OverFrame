@@ -1,0 +1,73 @@
+name: Release
+
+# Push a tag like `v0.1.0` to build ready-to-run binaries for Windows, macOS and
+# Linux and attach them to a GitHub Release. This is how players get a Windows
+# `overframe.exe` without installing anything: the .exe is built here on a real
+# Windows runner and uploaded as a release asset.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows-x86_64
+            bin: overframe.exe
+            archive: zip
+          - os: ubuntu-latest
+            name: linux-x86_64
+            bin: overframe
+            archive: tar
+          - os: macos-latest
+            name: macos-arm64
+            bin: overframe
+            archive: tar
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux GUI deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxi-dev libgl1-mesa-dev libasound2-dev
+
+      - name: Build (release)
+        run: cargo build --release --bin overframe
+
+      - name: Stage package
+        shell: bash
+        run: |
+          mkdir -p dist/overframe-${{ matrix.name }}
+          cp target/release/${{ matrix.bin }} dist/overframe-${{ matrix.name }}/
+          cp README.md LICENSE dist/overframe-${{ matrix.name }}/
+          cp -r docs dist/overframe-${{ matrix.name }}/docs
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: Compress-Archive -Path dist/overframe-${{ matrix.name }} -DestinationPath overframe-${{ matrix.name }}.zip
+
+      - name: Archive (tar)
+        if: matrix.archive == 'tar'
+        run: tar -C dist -czf overframe-${{ matrix.name }}.tar.gz overframe-${{ matrix.name }}
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            overframe-${{ matrix.name }}.zip
+            overframe-${{ matrix.name }}.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
