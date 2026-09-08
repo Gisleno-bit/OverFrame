@@ -40,5 +40,6 @@ pub mod headless;
 /// A scripted demo match shared by the headless GIF tool and the game's attract
 /// mode, so both show the same choreography of movement tech and a KO.
 pub mod demo;
+pub mod model;
 
 pub use sim::{GameState, MatchConfig, PlayerInput, Stage};
