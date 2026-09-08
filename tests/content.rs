@@ -85,7 +85,10 @@ fn character_ids_round_trip() {
         assert_eq!(id.index(), i);
     }
     assert_eq!(CharacterId::from_u8(200), None);
-    assert!(PALETTES >= 2);
+    // Every fighter ships at least PALETTES colour schemes.
+    for id in CharacterId::ALL {
+        assert!(overframe::model::palettes::of(id).len() >= PALETTES as usize);
+    }
 }
 
 #[test]

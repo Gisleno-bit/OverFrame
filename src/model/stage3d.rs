@@ -89,7 +89,7 @@ pub fn look(id: StageId) -> Look {
                 [96, 68, 48],
                 [255, 226, 160],
                 [190, 134, 108],
-                [130, 84, 84],
+                [122, 80, 68],
             ),
             light_dir: v3(0.45, 0.78, 0.5),
             key: [1.2, 1.0, 0.85],
@@ -223,8 +223,7 @@ pub fn build(stage: &Stage) -> StageModel {
         )));
     }
 
-    let floor_y;
-    match stage.id {
+    let floor_y = match stage.id {
         StageId::Lattice => {
             // The Lattice: a lattice of hexagonal pylons and rings suspended
             // in a violet void; a glowing grid far below.
@@ -261,7 +260,7 @@ pub fn build(stage: &Stage) -> StageModel {
                         .transform(&Xf::new(M3::rot_x(70.0) * M3::rot_z(20.0), v3(x, y, z))),
                 );
             }
-            floor_y = Some(stage.blast_bottom + 30.0);
+            Some(stage.blast_bottom + 30.0)
         }
         StageId::Meridian => {
             // Meridian: a flat arena at dawn over a desert plain; long low
@@ -288,7 +287,7 @@ pub fn build(stage: &Stage) -> StageModel {
                         )),
                 );
             }
-            floor_y = Some(stage.blast_bottom + 40.0);
+            Some(stage.blast_bottom + 40.0)
         }
         StageId::Tidegate => {
             // Tidegate: a sea gate — jagged basalt stacks and a broken arch
@@ -313,9 +312,9 @@ pub fn build(stage: &Stage) -> StageModel {
                     v3(-40.0, stage.blast_bottom + 60.0, -180.0),
                 )),
             );
-            floor_y = Some(stage.blast_bottom + 30.0);
+            Some(stage.blast_bottom + 30.0)
         }
-    }
+    };
 
     // Floor plane (sea / ground / void grid).
     if let Some(y) = floor_y {

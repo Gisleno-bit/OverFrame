@@ -29,6 +29,15 @@ use super::{col, MqPainter};
 /// call holds 5000 indices / 10000 vertices).
 const MAX_BATCH_INDICES: usize = 4500;
 
+/// Uploaded stage geometry for the menu's orbiting stage preview.
+struct PreviewStage {
+    id: StageId,
+    near: Vec<Mesh>,
+    far: Vec<Mesh>,
+    sky_top: [u8; 3],
+    sky_bottom: [u8; 3],
+}
+
 pub struct Scene3D {
     models: Vec<CharacterModel>,
     stage_id: Option<StageId>,
@@ -42,6 +51,8 @@ pub struct Scene3D {
     tex_spark: Texture2D,
     tex_ring: Texture2D,
     stage_tex: Option<Texture2D>,
+    /// Cached stage geometry for the menu preview.
+    preview_stage: Option<PreviewStage>,
     // Scratch buffers reused every frame.
     verts: Vec<Vert>,
     idx: Vec<u32>,
@@ -76,6 +87,7 @@ impl Scene3D {
                 false,
             ),
             stage_tex: None,
+            preview_stage: None,
             verts: Vec::new(),
             idx: Vec::new(),
             remap: Vec::new(),
@@ -668,6 +680,90 @@ impl Scene3D {
             draw_mesh(&m);
         }
         self.flush_tris(None);
+        set_default_camera();
+    }
+
+    /// Draw a whole stage, slowly orbiting, into a screen rectangle.
+    pub fn draw_stage_preview(&mut self, id: StageId, x: f32, y: f32, w: f32, h: f32) {
+        if self.preview_stage.as_ref().map(|c| c.id) != Some(id) {
+            let stage = crate::sim::stage::Stage::by_id(id);
+            let model = stage3d::build(&stage);
+            let lk = model.look;
+            let tex_bytes = stage3d::texture(lk.tex, 128);
+            let tex = Texture2D::from_rgba8(128, 128, &tex_bytes);
+            tex.set_filter(FilterMode::Linear);
+            // SAFETY: main thread, between draw calls (see ensure_stage).
+            unsafe {
+                let gl = get_internal_gl();
+                gl.quad_context.texture_set_wrap(
+                    tex.raw_miniquad_id(),
+                    miniquad::TextureWrap::Repeat,
+                    miniquad::TextureWrap::Repeat,
+                );
+            }
+            let near = upload_static(
+                &model.near,
+                &model.palette,
+                &model.light,
+                lk.haze,
+                false,
+                Some(&tex),
+            );
+            let far = upload_static(
+                &model.far,
+                &model.palette,
+                &model.light,
+                lk.haze,
+                true,
+                None,
+            );
+            self.preview_stage = Some(PreviewStage {
+                id,
+                near,
+                far,
+                sky_top: lk.sky_top,
+                sky_bottom: lk.sky_bottom,
+            });
+        }
+        let Some(ps) = self.preview_stage.as_ref() else {
+            return;
+        };
+        let (near, far, top, bottom) = (&ps.near, &ps.far, ps.sky_top, ps.sky_bottom);
+        // Sky inside the frame (2D), then the 3D orbit view.
+        let bands = 12;
+        for i in 0..bands {
+            let t = i as f32 / bands as f32;
+            let c = VColor::rgb(top[0], top[1], top[2])
+                .lerp(VColor::rgb(bottom[0], bottom[1], bottom[2]), t);
+            draw_rectangle(x, y + h * t, w, h / bands as f32 + 1.0, col(c));
+        }
+        self.preview_angle += 0.6;
+        let a = (self.preview_angle * 0.35).to_radians();
+        let dist = 520.0;
+        let dpi = miniquad::window::dpi_scale();
+        let sh = screen_height();
+        let cam = Camera3D {
+            position: vec3(a.sin() * dist * 0.55, 150.0, a.cos() * dist),
+            target: vec3(0.0, 30.0, 0.0),
+            up: vec3(0.0, 1.0, 0.0),
+            fovy: 36.0f32.to_radians(),
+            aspect: Some(w / h.max(1.0)),
+            projection: Projection::Perspective,
+            viewport: Some((
+                (x * dpi) as i32,
+                ((sh - y - h) * dpi) as i32,
+                (w * dpi) as i32,
+                (h * dpi) as i32,
+            )),
+            ..Default::default()
+        };
+        set_camera(&cam);
+        for m in far {
+            draw_mesh(m);
+        }
+        for m in near {
+            draw_mesh(m);
+        }
         set_default_camera();
     }
 

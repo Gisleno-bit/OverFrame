@@ -50,8 +50,10 @@ fn default_layout_mirrors_the_classic_controller() {
 #[test]
 fn analog_triggers_shield_past_threshold() {
     let b = PadBindings::default();
-    let mut s = PadSnapshot::default();
-    s.left_trigger = TRIGGER_THRESHOLD - 0.1;
+    let mut s = PadSnapshot {
+        left_trigger: TRIGGER_THRESHOLD - 0.1,
+        ..Default::default()
+    };
     assert_eq!(map(&s, &b).buttons, 0, "light pull is not a press");
     s.left_trigger = TRIGGER_THRESHOLD + 0.1;
     assert_eq!(map(&s, &b).buttons, buttons::SHIELD);
@@ -63,8 +65,10 @@ fn analog_triggers_shield_past_threshold() {
 #[test]
 fn sticks_map_with_radial_deadzone_and_rescale() {
     let b = PadBindings::default();
-    let mut s = PadSnapshot::default();
-    s.left = Vec2::new(0.1, 0.1); // inside deadzone
+    let mut s = PadSnapshot {
+        left: Vec2::new(0.1, 0.1), // inside deadzone
+        ..Default::default()
+    };
     assert_eq!(map(&s, &b).stick, Vec2::ZERO);
 
     s.left = Vec2::new(1.0, 0.0);

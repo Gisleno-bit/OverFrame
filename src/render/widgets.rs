@@ -106,16 +106,25 @@ pub fn time_label(secs: u32) -> String {
 
 /// A character preview card: capsule in its palette colour, name, archetype and
 /// signature trait — the 2D stand-in for a model preview.
-/// Where the 3D model preview goes inside a character card (relative x, y,
-/// width, height).
-pub const CARD_PREVIEW: (f32, f32, f32, f32) = (6.0, 30.0, 110.0, 150.0);
-/// Same for a lobby slot.
-pub const LOBBY_PREVIEW: (f32, f32, f32, f32) = (85.0, 72.0, 110.0, 130.0);
+/// Character card geometry: `(x, y, w, h)` of the 3D preview inside a card
+/// of size `(bw, bh)`.
+pub fn card_preview_rect(x: f32, y: f32, bw: f32, bh: f32) -> (f32, f32, f32, f32) {
+    (x + 8.0, y + 30.0, bw * 0.40, bh - 66.0)
+}
+/// Same for a lobby slot (preview centred below the name).
+pub fn lobby_preview_rect(x: f32, y: f32, bw: f32, bh: f32) -> (f32, f32, f32, f32) {
+    (x + bw * 0.5 - bw * 0.22, y + 76.0, bw * 0.44, bh - 140.0)
+}
 
+/// A character card: name, archetype, trait text, palette swatches, and room
+/// for the app's 3D preview (see [`card_preview_rect`]).
+#[allow(clippy::too_many_arguments)]
 pub fn draw_char_card(
     p: &mut MqPainter,
     x: f32,
     y: f32,
+    bw: f32,
+    bh: f32,
     slot: &str,
     id: CharacterId,
     palette: u8,
@@ -123,15 +132,17 @@ pub fn draw_char_card(
 ) {
     let ch = id.data();
     let c = fighter_color(id.index(), palette);
-    let bw = 300.0;
-    let bh = 210.0;
     let bg = if selected {
-        VColor::rgba(40, 44, 66, 220)
+        VColor::rgba(40, 44, 66, 225)
     } else {
-        VColor::rgba(18, 20, 34, 200)
+        VColor::rgba(18, 20, 34, 205)
     };
     p.fill_rect(x, y, bw, bh, bg);
     p.fill_rect(x, y, bw, 3.0, if selected { ACCENT } else { c });
+    // Preview well.
+    let (px, py, pw, ph) = card_preview_rect(x, y, bw, bh);
+    p.fill_rect(px, py, pw, ph, VColor::rgba(8, 9, 18, 200));
+    p.fill_rect(px, py + ph - 2.0, pw, 2.0, c.with_a(120));
 
     font::draw_text(
         p,
@@ -141,49 +152,95 @@ pub fn draw_char_card(
         1.5,
         if selected { ACCENT } else { MUTED },
     );
+    if selected {
+        font::draw_text(p, "< >", x + bw - 40.0, y + 10.0, 1.5, ACCENT);
+    }
 
-    // (The 3D preview is drawn by the app into CARD_PREVIEW.)
-    // palette swatches + name
+    // palette swatches + name (bottom strip)
+    let sy = y + bh - 28.0;
     for i in 0..PALETTES {
         let sw = fighter_color(id.index(), i);
-        let sx = x + 12.0 + i as f32 * 17.0;
-        p.fill_rect(sx, y + 182.0, 13.0, 13.0, sw);
+        let sx = x + 12.0 + i as f32 * 19.0;
+        p.fill_rect(sx, sy, 15.0, 15.0, sw);
         if i == palette {
-            p.fill_rect(sx - 1.0, y + 197.0, 15.0, 2.0, VColor::rgb(255, 255, 255));
+            p.fill_rect(sx - 1.0, sy + 17.0, 17.0, 2.0, VColor::rgb(255, 255, 255));
         }
     }
     font::draw_text(
         p,
         &crate::viz::palette_name(id, palette).to_uppercase(),
-        x + 12.0 + PALETTES as f32 * 17.0 + 6.0,
-        y + 184.0,
-        1.2,
-        MUTED,
+        x + 12.0 + PALETTES as f32 * 19.0 + 8.0,
+        sy + 2.0,
+        1.4,
+        DIM,
     );
 
     // Text on the right.
-    let tx = x + 120.0;
-    font::draw_text(p, &ch.name.to_uppercase(), tx, y + 34.0, 3.0, c);
-    font::draw_text(p, ch.archetype, tx, y + 66.0, 1.5, DIM);
+    let tx = px + pw + 16.0;
+    let name_scale = if bw > 420.0 { 3.5 } else { 3.0 };
+    font::draw_text(p, &ch.name.to_uppercase(), tx, y + 34.0, name_scale, c);
     font::draw_text(
         p,
-        &format!("TRAIT: {}", ch.trait_name),
+        ch.archetype,
         tx,
-        y + 92.0,
-        1.5,
-        ACCENT,
+        y + 34.0 + name_scale * 9.0 + 6.0,
+        1.6,
+        DIM,
     );
-    // wrap the trait description in ~18-char lines
-    for (i, line) in wrap(ch.trait_desc, 20).iter().enumerate().take(4) {
-        font::draw_text(p, line, tx, y + 112.0 + i as f32 * 16.0, 1.2, MUTED);
+    let ty = y + 34.0 + name_scale * 9.0 + 34.0;
+    font::draw_text(p, &format!("TRAIT: {}", ch.trait_name), tx, ty, 1.6, ACCENT);
+    let cols = (((x + bw - 12.0) - tx) / (6.0 * 1.3)) as usize;
+    for (i, line) in wrap(ch.trait_desc, cols.max(12)).iter().enumerate().take(4) {
+        font::draw_text(p, line, tx, ty + 22.0 + i as f32 * 17.0, 1.3, MUTED);
+    }
+    // Quick stats bars: weight, speed, air.
+    let st = [
+        ("WEIGHT", (ch.weight - 60.0) / 70.0),
+        ("SPEED", (ch.dash_max - 1.2) / 1.5),
+        ("AIR", (ch.air_max - 0.9) / 1.4),
+        ("FALL", (ch.fastfall - 2.5) / 3.0),
+    ];
+    let by = y + bh - 62.0 - 14.0 * (st.len() as f32 - 1.0);
+    if by > ty + 22.0 + 4.0 * 17.0 {
+        for (i, (label, v)) in st.iter().enumerate() {
+            let yy = by + i as f32 * 14.0;
+            font::draw_text(p, label, tx, yy, 1.1, MUTED);
+            let barw = (x + bw - 12.0) - (tx + 56.0);
+            p.fill_rect(
+                tx + 56.0,
+                yy + 1.0,
+                barw,
+                6.0,
+                VColor::rgba(255, 255, 255, 25),
+            );
+            p.fill_rect(
+                tx + 56.0,
+                yy + 1.0,
+                barw * v.clamp(0.05, 1.0),
+                6.0,
+                c.with_a(220),
+            );
+        }
     }
 }
 
-/// A stage preview: its platforms drawn to scale inside a small frame.
-pub fn draw_stage_card(p: &mut MqPainter, x: f32, y: f32, id: StageId, selected: bool) {
+/// Where the 3D stage preview goes inside a stage card.
+pub fn stage_preview_rect(x: f32, y: f32, bw: f32, bh: f32) -> (f32, f32, f32, f32) {
+    (x + 6.0, y + 30.0, bw - 12.0, bh - 36.0)
+}
+
+/// A stage card: name plus a frame the app fills with a live 3D preview (the
+/// 2D layout sketch is drawn underneath as a fallback).
+pub fn draw_stage_card(
+    p: &mut MqPainter,
+    x: f32,
+    y: f32,
+    bw: f32,
+    bh: f32,
+    id: StageId,
+    selected: bool,
+) {
     let stage = Stage::by_id(id);
-    let bw = 260.0;
-    let bh = 150.0;
     p.fill_rect(x, y, bw, bh, VColor::rgba(18, 20, 34, 220));
     p.fill_rect(
         x,
@@ -204,26 +261,31 @@ pub fn draw_stage_card(p: &mut MqPainter, x: f32, y: f32, id: StageId, selected:
         1.8,
         if selected { ACCENT } else { DIM },
     );
+    if selected {
+        font::draw_text(p, "< >", x + bw - 40.0, y + 10.0, 1.5, ACCENT);
+    }
+    let (px, py, pw, ph) = stage_preview_rect(x, y, bw, bh);
+    p.fill_rect(px, py, pw, ph, VColor::rgba(8, 9, 18, 200));
 
-    // Map world coords into the lower part of the card.
+    // Layout sketch (visible if the 3D preview is off).
     let world_half = 210.0;
-    let scale = (bw - 20.0) / (2.0 * world_half);
-    let cx = x + bw * 0.5;
-    let base_y = y + bh - 24.0;
+    let scale = (pw - 20.0) / (2.0 * world_half);
+    let cx = px + pw * 0.5;
+    let base_y = py + ph - 16.0;
     for plat in &stage.platforms {
         let px0 = cx + plat.left * scale;
         let px1 = cx + plat.right * scale;
-        let py = base_y - plat.y * scale;
+        let pyy = base_y - plat.y * scale;
         let c = if plat.solid {
             crate::viz::Color::rgb(stage.theme.slab.0, stage.theme.slab.1, stage.theme.slab.2)
         } else {
             crate::viz::Color::rgb(stage.theme.soft.0, stage.theme.soft.1, stage.theme.soft.2)
         };
-        let th = if plat.solid { 10.0 } else { 4.0 };
-        p.fill_rect(px0, py, px1 - px0, th, c);
+        let th = if plat.solid { 8.0 } else { 3.0 };
+        p.fill_rect(px0, pyy, px1 - px0, th, c);
         p.fill_rect(
             px0,
-            py,
+            pyy,
             px1 - px0,
             2.0,
             crate::viz::Color::rgb(stage.theme.lip.0, stage.theme.lip.1, stage.theme.lip.2),

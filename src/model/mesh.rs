@@ -236,6 +236,7 @@ impl MeshData {
 
     /// Box with chamfered (bevelled) edges: a cuboid whose faces are inset by
     /// `bevel` and joined by 45° strips. Reads as a soft block under lighting.
+    #[allow(clippy::needless_range_loop)]
     pub fn bevel_box(sx: f32, sy: f32, sz: f32, bevel: f32, slot: u8) -> MeshData {
         let b = bevel.min(sx * 0.45).min(sy * 0.45).min(sz * 0.45);
         // Build as the convex hull of a "superellipse"-ish frame: 8 corner

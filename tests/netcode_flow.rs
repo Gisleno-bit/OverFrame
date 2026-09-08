@@ -174,10 +174,12 @@ sig abc123
 
 #[test]
 fn settings_round_trip_and_keep_identity() {
-    let mut s = Settings::default();
-    s.host_port = 8123;
-    s.input_delay = 3;
-    s.name = "kestrel main!!".into();
+    let s = Settings {
+        host_port: 8123,
+        input_delay: 3,
+        name: "kestrel main!!".into(),
+        ..Default::default()
+    };
     let text = s.to_text();
     let back = Settings::from_text(&text);
     assert_eq!(back.player_id, s.player_id, "identity must survive");
@@ -263,11 +265,15 @@ fn pump_until<F: Fn(&NetMatch, &NetMatch) -> bool>(
 #[test]
 fn host_and_guest_connect_and_play_in_sync_over_loopback() {
     let port = free_port();
-    let mut sh = Settings::default();
-    sh.name = "HOST".into();
-    sh.input_delay = 2;
-    let mut sg = Settings::default();
-    sg.name = "GUEST".into();
+    let sh = Settings {
+        name: "HOST".into(),
+        input_delay: 2,
+        ..Default::default()
+    };
+    let sg = Settings {
+        name: "GUEST".into(),
+        ..Default::default()
+    };
 
     // Host with distinct rules so we also prove they travel to the guest.
     let rules = MatchConfig {

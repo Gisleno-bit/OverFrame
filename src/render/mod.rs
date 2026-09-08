@@ -94,7 +94,7 @@ impl MatchSpec {
                     full.eq_ignore_ascii_case(n)
                         || full
                             .strip_prefix("The")
-                            .map_or(false, |rest| rest.eq_ignore_ascii_case(n))
+                            .is_some_and(|rest| rest.eq_ignore_ascii_case(n))
                 })
                 .ok_or_else(|| format!("unknown stage '{n}'"))
         };
@@ -489,8 +489,6 @@ impl App {
         let mut steps = 0;
         while self.acc >= dt && steps < 5 {
             if self.demo_frame >= crate::demo::DEMO_LEN + 90 || self.gs.match_over.is_some() {
-                let rules = self.rules;
-                self.rules = rules;
                 self.start_demo();
             }
             let d = crate::demo::inputs(&self.gs, self.demo_frame);
@@ -902,14 +900,20 @@ impl App {
     }
 
     fn lobby_preview(&mut self, x: f32, y: f32, id: CharacterId, palette: u8) {
-        let (px, py, pw, ph) = widgets::LOBBY_PREVIEW;
-        self.scene.draw_preview(id, palette, x + px, y + py, pw, ph);
+        if !self.settings.render_3d {
+            return;
+        }
+        let (px, py, pw, ph) = widgets::lobby_preview_rect(x, y, 280.0, 250.0);
+        self.scene.draw_preview(id, palette, px, py, pw, ph);
     }
 
-    /// 3D model preview inside a character card (see `widgets::CARD_PREVIEW`).
-    fn card_preview(&mut self, x: f32, y: f32, id: CharacterId, palette: u8) {
-        let (px, py, pw, ph) = widgets::CARD_PREVIEW;
-        self.scene.draw_preview(id, palette, x + px, y + py, pw, ph);
+    /// 3D model preview inside a character card.
+    fn card_preview(&mut self, x: f32, y: f32, bw: f32, bh: f32, id: CharacterId, palette: u8) {
+        if !self.settings.render_3d {
+            return;
+        }
+        let (px, py, pw, ph) = widgets::card_preview_rect(x, y, bw, bh);
+        self.scene.draw_preview(id, palette, px, py, pw, ph);
     }
 
     fn scene_opts(&self, training: bool, local: Option<usize>) -> SceneOpts {
@@ -983,49 +987,63 @@ impl App {
 
     fn draw_setup(&mut self, p: &mut MqPainter, training: bool) {
         let (w, h) = p.dims();
-        title(p, if training { "TRAINING" } else { "VERSUS SETUP" }, 40.0);
+        title(p, if training { "TRAINING" } else { "VERSUS SETUP" }, 28.0);
 
+        // Two big character cards, a stage card with a live 3D preview, and
+        // the rules column.
+        let cw = w * 0.44;
+        let ch = h * 0.46;
+        let cy = h * 0.15;
+        let x1 = w * 0.04;
+        let x2 = w * 0.52;
         draw_char_card(
             p,
-            w * 0.10,
-            h * 0.28,
+            x1,
+            cy,
+            cw,
+            ch,
             "PLAYER 1",
             self.rules.p1,
             self.rules.p1_pal,
             self.setup_idx == 0,
         );
-        self.card_preview(w * 0.10, h * 0.28, self.rules.p1, self.rules.p1_pal);
-        if training {
-            draw_char_card(
-                p,
-                w * 0.55,
-                h * 0.28,
-                "DUMMY",
-                self.rules.p2,
-                self.rules.p2_pal,
-                false,
-            );
+        self.card_preview(x1, cy, cw, ch, self.rules.p1, self.rules.p1_pal);
+        let (slot2, sel2) = if training {
+            ("DUMMY", false)
         } else {
-            draw_char_card(
-                p,
-                w * 0.55,
-                h * 0.28,
-                "PLAYER 2",
-                self.rules.p2,
-                self.rules.p2_pal,
-                self.setup_idx == 1,
-            );
-        }
-        self.card_preview(w * 0.55, h * 0.28, self.rules.p2, self.rules.p2_pal);
+            ("PLAYER 2", self.setup_idx == 1)
+        };
+        draw_char_card(
+            p,
+            x2,
+            cy,
+            cw,
+            ch,
+            slot2,
+            self.rules.p2,
+            self.rules.p2_pal,
+            sel2,
+        );
+        self.card_preview(x2, cy, cw, ch, self.rules.p2, self.rules.p2_pal);
 
         let stage_row = if training { 1 } else { 2 };
+        let sy = cy + ch + h * 0.03;
+        let sh = h - sy - 44.0;
+        let sw = w * 0.44;
         draw_stage_card(
             p,
-            w * 0.10,
-            h * 0.66,
+            x1,
+            sy,
+            sw,
+            sh,
             self.rules.stage,
             self.setup_idx == stage_row,
         );
+        if self.settings.render_3d {
+            let (px, py, pw, ph) = widgets::stage_preview_rect(x1, sy, sw, sh);
+            self.scene
+                .draw_stage_preview(self.rules.stage, px, py, pw, ph);
+        }
 
         let rows: Vec<(String, bool)> = if training {
             vec![
@@ -1048,13 +1066,13 @@ impl App {
                 ("START".into(), self.setup_idx == 5),
             ]
         };
-        let x = w * 0.5;
+        let x = x2 + 24.0;
         for (i, (t, sel)) in rows.iter().enumerate() {
-            let y = h * 0.68 + i as f32 * 34.0;
+            let y = sy + 16.0 + i as f32 * 36.0;
             if *sel {
-                p.fill_rect(x - 18.0, y - 4.0, 10.0, 22.0, ACCENT);
+                p.fill_rect(x - 18.0, y - 4.0, 10.0, 24.0, ACCENT);
             }
-            font::draw_text(p, t, x, y, 2.5, if *sel { ACCENT } else { DIM });
+            font::draw_text(p, t, x, y, 2.6, if *sel { ACCENT } else { DIM });
         }
         hint(
             p,
@@ -1248,7 +1266,11 @@ impl App {
             };
             font::draw_text(p, t, rx, y, 2.0, c);
         }
-        draw_stage_card(p, rx, 230.0, lv.stage, false);
+        draw_stage_card(p, rx, 230.0, 260.0, 150.0, lv.stage, false);
+        if self.settings.render_3d {
+            let (px, py, pw, ph) = widgets::stage_preview_rect(rx, 230.0, 260.0, 150.0);
+            self.scene.draw_stage_preview(lv.stage, px, py, pw, ph);
+        }
 
         if hosting {
             let sel = self.lobby_idx == 6;

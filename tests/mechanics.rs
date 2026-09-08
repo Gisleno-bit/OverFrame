@@ -70,14 +70,12 @@ fn full_hop_is_higher_than_short_hop() {
     let base = gs.fighters[0].pos.y;
     let mut short_peak = base;
     drive(&mut gs, 60, |i| {
-        let inp = if i == 0 {
+        if i == 0 {
             press(buttons::JUMP)
         } else {
             neutral()
-        };
-        inp
+        }
     });
-    for _ in 0..1 {}
     // record peak during flight
     let mut gs2 = one_player();
     settle(&mut gs2);

@@ -30,6 +30,7 @@ pub struct Palette {
 }
 
 impl Palette {
+    #[allow(clippy::too_many_arguments)]
     pub const fn new(
         name: &'static str,
         primary: [u8; 3],
