@@ -13,7 +13,13 @@ pub const FPS: u32 = 60;
 /// character purely through this struct, so new fighters are pure data.
 #[derive(Clone, Copy, Debug)]
 pub struct Character {
+    pub id: super::roster::CharacterId,
     pub name: &'static str,
+    /// Short archetype label for the select screen ("FAST-FALLER", ...).
+    pub archetype: &'static str,
+    /// The character's signature mechanic, for the select screen.
+    pub trait_name: &'static str,
+    pub trait_desc: &'static str,
 
     // --- ground movement ---
     pub walk_max: f32,
@@ -46,39 +52,14 @@ pub struct Character {
     pub weight: f32,
     pub half_width: f32,
     pub height: f32,
+
+    /// Super armour: knockback below this value is absorbed (damage still
+    /// taken) during the startup of smash attacks. `0.0` disables it.
+    pub smash_armor: f32,
 }
 
-/// The prototype fighter. An agile, fast-falling bruiser built to show off the
-/// movement tech (dash-dance, wavedash, fast-fall, short-hop, L-cancel).
-pub const KESTREL: Character = Character {
-    name: "Kestrel",
-
-    walk_max: 1.55,
-    dash_max: 2.30,
-    run_max: 2.05,
-    ground_accel: 0.22,
-    ground_friction: 0.090,
-    traction: 0.050,
-
-    air_max: 1.85,
-    air_accel: 0.115,
-    air_friction: 0.020,
-
-    gravity: 0.290,
-    max_fall: 3.20,
-    fastfall: 4.85,
-    fullhop_v: 5.60,
-    shorthop_v: 3.70,
-    doublejump_v: 4.80,
-    air_jumps: 1,
-    jumpsquat: 4,
-
-    airdodge_speed: 3.10,
-
-    weight: 90.0,
-    half_width: 9.0,
-    height: 30.0,
-};
+/// The Fase 1 fighter, now defined with the rest of the roster.
+pub use super::roster::KESTREL;
 
 // ----- engine-wide constants -----
 

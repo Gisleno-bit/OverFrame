@@ -12,11 +12,13 @@ pub mod fighter;
 pub mod input;
 pub mod knockback;
 pub mod math;
+pub mod roster;
 pub mod stage;
 pub mod state;
 
 pub use fighter::{Fighter, LedgeKind, State};
 pub use input::{buttons, NetInput, PlayerInput};
 pub use math::{Rng, Vec2};
-pub use stage::{Ledge, Platform, Stage};
+pub use roster::CharacterId;
+pub use stage::{Ledge, Platform, Stage, StageId, Theme};
 pub use state::{Fx, FxKind, GameState, MatchConfig};

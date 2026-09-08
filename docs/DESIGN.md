@@ -274,6 +274,74 @@ canonicalisation function for the list text, `Settings.trusted_issuers`,
 signature verification in `BanList::verification`, and a "Ban lists" options
 page (import from URL/file, show issuer + entry count + validity).
 
+## Content model (Fase 3)
+
+Characters and stages are **pure data**, so the roster and stage list grow
+without touching engine code.
+
+* A character is a `roster::Character` attribute block (movement, weight, size,
+  a signature *trait*) plus a move table in `attacks.rs`. `CharacterId` is a
+  `u8`-repr enum that also travels in the lobby protocol. Adding a fighter is:
+  add an enum variant, one `Character` const, one move-table function, one match
+  arm — and `tests/content.rs` immediately checks it has a complete, sane
+  moveset and a distinct archetype.
+* A stage is a `stage::Stage` (platforms, ledges, blast zones, spawns, colour
+  `Theme`). `StageId` is likewise a `u8` enum. The renderer reads the theme, so
+  a new stage brings its own palette for free.
+
+Current roster (archetype spread): **Kestrel** fast-faller (Momentum: fastest
+fall, longest wavedash), **Boulder** heavyweight (Bulwark: super armour during
+smash startup), **Viper** lightweight (Skyline: two air jumps, best air
+control). Stages: **The Lattice** (battlefield-like), **Meridian** (flat),
+**Tidegate** (asymmetric). Signature traits live in the simulation
+(`smash_armor`, `air_jumps`) and are covered by tests.
+
+Match rules (`MatchConfig`) carry stage, per-slot character + palette, stock
+count and an optional time limit; a timed match ends on the clock with a
+most-stocks-then-lowest-percent tiebreak. All of it is part of the saved state,
+so it is rollback- and lobby-safe.
+
+### 3D asset pipeline (planned)
+
+The 2D capsules are placeholders. The planned path to models keeps the data
+model intact: author original rigged models in Blender → export glTF 2.0 →
+load with a Rust glTF loader → drive with the existing per-move frame data
+(startup/active/endlag windows become animation events; the hitboxes stay in
+`attacks.rs`). Because gameplay reads a character purely through `Character` +
+the move table, the renderer can move from capsules to skinned meshes without
+changing the simulation or the netcode. If no artist is available, models must
+be CC0/CC-BY (credited) and visibly unlike any existing franchise character —
+see `docs/LEGAL.md`.
+
+## Steam integration (Fase 3 plan)
+
+The whole online stack — handshake, lobby, GGRS session, ban logic — is written
+against `Identity` and an `impl NonBlockingSocket`, never against "UDP" or "an
+IP". Steam therefore plugs in behind `netcode::platform::Platform` without
+touching gameplay:
+
+| Concern | LAN backend (shipped) | Steam backend (planned) |
+|---|---|---|
+| Identity | random `Identity::Local` | `Identity::Steam(SteamID64)` from `steamworks` |
+| Auth | none | Steam session ticket |
+| Room list | UDP broadcast (`lobby::Browser`) | `ISteamMatchmaking` lobby list + metadata (region, ping) |
+| Invite / join | room code / `ip:port` | friend invite, `GameLobbyJoinRequested` |
+| Transport | our `OfSocket` (UDP) | `ISteamNetworkingMessages` over **Steam Datagram Relay** |
+| NAT / port forwarding | manual | none needed (SDR relays) |
+| Ban keys | local id | Steam id (already supported by `banlist`) |
+
+Concretely, Fase 3 adds a `steam` cargo feature that pulls the `steamworks`
+crate and provides: a `SteamPlatform: Platform`, a `SteamSocket:
+NonBlockingSocket<SteamId>` wrapping `ISteamNetworkingMessages`, and a
+`NetMatch` constructor that builds its `P2PSession` on that socket. Lobby state
+messages (`Pick`/`Rules`/`Chat`/`Start`) ride Steam lobby chat or SDR messages
+instead of our datagrams; the *content* is unchanged. Steamworks is a C++ SDK
+loaded as a dynamic library at runtime; there is no dependency conflict with
+GGRS (different layers), and GGRS never learns which transport it is on.
+
+The Steamworks setup checklist (App ID, depots, SDK placement, Early-Access
+manifest) is in `docs/STEAM.md`.
+
 ## Extending it
 
 - **New fighter:** add a `constants::Character` and (optionally) a moveset; the

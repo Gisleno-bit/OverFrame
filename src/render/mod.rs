@@ -1,30 +1,29 @@
-//! macroquad front-end: window, menus, input, the fixed-timestep game loop and
-//! the online (GGRS) match loop. All drawing goes through [`crate::viz`] via
-//! [`MqPainter`], so the window renders the exact same scene the headless GIF
-//! tool does.
-//!
-//! Screens: Menu → Versus / Training / Demo / Controls / Options / Online
-//! (Host or Join → Lobby → OnlineMatch → OnlineEnded).
+//! macroquad front-end: window, menus, character/stage select, options, the LAN
+//! room browser, the online lobby, and the fixed-timestep game + GGRS loops.
+//! All in-match drawing goes through [`crate::viz`]; the menus draw with the
+//! same bitmap font so nothing needs a font file.
 
 mod input;
+mod widgets;
 
 use macroquad::prelude::*;
 
 use crate::config::Settings;
 use crate::gamepad::{mask_label, PadAction};
 use crate::netcode::banlist::BanList;
-use crate::netcode::{roomcode, Advance, NetMatch, Phase, Role};
-use crate::sim::input::PlayerInput;
-use crate::sim::math::Vec2 as SimVec2;
-use crate::sim::{GameState, MatchConfig};
+use crate::netcode::{roomcode, Advance, Browser, NetMatch, Phase, Role};
+use crate::sim::roster::CharacterId;
+use crate::sim::stage::StageId;
+use crate::sim::{GameState, MatchConfig, PlayerInput};
 use crate::viz::{self, font, Color as VColor, Painter, SceneOpts};
 use input::InputHub;
+use widgets::*;
 
 /// Adapts macroquad's immediate-mode drawing to the [`Painter`] trait.
-struct MqPainter;
+pub(crate) struct MqPainter;
 
 #[inline]
-fn col(c: VColor) -> macroquad::color::Color {
+pub(crate) fn col(c: VColor) -> macroquad::color::Color {
     macroquad::color::Color::from_rgba(c.r, c.g, c.b, c.a)
 }
 
@@ -53,33 +52,28 @@ pub struct LaunchOpts {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Screen {
     Menu,
+    LocalSetup,
+    TrainSetup,
     Versus,
     Training,
-    Demo,
     Controls,
     Options,
     OnlineMenu,
+    JoinBrowser,
     Lobby,
     OnlineMatch,
     OnlineEnded,
 }
 
-const MENU_ITEMS: [&str; 7] = [
+const MENU_ITEMS: [&str; 6] = [
     "VERSUS  2P LOCAL",
     "ONLINE",
-    "TRAINING  1P",
-    "WATCH DEMO",
+    "TRAINING",
     "OPTIONS",
     "CONTROLS",
     "QUIT",
 ];
 const ONLINE_ITEMS: [&str; 3] = ["HOST GAME", "JOIN GAME", "BACK"];
-
-const ACCENT: VColor = VColor::rgb(255, 220, 120);
-const DIM: VColor = VColor::rgba(200, 210, 230, 200);
-const MUTED: VColor = VColor::rgba(150, 160, 190, 160);
-const BAD: VColor = VColor::rgb(255, 90, 90);
-const GOOD: VColor = VColor::rgb(120, 230, 150);
 
 fn window_conf() -> Conf {
     Conf {
@@ -96,13 +90,35 @@ pub fn launch(opts: LaunchOpts) {
     macroquad::Window::from_config(window_conf(), amain(opts));
 }
 
-/// Menu navigation for this frame, merged from keyboard and any gamepad.
-#[derive(Clone, Copy, Default)]
-struct Nav {
-    v: i32,
-    h: i32,
-    confirm: bool,
-    back: bool,
+/// Local match setup, edited on the setup screens and carried into the lobby as
+/// the host's defaults.
+#[derive(Clone, Copy)]
+struct Rules {
+    p1: CharacterId,
+    p2: CharacterId,
+    p1_pal: u8,
+    p2_pal: u8,
+    stage: StageId,
+    stocks: i32,
+    time_secs: u32,
+}
+impl Rules {
+    fn to_config(self) -> MatchConfig {
+        MatchConfig {
+            stocks: self.stocks,
+            time_limit_secs: self.time_secs,
+            stage: self.stage,
+            chars: [self.p1, self.p2, CharacterId::Kestrel, CharacterId::Kestrel],
+            palettes: [self.p1_pal, self.p2_pal, 2, 3],
+            ..MatchConfig::default()
+        }
+    }
+    fn training_config(self) -> MatchConfig {
+        MatchConfig {
+            stocks: 99,
+            ..self.to_config()
+        }
+    }
 }
 
 struct App {
@@ -114,27 +130,34 @@ struct App {
     menu_idx: usize,
     online_idx: usize,
     options_idx: usize,
+    setup_idx: usize,
+    lobby_idx: usize,
+    browser_idx: usize,
 
+    rules: Rules,
     gs: GameState,
     demo_frame: u64,
     show_boxes: bool,
     acc: f32,
 
     net: Option<NetMatch>,
+    browser: Option<Browser>,
     join_text: String,
+    pass_text: String,
+    chat_text: String,
+    typing_chat: bool,
     status: String,
     waiting_ticks: u32,
-    last_rollback_shown: u32,
 
     rebind: Option<(usize, PadAction)>,
     rebind_started: u64,
-
-    stick_nav_cooldown: f32,
+    nav_cd: f32,
 }
 
 impl App {
     fn new(opts: LaunchOpts) -> App {
         let settings = Settings::load_or_create();
+        let last = settings.last_character();
         let mut app = App {
             settings,
             hub: InputHub::new(),
@@ -143,18 +166,33 @@ impl App {
             menu_idx: 0,
             online_idx: 0,
             options_idx: 0,
+            setup_idx: 0,
+            lobby_idx: 0,
+            browser_idx: 0,
+            rules: Rules {
+                p1: last,
+                p2: CharacterId::Boulder,
+                p1_pal: 0,
+                p2_pal: 1,
+                stage: StageId::Lattice,
+                stocks: 4,
+                time_secs: 0,
+            },
             gs: GameState::new(2, MatchConfig::default()),
             demo_frame: 0,
             show_boxes: true,
             acc: 0.0,
             net: None,
+            browser: None,
             join_text: String::new(),
+            pass_text: String::new(),
+            chat_text: String::new(),
+            typing_chat: false,
             status: String::new(),
             waiting_ticks: 0,
-            last_rollback_shown: 0,
             rebind: None,
             rebind_started: 0,
-            stick_nav_cooldown: 0.0,
+            nav_cd: 0.0,
         };
         if let Some(port) = opts.host {
             app.start_host(port);
@@ -185,51 +223,45 @@ impl App {
         if is_key_pressed(KeyCode::Escape) {
             n.back = true;
         }
-        // Gamepad: South confirms, East backs, left stick nudges with a repeat delay.
+        use crate::gamepad::PadButton as B;
         if let Some(b) = self.hub.any_just_pressed() {
             match b {
-                crate::gamepad::PadButton::South => n.confirm = true,
-                crate::gamepad::PadButton::East => n.back = true,
-                crate::gamepad::PadButton::DPadDown => n.v += 1,
-                crate::gamepad::PadButton::DPadUp => n.v -= 1,
-                crate::gamepad::PadButton::DPadLeft => n.h -= 1,
-                crate::gamepad::PadButton::DPadRight => n.h += 1,
+                B::South | B::Start => n.confirm = true,
+                B::East => n.back = true,
+                B::DPadDown => n.v += 1,
+                B::DPadUp => n.v -= 1,
+                B::DPadLeft => n.h -= 1,
+                B::DPadRight => n.h += 1,
                 _ => {}
             }
         }
-        self.stick_nav_cooldown = (self.stick_nav_cooldown - get_frame_time()).max(0.0);
+        self.nav_cd = (self.nav_cd - get_frame_time()).max(0.0);
         let s = self.hub.any_stick();
-        if self.stick_nav_cooldown <= 0.0 && s.length() > 0.6 {
+        if self.nav_cd <= 0.0 && s.length() > 0.6 {
             if s.y.abs() > s.x.abs() {
                 n.v += if s.y < 0.0 { 1 } else { -1 };
             } else {
                 n.h += if s.x > 0.0 { 1 } else { -1 };
             }
-            self.stick_nav_cooldown = 0.22;
+            self.nav_cd = 0.2;
         }
         n
-    }
-
-    fn training_state() -> GameState {
-        let mut gs = GameState::new(
-            2,
-            MatchConfig {
-                stocks: 99,
-                seed: 7,
-            },
-        );
-        gs.fighters[0].pos = SimVec2::new(-40.0, 1.0);
-        gs.fighters[1].pos = SimVec2::new(40.0, 1.0);
-        gs
     }
 
     // ------------------------------------------------------------ online
 
     fn start_host(&mut self, port: u16) {
-        match NetMatch::host(port, &self.settings, BanList::load_local()) {
+        match NetMatch::host(
+            port,
+            &self.settings,
+            self.rules.to_config(),
+            &self.pass_text,
+            BanList::load_local(),
+        ) {
             Ok(m) => {
                 self.net = Some(m);
                 self.status.clear();
+                self.lobby_idx = 0;
                 self.screen = Screen::Lobby;
             }
             Err(e) => {
@@ -244,10 +276,12 @@ impl App {
             self.status = "INVALID CODE OR ADDRESS".into();
             return;
         };
-        match NetMatch::join(addr, &self.settings) {
+        match NetMatch::join(addr, &self.settings, &self.pass_text) {
             Ok(m) => {
                 self.net = Some(m);
+                self.browser = None;
                 self.status.clear();
+                self.lobby_idx = 0;
                 self.screen = Screen::Lobby;
             }
             Err(e) => self.status = format!("CANNOT OPEN SOCKET: {e}").to_uppercase(),
@@ -255,7 +289,12 @@ impl App {
     }
 
     fn leave_online(&mut self) {
+        if let Some(net) = &self.net {
+            net.send_leave();
+        }
         self.net = None;
+        self.browser = None;
+        self.typing_chat = false;
         self.waiting_ticks = 0;
         self.screen = Screen::Menu;
     }
@@ -266,73 +305,18 @@ impl App {
         self.frame_no += 1;
         self.hub.poll();
         let nav = self.nav();
-
         match self.screen {
-            Screen::Menu => {
-                let n = MENU_ITEMS.len() as i32;
-                self.menu_idx = ((self.menu_idx as i32 + nav.v).rem_euclid(n)) as usize;
-                if nav.confirm {
-                    match self.menu_idx {
-                        0 => {
-                            self.gs = GameState::new(2, MatchConfig::default());
-                            self.acc = 0.0;
-                            self.screen = Screen::Versus;
-                        }
-                        1 => {
-                            self.status.clear();
-                            self.screen = Screen::OnlineMenu;
-                        }
-                        2 => {
-                            self.gs = Self::training_state();
-                            self.acc = 0.0;
-                            self.screen = Screen::Training;
-                        }
-                        3 => {
-                            self.gs = crate::demo::match_state();
-                            self.demo_frame = 0;
-                            self.acc = 0.0;
-                            self.screen = Screen::Demo;
-                        }
-                        4 => {
-                            self.options_idx = 0;
-                            self.screen = Screen::Options;
-                        }
-                        5 => self.screen = Screen::Controls,
-                        _ => std::process::exit(0),
-                    }
-                }
-                if nav.back {
-                    std::process::exit(0);
-                }
-            }
+            Screen::Menu => self.update_menu(nav),
+            Screen::LocalSetup => self.update_setup(nav, false),
+            Screen::TrainSetup => self.update_setup(nav, true),
             Screen::Controls => {
                 if nav.back || nav.confirm {
                     self.screen = Screen::Menu;
                 }
             }
             Screen::Options => self.update_options(nav),
-            Screen::OnlineMenu => {
-                let n = ONLINE_ITEMS.len() as i32;
-                self.online_idx = ((self.online_idx as i32 + nav.v).rem_euclid(n)) as usize;
-                if nav.back {
-                    self.screen = Screen::Menu;
-                } else if nav.confirm {
-                    match self.online_idx {
-                        0 => {
-                            let port = self.settings.host_port;
-                            self.start_host(port);
-                        }
-                        1 => {
-                            // Text entry mode: Enter confirms (handled below).
-                            self.status = "TYPE THE HOST'S CODE OR IP:PORT".into();
-                            self.online_idx = 1;
-                            self.screen = Screen::Lobby; // guest entry lives in Lobby
-                            self.net = None;
-                        }
-                        _ => self.screen = Screen::Menu,
-                    }
-                }
-            }
+            Screen::OnlineMenu => self.update_online_menu(nav),
+            Screen::JoinBrowser => self.update_browser(nav),
             Screen::Lobby => self.update_lobby(nav),
             Screen::OnlineMatch => self.update_online_match(),
             Screen::OnlineEnded => {
@@ -340,69 +324,176 @@ impl App {
                     self.leave_online();
                 }
             }
-            Screen::Versus | Screen::Training | Screen::Demo => {
-                if nav.back {
-                    self.screen = Screen::Menu;
+            Screen::Versus | Screen::Training => self.update_local_match(nav),
+        }
+    }
+
+    fn update_menu(&mut self, nav: Nav) {
+        let n = MENU_ITEMS.len() as i32;
+        self.menu_idx = ((self.menu_idx as i32 + nav.v).rem_euclid(n)) as usize;
+        if nav.confirm {
+            match self.menu_idx {
+                0 => {
+                    self.setup_idx = 0;
+                    self.screen = Screen::LocalSetup;
                 }
-                if self.screen == Screen::Training && is_key_pressed(KeyCode::Tab) {
-                    self.show_boxes = !self.show_boxes;
+                1 => {
+                    self.status.clear();
+                    self.screen = Screen::OnlineMenu;
                 }
-                if self.screen == Screen::Training
-                    && (is_key_pressed(KeyCode::Backspace) || is_key_pressed(KeyCode::Key0))
-                {
-                    self.gs = Self::training_state();
+                2 => {
+                    self.setup_idx = 0;
+                    self.screen = Screen::TrainSetup;
+                }
+                3 => {
+                    self.options_idx = 0;
+                    self.screen = Screen::Options;
+                }
+                4 => self.screen = Screen::Controls,
+                _ => std::process::exit(0),
+            }
+        }
+        if nav.back {
+            std::process::exit(0);
+        }
+    }
+
+    fn update_setup(&mut self, nav: Nav, training: bool) {
+        let rows: i32 = if training { 4 } else { 6 };
+        self.setup_idx = ((self.setup_idx as i32 + nav.v).rem_euclid(rows)) as usize;
+        if nav.back {
+            self.screen = Screen::Menu;
+            return;
+        }
+        let idx = self.setup_idx;
+        let r = &mut self.rules;
+        if training {
+            match idx {
+                0 => cycle_char(&mut r.p1, &mut r.p1_pal, nav),
+                1 => cycle_stage(&mut r.stage, nav),
+                2 => cycle_stocks(&mut r.stocks, nav),
+                3 if nav.confirm => {
+                    self.gs = GameState::new(2, self.rules.training_config());
                     self.acc = 0.0;
+                    self.screen = Screen::Training;
                 }
-                self.acc += get_frame_time().min(0.1);
-                let dt_fixed = 1.0 / 60.0;
-                let mut steps = 0;
-                while self.acc >= dt_fixed && steps < 5 {
-                    let inputs: Vec<PlayerInput> = match self.screen {
-                        Screen::Versus => vec![
-                            self.hub.player_input(0, &self.settings.pad[0]),
-                            self.hub.player_input(1, &self.settings.pad[1]),
-                        ],
-                        Screen::Training => vec![
-                            self.hub.player_input(0, &self.settings.pad[0]),
-                            PlayerInput::default(),
-                        ],
-                        _ => {
-                            let d = crate::demo::inputs(&self.gs, self.demo_frame);
-                            self.demo_frame += 1;
-                            vec![d[0], d[1]]
-                        }
-                    };
-                    self.gs.step(&inputs);
-                    self.acc -= dt_fixed;
-                    steps += 1;
+                _ => {}
+            }
+        } else {
+            match idx {
+                0 => cycle_char(&mut r.p1, &mut r.p1_pal, nav),
+                1 => cycle_char(&mut r.p2, &mut r.p2_pal, nav),
+                2 => cycle_stage(&mut r.stage, nav),
+                3 => cycle_stocks(&mut r.stocks, nav),
+                4 => cycle_time(&mut r.time_secs, nav),
+                5 if nav.confirm => {
+                    self.settings.last_character = self.rules.p1 as u8;
+                    let _ = self.settings.save();
+                    self.gs = GameState::new(2, self.rules.to_config());
+                    self.acc = 0.0;
+                    self.screen = Screen::Versus;
                 }
+                _ => {}
+            }
+        }
+    }
+
+    fn update_local_match(&mut self, nav: Nav) {
+        if nav.back {
+            self.screen = match self.screen {
+                Screen::Training => Screen::TrainSetup,
+                _ => Screen::LocalSetup,
+            };
+            return;
+        }
+        if self.screen == Screen::Training && is_key_pressed(KeyCode::Tab) {
+            self.show_boxes = !self.show_boxes;
+        }
+        if self.screen == Screen::Training
+            && (is_key_pressed(KeyCode::Backspace) || is_key_pressed(KeyCode::Key0))
+        {
+            self.gs = GameState::new(2, self.rules.training_config());
+            self.acc = 0.0;
+        }
+        self.acc += get_frame_time().min(0.1);
+        let dt = 1.0 / 60.0;
+        let mut steps = 0;
+        while self.acc >= dt && steps < 5 {
+            let inputs: Vec<PlayerInput> = match self.screen {
+                Screen::Versus => vec![
+                    self.hub.player_input(0, &self.settings.pad[0]),
+                    self.hub.player_input(1, &self.settings.pad[1]),
+                ],
+                Screen::Training => vec![
+                    self.hub.player_input(0, &self.settings.pad[0]),
+                    PlayerInput::default(),
+                ],
+                _ => {
+                    let d = crate::demo::inputs(&self.gs, self.demo_frame);
+                    self.demo_frame += 1;
+                    vec![d[0], d[1]]
+                }
+            };
+            self.gs.step(&inputs);
+            self.acc -= dt;
+            steps += 1;
+        }
+    }
+
+    fn update_online_menu(&mut self, nav: Nav) {
+        let n = ONLINE_ITEMS.len() as i32;
+        self.online_idx = ((self.online_idx as i32 + nav.v).rem_euclid(n)) as usize;
+        take_text(&mut self.pass_text, 20);
+        if nav.back {
+            self.screen = Screen::Menu;
+        } else if nav.confirm {
+            match self.online_idx {
+                0 => {
+                    let port = self.settings.host_port;
+                    self.start_host(port);
+                }
+                1 => {
+                    self.browser = Browser::new().ok();
+                    self.browser_idx = 0;
+                    self.join_text.clear();
+                    self.status.clear();
+                    self.screen = Screen::JoinBrowser;
+                }
+                _ => self.screen = Screen::Menu,
+            }
+        }
+    }
+
+    fn update_browser(&mut self, nav: Nav) {
+        if let Some(b) = self.browser.as_mut() {
+            b.poll();
+        }
+        let rooms = self.browser.as_ref().map(|b| b.rooms()).unwrap_or_default();
+        take_text_filtered(&mut self.join_text, 24, |c| {
+            c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-')
+        });
+        if nav.back {
+            self.browser = None;
+            self.screen = Screen::OnlineMenu;
+            return;
+        }
+        if !rooms.is_empty() {
+            self.browser_idx =
+                ((self.browser_idx as i32 + nav.v).rem_euclid(rooms.len() as i32)) as usize;
+        }
+        if is_key_pressed(KeyCode::Enter) {
+            if !self.join_text.is_empty() {
+                self.start_join();
+            } else if let Some(room) = rooms.get(self.browser_idx) {
+                self.join_text = format!("{}", room.addr);
+                self.start_join();
             }
         }
     }
 
     fn update_lobby(&mut self, nav: Nav) {
-        // Guest text entry (no NetMatch yet).
-        if self.net.is_none() {
-            while let Some(c) = get_char_pressed() {
-                if (c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-'))
-                    && self.join_text.len() < 24
-                {
-                    self.join_text.push(c.to_ascii_uppercase());
-                }
-            }
-            if is_key_pressed(KeyCode::Backspace) {
-                self.join_text.pop();
-            }
-            if is_key_pressed(KeyCode::Enter) {
-                self.start_join();
-            }
-            if nav.back {
-                self.screen = Screen::OnlineMenu;
-            }
-            return;
-        }
-
         let Some(net) = self.net.as_mut() else {
+            self.screen = Screen::Menu;
             return;
         };
         net.poll();
@@ -412,15 +503,66 @@ impl App {
                 self.acc = 0.0;
                 self.waiting_ticks = 0;
                 self.screen = Screen::OnlineMatch;
+                return;
             }
             Phase::Ended(reason) => {
                 self.status = reason;
                 self.screen = Screen::OnlineEnded;
+                return;
             }
             _ => {}
         }
+
+        if self.typing_chat {
+            take_text_filtered(&mut self.chat_text, 60, |c| {
+                c.is_ascii_graphic() || c == ' '
+            });
+            if is_key_pressed(KeyCode::Enter) {
+                let t = std::mem::take(&mut self.chat_text);
+                net.send_chat(&t);
+                self.typing_chat = false;
+            }
+            if is_key_pressed(KeyCode::Escape) {
+                self.typing_chat = false;
+                self.chat_text.clear();
+            }
+            return;
+        }
+        if is_key_pressed(KeyCode::T) {
+            self.typing_chat = true;
+            return;
+        }
         if nav.back {
             self.leave_online();
+            return;
+        }
+
+        let host = net.is_host();
+        let rows: i32 = if host { 7 } else { 3 };
+        self.lobby_idx = ((self.lobby_idx as i32 + nav.v).rem_euclid(rows)) as usize;
+        match self.lobby_idx {
+            0 if nav.h != 0 => {
+                let mut c = net.lobby_view().my.character;
+                let mut pal = net.lobby_view().my.palette;
+                cycle_char(&mut c, &mut pal, nav);
+                net.set_my_character(c);
+                self.settings.last_character = c as u8;
+                let _ = self.settings.save();
+            }
+            1 if nav.h != 0 => net.cycle_my_palette(nav.h),
+            2 if nav.confirm => net.toggle_ready(),
+            3 if host && nav.h != 0 => {
+                let mut s = net.lobby_view().stage;
+                cycle_stage(&mut s, nav);
+                net.set_stage(s);
+            }
+            4 if host && nav.h != 0 => net.set_stocks(net.lobby_view().stocks + nav.h),
+            5 if host && nav.h != 0 => {
+                let cur = net.lobby_view().time_secs as i32;
+                net.set_time((cur + nav.h * 30).clamp(0, 600) as u32);
+            }
+            6 if host && nav.confirm && net.can_start() => net.start_match(),
+            _ => {}
         }
     }
 
@@ -439,19 +581,13 @@ impl App {
             self.screen = Screen::OnlineEnded;
             return;
         }
-
         self.acc += get_frame_time().min(0.1);
-        let dt_fixed = 1.0 / 60.0;
+        let dt = 1.0 / 60.0;
         let mut steps = 0;
-        while self.acc >= dt_fixed && steps < 5 {
+        while self.acc >= dt && steps < 5 {
             let local = self.hub.player_input(0, &self.settings.pad[0]);
             match net.advance(local, &mut self.gs) {
-                Advance::Advanced { rollback_frames } => {
-                    self.waiting_ticks = 0;
-                    if rollback_frames > 0 {
-                        self.last_rollback_shown = rollback_frames;
-                    }
-                }
+                Advance::Advanced { .. } => self.waiting_ticks = 0,
                 Advance::Skipped => {}
                 Advance::Waiting => self.waiting_ticks = self.waiting_ticks.saturating_add(1),
                 Advance::Ended => {
@@ -462,14 +598,11 @@ impl App {
                     return;
                 }
             }
-            self.acc -= dt_fixed;
+            self.acc -= dt;
             steps += 1;
         }
     }
 
-    // ------------------------------------------------------------ options
-
-    /// Rows of the options screen.
     fn option_rows(&self) -> Vec<String> {
         let mut rows = vec![
             format!("INPUT DELAY   {} FRAMES", self.settings.input_delay),
@@ -491,7 +624,6 @@ impl App {
     }
 
     fn update_options(&mut self, nav: Nav) {
-        // Capturing a button for a rebind?
         if let Some((slot, action)) = self.rebind {
             if nav.back {
                 self.rebind = None;
@@ -506,54 +638,41 @@ impl App {
             }
             return;
         }
-
         let rows = self.option_rows().len() as i32;
         self.options_idx = ((self.options_idx as i32 + nav.v).rem_euclid(rows)) as usize;
         let idx = self.options_idx;
         let pad_rows = PadAction::ALL.len();
         let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
-
         if nav.back {
             let _ = self.settings.save();
             self.screen = Screen::Menu;
             return;
         }
         match idx {
-            0 => {
-                if nav.h != 0 {
-                    let d = (self.settings.input_delay as i32 + nav.h).clamp(0, 8);
-                    self.settings.input_delay = d as u8;
-                    let _ = self.settings.save();
-                }
+            0 if nav.h != 0 => {
+                self.settings.input_delay =
+                    (self.settings.input_delay as i32 + nav.h).clamp(0, 8) as u8;
+                let _ = self.settings.save();
             }
-            1 => {
-                if nav.h != 0 {
-                    let step = if shift { 100 } else { 1 };
-                    let p = (self.settings.host_port as i32 + nav.h * step).clamp(1024, 65535);
-                    self.settings.host_port = p as u16;
-                    let _ = self.settings.save();
-                }
+            1 if nav.h != 0 => {
+                let step = if shift { 100 } else { 1 };
+                self.settings.host_port =
+                    (self.settings.host_port as i32 + nav.h * step).clamp(1024, 65535) as u16;
+                let _ = self.settings.save();
             }
-            i if i >= 2 && i < 2 + 2 * pad_rows => {
-                if nav.confirm {
-                    let slot = (i - 2) / pad_rows;
-                    let action = PadAction::ALL[(i - 2) % pad_rows];
-                    self.rebind = Some((slot, action));
-                    self.rebind_started = self.frame_no;
-                }
+            i if (2..2 + 2 * pad_rows).contains(&i) && nav.confirm => {
+                self.rebind = Some(((i - 2) / pad_rows, PadAction::ALL[(i - 2) % pad_rows]));
+                self.rebind_started = self.frame_no;
             }
-            i if i == 2 + 2 * pad_rows => {
-                if nav.confirm {
-                    self.settings.pad = Default::default();
-                    let _ = self.settings.save();
-                }
+            i if i == 2 + 2 * pad_rows && nav.confirm => {
+                self.settings.pad = Default::default();
+                let _ = self.settings.save();
             }
-            _ => {
-                if nav.confirm {
-                    let _ = self.settings.save();
-                    self.screen = Screen::Menu;
-                }
+            i if i == 3 + 2 * pad_rows && nav.confirm => {
+                let _ = self.settings.save();
+                self.screen = Screen::Menu;
             }
+            _ => {}
         }
     }
 
@@ -564,59 +683,51 @@ impl App {
         let mut p = MqPainter;
         match self.screen {
             Screen::Menu => self.draw_menu(&mut p),
-            Screen::Controls => draw_controls(&mut p),
+            Screen::LocalSetup => self.draw_setup(&mut p, false),
+            Screen::TrainSetup => self.draw_setup(&mut p, true),
+            Screen::Controls => widgets::draw_controls(&mut p),
             Screen::Options => self.draw_options(&mut p),
             Screen::OnlineMenu => self.draw_online_menu(&mut p),
+            Screen::JoinBrowser => self.draw_browser(&mut p),
             Screen::Lobby => self.draw_lobby(&mut p),
             Screen::OnlineEnded => self.draw_ended(&mut p),
             Screen::Versus => {
-                viz::draw_scene(
-                    &mut p,
-                    &self.gs,
-                    SceneOpts {
-                        training: false,
-                        watermark: true,
-                        local_player: None,
-                    },
-                );
+                viz::draw_scene(&mut p, &self.gs, self.scene_opts(false, None));
+                self.draw_clock(&mut p);
             }
             Screen::Training => {
-                viz::draw_scene(
-                    &mut p,
-                    &self.gs,
-                    SceneOpts {
-                        training: self.show_boxes,
-                        watermark: true,
-                        local_player: None,
-                    },
-                );
-                hint(&mut p, "TAB BOXES   BACKSPACE RESET   ESC MENU");
-            }
-            Screen::Demo => {
-                viz::draw_scene(
-                    &mut p,
-                    &self.gs,
-                    SceneOpts {
-                        training: false,
-                        watermark: true,
-                        local_player: None,
-                    },
-                );
-                hint(&mut p, "DEMO   ESC MENU");
+                viz::draw_scene(&mut p, &self.gs, self.scene_opts(self.show_boxes, None));
+                hint(&mut p, "TAB BOXES   BACKSPACE RESET   ESC BACK");
             }
             Screen::OnlineMatch => {
                 let local = self.net.as_ref().map(|n| n.local_handle());
-                viz::draw_scene(
-                    &mut p,
-                    &self.gs,
-                    SceneOpts {
-                        training: false,
-                        watermark: true,
-                        local_player: local,
-                    },
-                );
+                viz::draw_scene(&mut p, &self.gs, self.scene_opts(false, local));
+                self.draw_clock(&mut p);
                 self.draw_online_overlay(&mut p);
             }
+        }
+    }
+
+    fn scene_opts(&self, training: bool, local: Option<usize>) -> SceneOpts {
+        SceneOpts {
+            training,
+            watermark: true,
+            local_player: local,
+        }
+    }
+
+    fn draw_clock(&self, p: &mut MqPainter) {
+        if let Some(secs) = self.gs.time_left_secs() {
+            let (w, _) = p.dims();
+            let t = format!("{}:{:02}", secs / 60, secs % 60);
+            font::draw_text(
+                p,
+                &t,
+                w * 0.5 - font::text_width(&t, 3.0) * 0.5,
+                20.0,
+                3.0,
+                ACCENT,
+            );
         }
     }
 
@@ -625,16 +736,12 @@ impl App {
         let pads = if self.hub.pad_count() == 0 {
             "NO GAMEPAD".to_owned()
         } else {
-            format!(
-                "{} GAMEPAD(S): {}",
-                self.hub.pad_count(),
-                self.hub.names.join(", ")
-            )
+            format!("{} GAMEPAD(S)", self.hub.pad_count())
         };
         let line = format!(
             "ID {:08X}   {}   MIT   FREE   ROLLBACK NETCODE",
             (self.settings.player_id >> 32) as u32,
-            pads.to_uppercase()
+            pads
         );
         font::draw_text(
             p,
@@ -648,14 +755,12 @@ impl App {
 
     fn draw_menu(&self, p: &mut MqPainter) {
         let (w, h) = p.dims();
-        let title = "OVERFRAME";
-        let sc = 8.0;
         font::draw_text(
             p,
-            title,
-            w * 0.5 - font::text_width(title, sc) * 0.5,
+            "OVERFRAME",
+            w * 0.5 - font::text_width("OVERFRAME", 8.0) * 0.5,
             h * 0.13,
-            sc,
+            8.0,
             VColor::rgb(255, 92, 74),
         );
         let sub = "AN OPEN PLATFORM FIGHTER";
@@ -663,7 +768,7 @@ impl App {
             p,
             sub,
             w * 0.5 - font::text_width(sub, 2.0) * 0.5,
-            h * 0.13 + sc * 7.0 + 10.0,
+            h * 0.13 + 66.0,
             2.0,
             DIM,
         );
@@ -671,20 +776,113 @@ impl App {
         self.footer(p);
     }
 
+    fn draw_setup(&self, p: &mut MqPainter, training: bool) {
+        let (w, h) = p.dims();
+        title(p, if training { "TRAINING" } else { "VERSUS SETUP" }, 40.0);
+
+        draw_char_card(
+            p,
+            w * 0.10,
+            h * 0.28,
+            "PLAYER 1",
+            self.rules.p1,
+            self.rules.p1_pal,
+            self.setup_idx == 0,
+        );
+        if training {
+            draw_char_card(
+                p,
+                w * 0.55,
+                h * 0.28,
+                "DUMMY",
+                self.rules.p2,
+                self.rules.p2_pal,
+                false,
+            );
+        } else {
+            draw_char_card(
+                p,
+                w * 0.55,
+                h * 0.28,
+                "PLAYER 2",
+                self.rules.p2,
+                self.rules.p2_pal,
+                self.setup_idx == 1,
+            );
+        }
+
+        let stage_row = if training { 1 } else { 2 };
+        draw_stage_card(
+            p,
+            w * 0.10,
+            h * 0.66,
+            self.rules.stage,
+            self.setup_idx == stage_row,
+        );
+
+        let rows: Vec<(String, bool)> = if training {
+            vec![
+                (
+                    format!("STOCKS   {}", self.rules.stocks),
+                    self.setup_idx == 2,
+                ),
+                ("START".into(), self.setup_idx == 3),
+            ]
+        } else {
+            vec![
+                (
+                    format!("STOCKS   {}", self.rules.stocks),
+                    self.setup_idx == 3,
+                ),
+                (
+                    format!("TIME     {}", time_label(self.rules.time_secs)),
+                    self.setup_idx == 4,
+                ),
+                ("START".into(), self.setup_idx == 5),
+            ]
+        };
+        let x = w * 0.5;
+        for (i, (t, sel)) in rows.iter().enumerate() {
+            let y = h * 0.68 + i as f32 * 34.0;
+            if *sel {
+                p.fill_rect(x - 18.0, y - 4.0, 10.0, 22.0, ACCENT);
+            }
+            font::draw_text(p, t, x, y, 2.5, if *sel { ACCENT } else { DIM });
+        }
+        hint(
+            p,
+            "UP/DOWN SELECT   LEFT/RIGHT CHANGE   ENTER START   ESC BACK",
+        );
+    }
+
     fn draw_online_menu(&self, p: &mut MqPainter) {
         let (w, h) = p.dims();
         title(p, "ONLINE", 50.0);
-        draw_list(p, &ONLINE_ITEMS, self.online_idx, h * 0.36, 46.0, 3.0);
+        draw_list(p, &ONLINE_ITEMS, self.online_idx, h * 0.34, 46.0, 3.0);
+        let pw = if self.pass_text.is_empty() {
+            "(NONE)".to_owned()
+        } else {
+            "*".repeat(self.pass_text.len())
+        };
+        let l = format!("ROOM PASSWORD (TYPE): {pw}");
+        font::draw_text(
+            p,
+            &l,
+            w * 0.5 - font::text_width(&l, 1.5) * 0.5,
+            h * 0.60,
+            1.5,
+            DIM,
+        );
         let info = [
             format!("HOSTING USES UDP PORT {}", self.settings.host_port),
-            "LAN: SHARE THE CODE SHOWN WHEN HOSTING".into(),
-            "INTERNET: FORWARD THAT UDP PORT AND SHARE YOUR PUBLIC IP:PORT".into(),
+            "LAN GAMES ARE FOUND AUTOMATICALLY IN JOIN".into(),
+            "INTERNET: FORWARD THAT UDP PORT, SHARE YOUR PUBLIC IP:PORT".into(),
         ];
-        for (i, l) in info.iter().enumerate() {
+        for (i, t) in info.iter().enumerate() {
             font::draw_text(
                 p,
-                l,
-                w * 0.5 - font::text_width(l, 1.5) * 0.5,
+                t,
+                w * 0.5 - font::text_width(t, 1.5) * 0.5,
                 h * 0.66 + i as f32 * 22.0,
                 1.5,
                 MUTED,
@@ -695,7 +893,7 @@ impl App {
                 p,
                 &self.status,
                 w * 0.5 - font::text_width(&self.status, 2.0) * 0.5,
-                h * 0.58,
+                h * 0.54,
                 2.0,
                 BAD,
             );
@@ -703,131 +901,199 @@ impl App {
         self.footer(p);
     }
 
+    fn draw_browser(&self, p: &mut MqPainter) {
+        let (w, h) = p.dims();
+        title(p, "JOIN GAME", 40.0);
+        let rooms = self.browser.as_ref().map(|b| b.rooms()).unwrap_or_default();
+        font::draw_text(p, "LAN ROOMS", w * 0.12, 110.0, 2.0, DIM);
+        if rooms.is_empty() {
+            let e = if self.browser.is_none() {
+                "DISCOVERY PORT BUSY (ANOTHER INSTANCE IS BROWSING)"
+            } else {
+                "SEARCHING... HOSTS APPEAR HERE AUTOMATICALLY"
+            };
+            font::draw_text(p, e, w * 0.12, 150.0, 1.5, MUTED);
+        }
+        for (i, r) in rooms.iter().enumerate().take(8) {
+            let y = 145.0 + i as f32 * 34.0;
+            let sel = i == self.browser_idx;
+            if sel {
+                p.fill_rect(w * 0.12 - 18.0, y - 4.0, 10.0, 24.0, ACCENT);
+            }
+            let lock = if r.locked { " [LOCK]" } else { "" };
+            let ver = if r.version_ok { "" } else { " [VER?]" };
+            let line = format!("{}  {}P{}{}", r.name, r.players, lock, ver);
+            font::draw_text(
+                p,
+                &line.to_uppercase(),
+                w * 0.12,
+                y,
+                2.0,
+                if sel { ACCENT } else { DIM },
+            );
+        }
+
+        let bx = w * 0.12;
+        let by = h * 0.66;
+        font::draw_text(p, "OR ENTER CODE / IP:PORT", bx, by - 26.0, 1.5, DIM);
+        p.fill_rect(bx, by, 520.0, 46.0, VColor::rgba(10, 12, 22, 200));
+        p.fill_rect(bx, by + 44.0, 520.0, 2.0, ACCENT);
+        let caret = if (self.frame_no / 30) % 2 == 0 {
+            "_"
+        } else {
+            " "
+        };
+        font::draw_text(
+            p,
+            &format!("{}{}", self.join_text, caret),
+            bx + 12.0,
+            by + 12.0,
+            3.0,
+            VColor::rgb(240, 240, 240),
+        );
+        font::draw_text(p, "ENTER  CONNECT     ESC  BACK", bx, by + 60.0, 1.5, MUTED);
+        if !self.status.is_empty() {
+            font::draw_text(p, &self.status, bx, by + 84.0, 1.8, BAD);
+        }
+    }
+
     fn draw_lobby(&self, p: &mut MqPainter) {
         let (w, h) = p.dims();
-        match &self.net {
-            None => {
-                title(p, "JOIN GAME", 50.0);
-                let label = "HOST CODE OR IP:PORT";
-                font::draw_text(
-                    p,
-                    label,
-                    w * 0.5 - font::text_width(label, 2.0) * 0.5,
-                    h * 0.34,
-                    2.0,
-                    DIM,
-                );
-                // Text box.
-                let bw = 520.0;
-                let bx = w * 0.5 - bw * 0.5;
-                let by = h * 0.42;
-                p.fill_rect(bx, by, bw, 56.0, VColor::rgba(10, 12, 22, 200));
-                p.fill_rect(bx, by + 54.0, bw, 2.0, ACCENT);
-                let caret = if (self.frame_no / 30) % 2 == 0 {
-                    "_"
-                } else {
-                    " "
-                };
-                let shown = format!("{}{}", self.join_text, caret);
-                font::draw_text(
-                    p,
-                    &shown,
-                    bx + 16.0,
-                    by + 14.0,
-                    4.0,
-                    VColor::rgb(240, 240, 240),
-                );
-                let help = "ENTER  CONNECT      ESC  BACK";
-                font::draw_text(
-                    p,
-                    help,
-                    w * 0.5 - font::text_width(help, 1.5) * 0.5,
-                    h * 0.56,
-                    1.5,
-                    MUTED,
-                );
-                if !self.status.is_empty() {
-                    let c = if self.status.starts_with("TYPE") {
-                        MUTED
-                    } else {
-                        BAD
-                    };
-                    font::draw_text(
-                        p,
-                        &self.status,
-                        w * 0.5 - font::text_width(&self.status, 2.0) * 0.5,
-                        h * 0.63,
-                        2.0,
-                        c,
-                    );
-                }
-            }
-            Some(net) => {
-                let hosting = net.role() == Role::Host;
-                title(p, if hosting { "HOSTING" } else { "CONNECTING" }, 50.0);
-                if hosting {
-                    let l = "ROOM CODE";
-                    font::draw_text(
-                        p,
-                        l,
-                        w * 0.5 - font::text_width(l, 2.0) * 0.5,
-                        h * 0.30,
-                        2.0,
-                        DIM,
-                    );
-                    let code = &net.room_code;
-                    let sc = 7.0;
-                    font::draw_text(
-                        p,
-                        code,
-                        w * 0.5 - font::text_width(code, sc) * 0.5,
-                        h * 0.36,
-                        sc,
-                        ACCENT,
-                    );
-                    let addr = format!("LAN {}:{}", roomcode::local_ipv4(), net.local_addr.port());
-                    font::draw_text(
-                        p,
-                        &addr,
-                        w * 0.5 - font::text_width(&addr, 2.0) * 0.5,
-                        h * 0.36 + sc * 7.0 + 18.0,
-                        2.0,
-                        DIM,
-                    );
-                    let tip = "INTERNET: FORWARD THIS UDP PORT AND SHARE PUBLIC-IP:PORT INSTEAD";
-                    font::draw_text(
-                        p,
-                        tip,
-                        w * 0.5 - font::text_width(tip, 1.5) * 0.5,
-                        h * 0.36 + sc * 7.0 + 44.0,
-                        1.5,
-                        MUTED,
-                    );
-                }
-                let dots = ".".repeat(((self.frame_no / 20) % 4) as usize);
-                let st = match net.phase() {
-                    Phase::Handshaking => {
-                        if hosting {
-                            format!("WAITING FOR A PLAYER{dots}")
-                        } else {
-                            format!("LOOKING FOR HOST{dots}")
-                        }
-                    }
-                    Phase::Syncing => format!("SYNCHRONISING WITH {}{dots}", net.peer_name()),
-                    _ => String::new(),
-                };
-                font::draw_text(
-                    p,
-                    &st,
-                    w * 0.5 - font::text_width(&st, 2.5) * 0.5,
-                    h * 0.72,
-                    2.5,
-                    GOOD,
-                );
-                hint(p, "ESC  CANCEL");
-            }
+        let Some(net) = &self.net else {
+            return;
+        };
+        let lv = net.lobby_view();
+        let hosting = net.role() == Role::Host;
+        title(p, if hosting { "HOSTING" } else { "LOBBY" }, 36.0);
+
+        if hosting {
+            let code = format!("CODE {}", net.room_code);
+            font::draw_text(
+                p,
+                &code,
+                w * 0.5 - font::text_width(&code, 2.0) * 0.5,
+                76.0,
+                2.0,
+                MUTED,
+            );
         }
-        self.footer(p);
+
+        draw_lobby_pick(
+            p,
+            w * 0.05,
+            110.0,
+            "YOU",
+            lv.my,
+            self.lobby_idx,
+            true,
+            hosting,
+        );
+        if lv.peer_present {
+            draw_lobby_pick(
+                p,
+                w * 0.05 + 300.0,
+                110.0,
+                &lv.peer_name,
+                lv.peer,
+                99,
+                false,
+                false,
+            );
+        } else {
+            font::draw_text(
+                p,
+                "WAITING FOR OPPONENT...",
+                w * 0.05 + 320.0,
+                150.0,
+                2.0,
+                MUTED,
+            );
+        }
+
+        let rx = w * 0.66;
+        font::draw_text(p, "RULES", rx, 110.0, 2.0, DIM);
+        let rules = [
+            (
+                format!("STAGE   {}", lv.stage.name().to_uppercase()),
+                3usize,
+            ),
+            (format!("STOCKS  {}", lv.stocks), 4),
+            (format!("TIME    {}", time_label(lv.time_secs)), 5),
+        ];
+        for (i, (t, row)) in rules.iter().enumerate() {
+            let y = 140.0 + i as f32 * 28.0;
+            let sel = hosting && self.lobby_idx == *row;
+            if sel {
+                p.fill_rect(rx - 16.0, y - 4.0, 8.0, 20.0, ACCENT);
+            }
+            let c = if sel {
+                ACCENT
+            } else if hosting {
+                DIM
+            } else {
+                MUTED
+            };
+            font::draw_text(p, t, rx, y, 2.0, c);
+        }
+        draw_stage_card(p, rx, 230.0, lv.stage, false);
+
+        if hosting {
+            let sel = self.lobby_idx == 6;
+            let can = net.can_start();
+            let label = if can {
+                "START MATCH"
+            } else {
+                "START (NEED BOTH READY)"
+            };
+            let c = if !can {
+                MUTED
+            } else if sel {
+                ACCENT
+            } else {
+                GOOD
+            };
+            if sel {
+                p.fill_rect(rx - 16.0, h * 0.60 - 4.0, 8.0, 22.0, c);
+            }
+            font::draw_text(p, label, rx, h * 0.60, 2.2, c);
+        }
+
+        // Chat.
+        let cx = w * 0.05;
+        let cy = h * 0.58;
+        font::draw_text(p, "CHAT  (T TO TYPE)", cx, cy - 22.0, 1.5, DIM);
+        p.fill_rect(cx, cy, 560.0, 118.0, VColor::rgba(10, 12, 22, 160));
+        let start = lv.chat.len().saturating_sub(6);
+        for (i, (who, text)) in lv.chat[start..].iter().enumerate() {
+            let y = cy + 6.0 + i as f32 * 18.0;
+            let c = match who.as_str() {
+                "YOU" => ACCENT,
+                "SYSTEM" => GOOD,
+                _ => DIM,
+            };
+            font::draw_text(p, &format!("{who}: {text}"), cx + 6.0, y, 1.5, c);
+        }
+        if self.typing_chat {
+            let caret = if (self.frame_no / 30) % 2 == 0 {
+                "_"
+            } else {
+                " "
+            };
+            p.fill_rect(cx, cy + 120.0, 560.0, 22.0, VColor::rgba(30, 34, 54, 220));
+            font::draw_text(
+                p,
+                &format!("> {}{}", self.chat_text, caret),
+                cx + 6.0,
+                cy + 124.0,
+                1.8,
+                VColor::rgb(240, 240, 240),
+            );
+        }
+
+        hint(
+            p,
+            "ARROWS SELECT/CHANGE   ENTER READY/START   T CHAT   ESC LEAVE",
+        );
     }
 
     fn draw_ended(&self, p: &mut MqPainter) {
@@ -837,16 +1103,16 @@ impl App {
         font::draw_text(
             p,
             &r,
-            w * 0.5 - font::text_width(&r, 3.0) * 0.5,
+            w * 0.5 - font::text_width(&r, 2.5) * 0.5,
             h * 0.42,
-            3.0,
+            2.5,
             BAD,
         );
-        let help = "ENTER / ESC  BACK TO MENU";
+        let msg = "ENTER / ESC  BACK TO MENU";
         font::draw_text(
             p,
-            help,
-            w * 0.5 - font::text_width(help, 1.5) * 0.5,
+            msg,
+            w * 0.5 - font::text_width(msg, 1.5) * 0.5,
             h * 0.6,
             1.5,
             MUTED,
@@ -858,7 +1124,7 @@ impl App {
         let Some(net) = &self.net else {
             return;
         };
-        let stats = net.stats().unwrap_or_default();
+        let s = net.stats().unwrap_or_default();
         let role = if net.role() == Role::Host {
             "HOST"
         } else {
@@ -868,9 +1134,9 @@ impl App {
             "ONLINE {}  VS {}   PING {}MS   ROLLBACK {}F   AHEAD {:+}   DELAY {}F",
             role,
             net.peer_name(),
-            stats.ping_ms,
-            stats.rollback_frames,
-            stats.frames_ahead,
+            s.ping_ms,
+            s.rollback_frames,
+            s.frames_ahead,
             self.settings.input_delay
         );
         p.fill_rect(
@@ -880,33 +1146,18 @@ impl App {
             22.0,
             VColor::rgba(10, 12, 22, 170),
         );
-        let c = if stats.ping_ms > 120 {
+        let c = if s.ping_ms > 120 {
             BAD
-        } else if stats.ping_ms > 60 {
+        } else if s.ping_ms > 60 {
             ACCENT
         } else {
             GOOD
         };
         font::draw_text(p, &line, 16.0, 13.0, 1.5, c);
-
-        if net.role() == Role::Host {
-            let code = format!("CODE {}", net.room_code);
-            let x = w - font::text_width(&code, 1.5) - 16.0;
-            font::draw_text(p, &code, x, 40.0, 1.5, MUTED);
-        }
         if self.waiting_ticks > 6 {
-            let t = "WAITING FOR PEER...";
-            font::draw_text(
-                p,
-                t,
-                w * 0.5 - font::text_width(t, 2.5) * 0.5,
-                60.0,
-                2.5,
-                ACCENT,
-            );
+            font::draw_text(p, "WAITING FOR PEER...", w * 0.5 - 130.0, 60.0, 2.5, ACCENT);
         }
-        if stats.desynced {
-            let t = "DESYNC DETECTED";
+        if s.desynced {
             p.fill_rect(
                 w * 0.5 - 150.0,
                 90.0,
@@ -916,8 +1167,8 @@ impl App {
             );
             font::draw_text(
                 p,
-                t,
-                w * 0.5 - font::text_width(t, 2.5) * 0.5,
+                "DESYNC DETECTED",
+                w * 0.5 - font::text_width("DESYNC DETECTED", 2.5) * 0.5,
                 98.0,
                 2.5,
                 BAD,
@@ -927,7 +1178,7 @@ impl App {
 
     fn draw_options(&self, p: &mut MqPainter) {
         let (w, h) = p.dims();
-        title(p, "OPTIONS", 40.0);
+        title(p, "OPTIONS", 36.0);
         let pads = if self.hub.pad_count() == 0 {
             match &self.hub.init_error {
                 Some(e) => format!("GAMEPADS UNAVAILABLE: {}", e.to_uppercase()),
@@ -940,18 +1191,15 @@ impl App {
             p,
             &pads,
             w * 0.5 - font::text_width(&pads, 1.5) * 0.5,
-            100.0,
+            92.0,
             1.5,
             MUTED,
         );
-
         let rows = self.option_rows();
         let x = w * 0.5 - 330.0;
-        let y0 = 135.0;
-        let dy = 30.0;
         for (i, r) in rows.iter().enumerate() {
             let sel = i == self.options_idx;
-            let y = y0 + i as f32 * dy;
+            let y = 125.0 + i as f32 * 30.0;
             if sel {
                 p.fill_rect(x - 22.0, y - 4.0, 10.0, 20.0, ACCENT);
             }
@@ -964,26 +1212,15 @@ impl App {
                 a.label()
             )
         } else {
-            "UP/DOWN SELECT   LEFT/RIGHT ADJUST (SHIFT = X100 FOR PORT)   ENTER REBIND   ESC BACK"
-                .into()
+            "UP/DOWN SELECT   LEFT/RIGHT ADJUST (SHIFT X100)   ENTER REBIND   ESC BACK".into()
         };
-        let c = if self.rebind.is_some() { GOOD } else { MUTED };
         font::draw_text(
             p,
             &help,
             w * 0.5 - font::text_width(&help, 1.5) * 0.5,
-            h - 60.0,
+            h - 40.0,
             1.5,
-            c,
-        );
-        let path = format!("SAVED TO {}", Settings::path().display()).to_uppercase();
-        font::draw_text(
-            p,
-            &path,
-            w * 0.5 - font::text_width(&path, 1.2) * 0.5,
-            h - 34.0,
-            1.2,
-            MUTED,
+            if self.rebind.is_some() { GOOD } else { MUTED },
         );
     }
 }
@@ -997,71 +1234,20 @@ async fn amain(opts: LaunchOpts) {
     }
 }
 
-// ---------------------------------------------------------------- widgets
+// ---- keyboard text entry helpers ----
 
-fn title(p: &mut MqPainter, t: &str, y: f32) {
-    let (w, _) = p.dims();
-    font::draw_text(
-        p,
-        t,
-        w * 0.5 - font::text_width(t, 5.0) * 0.5,
-        y,
-        5.0,
-        ACCENT,
-    );
+fn take_text(buf: &mut String, max: usize) {
+    take_text_filtered(buf, max, |c| {
+        c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-' | '_')
+    })
 }
-
-fn draw_list(p: &mut MqPainter, items: &[&str], idx: usize, y0: f32, dy: f32, scale: f32) {
-    let (w, _) = p.dims();
-    for (i, item) in items.iter().enumerate() {
-        let selected = i == idx;
-        let y = y0 + i as f32 * dy;
-        let color = if selected { ACCENT } else { DIM };
-        let x = w * 0.5 - font::text_width(item, scale) * 0.5;
-        if selected {
-            p.fill_rect(x - 22.0, y - 4.0, 12.0, font::GLYPH_H * scale + 8.0, ACCENT);
+fn take_text_filtered<F: Fn(char) -> bool>(buf: &mut String, max: usize, ok: F) {
+    while let Some(c) = get_char_pressed() {
+        if ok(c) && buf.len() < max {
+            buf.push(c.to_ascii_uppercase());
         }
-        font::draw_text(p, item, x, y, scale, color);
     }
-}
-
-fn draw_controls(p: &mut MqPainter) {
-    let (w, _h) = p.dims();
-    title(p, "CONTROLS", 40.0);
-    let lines = [
-        "KEYBOARD  PLAYER 1              PLAYER 2",
-        "MOVE      W A S D               ARROW KEYS",
-        "C-STICK   Q E R F               I J K L",
-        "JUMP      SPACE                 RIGHT SHIFT",
-        "ATTACK    C                     . (PERIOD)",
-        "SPECIAL   V                     / (SLASH)",
-        "SHIELD    LEFT SHIFT            RIGHT CTRL",
-        "GRAB      X                     , (COMMA)",
-        "",
-        "GAMEPAD (DEFAULT, REBIND IN OPTIONS)",
-        "STICK / C-STICK   LEFT / RIGHT STICK",
-        "ATTACK A   SPECIAL B   JUMP X OR Y   SHIELD LT/RT/LB   GRAB RB",
-        "FIRST PAD = P1, SECOND PAD = P2. KEYBOARD ALWAYS WORKS TOO.",
-        "",
-        "TILT  ATTACK + HELD STICK     SMASH  C-STICK FLICK",
-        "SHORT HOP  TAP JUMP    WAVEDASH  JUMP, THEN SHIELD DOWN-FORWARD",
-        "L-CANCEL  SHIELD JUST BEFORE LANDING AN AERIAL",
-        "",
-        "ESC  BACK",
-    ];
-    for (i, l) in lines.iter().enumerate() {
-        font::draw_text(p, l, w * 0.5 - 330.0, 110.0 + i as f32 * 27.0, 2.0, DIM);
+    if is_key_pressed(KeyCode::Backspace) {
+        buf.pop();
     }
-}
-
-fn hint(p: &mut MqPainter, text: &str) {
-    let (w, _h) = p.dims();
-    font::draw_text(
-        p,
-        text,
-        w * 0.5 - font::text_width(text, 1.5) * 0.5,
-        16.0,
-        1.5,
-        VColor::rgba(180, 200, 230, 150),
-    );
 }

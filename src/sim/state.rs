@@ -11,20 +11,45 @@ use super::fighter::{Fighter, State};
 use super::input::PlayerInput;
 use super::knockback;
 use super::math::{clampf, Rng, Vec2};
-use super::stage::Stage;
+use super::roster::CharacterId;
+use super::stage::{Stage, StageId};
 
-/// Match rules.
-#[derive(Clone, Copy, Debug)]
+/// Match rules. `Copy` on purpose: it is sent over the lobby protocol and
+/// stored in the saved state.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MatchConfig {
     pub stocks: i32,
+    /// Time limit in seconds; `0` = no limit. On expiry the player with the
+    /// most stocks wins (tie-break: lower percent; otherwise a draw).
+    pub time_limit_secs: u32,
     pub seed: u32,
+    pub stage: StageId,
+    /// Character per player slot (only the first `num_players` are used).
+    pub chars: [CharacterId; 4],
+    /// Colour palette per player slot.
+    pub palettes: [u8; 4],
 }
 
 impl Default for MatchConfig {
     fn default() -> Self {
         MatchConfig {
             stocks: 4,
+            time_limit_secs: 0,
             seed: 0x1234_5678,
+            stage: StageId::Lattice,
+            chars: [CharacterId::Kestrel; 4],
+            palettes: [0, 1, 2, 3],
+        }
+    }
+}
+
+impl MatchConfig {
+    /// Frames remaining before the time limit, if any.
+    pub fn time_limit_frames(&self) -> Option<u64> {
+        if self.time_limit_secs == 0 {
+            None
+        } else {
+            Some(self.time_limit_secs as u64 * super::constants::FPS as u64)
         }
     }
 }
@@ -64,14 +89,16 @@ pub struct GameState {
 }
 
 impl GameState {
-    /// Build a fresh match with `num_players` Kestrels on The Lattice.
+    /// Build a fresh match from its rules (stage, characters, stocks, time).
     pub fn new(num_players: usize, config: MatchConfig) -> Self {
-        let stage = Stage::lattice();
+        let stage = Stage::by_id(config.stage);
         let mut fighters = Vec::with_capacity(num_players);
         for i in 0..num_players {
             let spawn = stage.spawns[i % stage.spawns.len()];
-            let mut f = Fighter::new(&k::KESTREL, i, Vec2::new(spawn.x, spawn.y + 40.0));
+            let ch = config.chars[i % 4].data();
+            let mut f = Fighter::new(ch, i, Vec2::new(spawn.x, spawn.y + 40.0));
             f.stocks = config.stocks;
+            f.palette = config.palettes[i % 4] % super::roster::PALETTES;
             fighters.push(f);
         }
         GameState {
@@ -179,7 +206,7 @@ impl GameState {
         // 7) KO checks.
         self.check_kos();
 
-        // 8) Match end.
+        // 8) Match end: last one standing, or the clock running out.
         if self.match_over.is_none() {
             let alive: Vec<usize> = self
                 .fighters
@@ -190,10 +217,48 @@ impl GameState {
                 .collect();
             if n >= 2 && alive.len() <= 1 {
                 self.match_over = alive.first().copied().or(Some(usize::MAX));
+            } else if let Some(limit) = self.config.time_limit_frames() {
+                if self.frame + 1 >= limit {
+                    self.match_over = Some(self.timeout_winner());
+                }
             }
         }
 
         self.frame += 1;
+    }
+
+    /// Winner when the clock expires: most stocks, then lowest percent; a
+    /// perfect tie is a draw (`usize::MAX`).
+    fn timeout_winner(&self) -> usize {
+        let mut best: Option<usize> = None;
+        let mut tie = false;
+        for (i, f) in self.fighters.iter().enumerate() {
+            match best {
+                None => best = Some(i),
+                Some(b) => {
+                    let bf = &self.fighters[b];
+                    if f.stocks > bf.stocks || (f.stocks == bf.stocks && f.percent < bf.percent) {
+                        best = Some(i);
+                        tie = false;
+                    } else if f.stocks == bf.stocks && f.percent == bf.percent {
+                        tie = true;
+                    }
+                }
+            }
+        }
+        if tie {
+            usize::MAX
+        } else {
+            best.unwrap_or(usize::MAX)
+        }
+    }
+
+    /// Seconds left on the clock, if the match is timed.
+    pub fn time_left_secs(&self) -> Option<u64> {
+        self.config.time_limit_frames().map(|limit| {
+            let left = limit.saturating_sub(self.frame);
+            left.div_ceil(super::constants::FPS as u64)
+        })
     }
 
     fn resolve_combat(&mut self, inputs: &[PlayerInput]) {
@@ -238,7 +303,7 @@ impl GameState {
 
             // --- throw release ---
             if let State::Throw { id } = state_i {
-                let md = attacks::data(id);
+                let md = attacks::data(self.fighters[i].character.id, id);
                 let released = md.is_active(frame_i);
                 if released {
                     let already = self.fighters[i].already_hit;
@@ -329,10 +394,33 @@ impl GameState {
         let di_stick = inputs.get(j).copied().unwrap_or_default().stick;
         let angle = knockback::apply_di(angle, di_stick);
 
+        let hitlag = knockback::hitlag(hitbox.damage);
+
+        // Super armour (e.g. Boulder's *Bulwark*): during smash startup, weak
+        // knockback is absorbed — damage is taken, but no launch, no hitstun.
+        let armored = {
+            let v = &self.fighters[j];
+            let armor = v.character.smash_armor;
+            match v.state {
+                State::Attack { id, aerial: false } if attacks::is_smash(id) => {
+                    let startup = attacks::data(v.character.id, id).startup;
+                    armor > 0.0 && !is_throw && kb < armor && v.state_frame < startup
+                }
+                _ => false,
+            }
+        };
+        if armored {
+            self.fighters[j].anim_flash = 6;
+            self.fighters[j].hitlag = hitlag / 2;
+            self.fighters[i].hitlag = hitlag;
+            let vp = self.fighters[j].body_center();
+            self.push_fx(vp, FxKind::Shield, hitbox.damage);
+            return;
+        }
+
         let launch = knockback::launch_velocity(kb, angle);
         let hitstun = knockback::hitstun(kb).max(if is_throw { 8 } else { 4 });
         let tumble = knockback::causes_tumble(kb);
-        let hitlag = knockback::hitlag(hitbox.damage);
 
         self.fighters[j].apply_launch(launch, hitstun, tumble, hitlag);
         self.fighters[i].hitlag = hitlag;

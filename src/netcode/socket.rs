@@ -8,6 +8,7 @@
 
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
+use std::sync::{Arc, Mutex};
 
 use ggrs::{Message, NonBlockingSocket};
 
@@ -53,6 +54,11 @@ impl OfSocket {
         self.socket.local_addr()
     }
 
+    /// Allow sending to the LAN broadcast address (room announcements).
+    pub fn set_broadcast(&self, on: bool) -> std::io::Result<()> {
+        self.socket.set_broadcast(on)
+    }
+
     /// Send a handshake datagram.
     pub fn send_handshake(&self, hs: &Handshake, to: SocketAddr) -> std::io::Result<()> {
         self.socket.send_to(&hs.encode(), to).map(|_| ())
@@ -85,6 +91,39 @@ impl OfSocket {
                 Err(_) => return,
             }
         }
+    }
+}
+
+/// A clonable handle to one [`OfSocket`]. GGRS takes ownership of the socket it
+/// is given; sharing it behind a mutex lets the lobby layer keep sending
+/// handshake/lobby datagrams (e.g. resending `Start`) after the session exists.
+#[derive(Clone, Debug)]
+pub struct SharedSocket(pub Arc<Mutex<OfSocket>>);
+
+impl SharedSocket {
+    pub fn new(s: OfSocket) -> Self {
+        SharedSocket(Arc::new(Mutex::new(s)))
+    }
+    pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
+        self.0.lock().expect("socket mutex").local_addr()
+    }
+    pub fn send_handshake(&self, hs: &Handshake, to: SocketAddr) -> std::io::Result<()> {
+        self.0.lock().expect("socket mutex").send_handshake(hs, to)
+    }
+    pub fn poll_handshakes(&self) -> Vec<(SocketAddr, Handshake)> {
+        self.0.lock().expect("socket mutex").poll_handshakes()
+    }
+    pub fn set_broadcast(&self, on: bool) -> std::io::Result<()> {
+        self.0.lock().expect("socket mutex").set_broadcast(on)
+    }
+}
+
+impl NonBlockingSocket<SocketAddr> for SharedSocket {
+    fn send_to(&mut self, msg: &Message, addr: &SocketAddr) {
+        self.0.lock().expect("socket mutex").send_to(msg, addr);
+    }
+    fn receive_all_messages(&mut self) -> Vec<(SocketAddr, Message)> {
+        self.0.lock().expect("socket mutex").receive_all_messages()
     }
 }
 

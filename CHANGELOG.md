@@ -3,6 +3,56 @@
 All notable changes to OVERFRAME. Format follows *Keep a Changelog*; versions
 follow SemVer once `v1.0.0` ships.
 
+## [0.3.0] — Fase 3 (in progress): roster, stages, online lobbies
+
+### Added
+- **Roster of 3 characters** across the classic archetypes, all original:
+  **Kestrel** (fast-faller, *Momentum*), **Boulder** (heavyweight, *Bulwark*:
+  super armour during smash startup), **Viper** (lightweight, *Skyline*: two air
+  jumps, best air control). Characters are pure data (`sim/roster.rs` +
+  per-character move tables in `sim/attacks.rs`).
+- **3 stages** with distinct layouts and colour themes: **The Lattice**
+  (floating platforms), **Meridian** (flat), **Tidegate** (asymmetric).
+- **Character/palette select** and **stage select** for local Versus and
+  Training, with on-screen character cards (archetype, trait, palette swatches)
+  and stage thumbnails.
+- **Match rules**: stock count and an optional **time limit** (timed matches end
+  on the clock with a most-stocks / lowest-percent tiebreak).
+- **Online lobbies**: after connecting, both players sit in a lobby to pick
+  character + palette, **chat**, and **ready up**; the host sets the stage and
+  rules and starts. Selections travel in a new versioned lobby protocol and
+  build an identical `GameState` on both sides.
+- **LAN room browser**: hosts broadcast an announcement; the Join screen lists
+  discovered rooms automatically (plus manual code / `ip:port` entry).
+- **Room passwords** (FNV-hashed in the handshake; wrong password rejected).
+- **Typed identity** (`identity::Identity`): `Local` today, `Steam(SteamID64)`
+  ready for the Steam build; the ban list now keys on it (`local:` / `steam:`).
+- **Platform abstraction** (`netcode/platform.rs`): the seam Steam plugs into,
+  with the LAN backend shipped and the Steam backend specified.
+- Renderer: per-character palettes and per-stage themes; HUD shows character
+  names; a match clock for timed games.
+- Docs: `docs/STEAM.md` (Steamworks integration checklist), `docs/TEST_PLAN.md`
+  (automated + manual), and DESIGN sections on the content model, the 3D asset
+  pipeline plan and the Steam integration.
+- Tests: `tests/content.rs` (roster completeness, distinct archetypes, stage
+  validity, timed-match end). `tests/netcode_flow.rs` now drives the full lobby
+  (pick characters, agree stage, ready, start) before the rollback match, and
+  adds a wrong-password rejection test.
+
+### Changed
+- `MatchConfig` carries stage, per-slot character + palette, stocks and time.
+- `netcode::NetMatch` gained a lobby phase (Handshaking → Lobby → Syncing →
+  Running); `host`/`join` now take the rules and a password.
+- `Identity` moved to a top-level module so non-netcode builds compile.
+- Menu restructured: Versus/Training go through a setup screen; "Watch Demo"
+  removed from the menu (the demo remains for the GIF tool and tests).
+
+### Known limitations
+- Roster is 3 of the planned 8-10; art is 2D placeholder pending original 3D
+  models (pipeline documented).
+- Steam integration is specified and seam-ready but not implemented; online is
+  direct-UDP + LAN discovery today (internet still needs a forwarded port).
+
 ## [0.2.0] — Fase 2: online play + gamepads
 
 ### Added

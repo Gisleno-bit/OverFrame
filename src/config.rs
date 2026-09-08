@@ -15,6 +15,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::gamepad::PadBindings;
+use crate::identity::Identity;
+use crate::sim::roster::CharacterId;
 
 /// Everything the game remembers between runs.
 #[derive(Clone, Debug, PartialEq)]
@@ -31,6 +33,8 @@ pub struct Settings {
     pub name: String,
     /// Gamepad bindings for player slots 1 and 2.
     pub pad: [PadBindings; 2],
+    /// Character last picked in the character-select screen (u8 id).
+    pub last_character: u8,
 }
 
 impl Default for Settings {
@@ -41,6 +45,7 @@ impl Default for Settings {
             input_delay: 2,
             name: "PLAYER".to_owned(),
             pad: [PadBindings::default(), PadBindings::default()],
+            last_character: 0,
         }
     }
 }
@@ -87,6 +92,7 @@ impl Settings {
         s.push_str(&format!("host_port = {}\n", self.host_port));
         s.push_str(&format!("input_delay = {}\n", self.input_delay));
         s.push_str(&format!("name = {}\n", sanitize_name(&self.name)));
+        s.push_str(&format!("last_character = {}\n", self.last_character));
         for (i, b) in self.pad.iter().enumerate() {
             s.push_str(&format!("pad{}.jump = {}\n", i + 1, b.jump));
             s.push_str(&format!("pad{}.attack = {}\n", i + 1, b.attack));
@@ -128,6 +134,9 @@ impl Settings {
         if let Some(v) = kv.get("name") {
             s.name = sanitize_name(v);
         }
+        if let Some(v) = kv.get("last_character").and_then(|v| v.parse::<u8>().ok()) {
+            s.last_character = v;
+        }
         for i in 0..2 {
             let p = format!("pad{}.", i + 1);
             let get = |k: &str| {
@@ -157,6 +166,16 @@ impl Settings {
             }
         }
         s
+    }
+
+    /// This install's identity (local id today; a Steam id in the Steam build).
+    pub fn identity(&self) -> Identity {
+        Identity::Local(self.player_id)
+    }
+
+    /// The last character the player selected (defaults to Kestrel).
+    pub fn last_character(&self) -> CharacterId {
+        CharacterId::from_u8(self.last_character).unwrap_or(CharacterId::Kestrel)
     }
 
     /// Path of the settings file for this platform.
@@ -201,6 +220,15 @@ pub fn sanitize_name(n: &str) -> String {
     } else {
         cleaned
     }
+}
+
+/// Keep chat printable-ASCII and bounded for the bitmap font.
+pub fn sanitize_chat(t: &str) -> String {
+    t.chars()
+        .filter(|c| c.is_ascii_graphic() || *c == ' ')
+        .take(80)
+        .collect::<String>()
+        .to_ascii_uppercase()
 }
 
 /// Per-platform config directory (not created here).

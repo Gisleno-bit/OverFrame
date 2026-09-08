@@ -13,11 +13,15 @@ use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
 use overframe::config::Settings;
+use overframe::identity::Identity;
 use overframe::netcode::banlist::{BanEntry, BanList, Verification};
 use overframe::netcode::handshake::{Handshake, PROTOCOL_VERSION};
 use overframe::netcode::roomcode;
 use overframe::netcode::{Advance, NetMatch, Phase, Role};
+use overframe::sim::roster::CharacterId;
+use overframe::sim::stage::StageId;
 use overframe::sim::{buttons, PlayerInput, Vec2};
+use overframe::MatchConfig;
 
 // ---------------------------------------------------------------- room codes
 
@@ -62,22 +66,56 @@ fn room_code_decoding_is_forgiving() {
 
 #[test]
 fn handshake_messages_round_trip() {
+    use overframe::netcode::handshake::{Announce, LobbyMsg, RulesWire, StartWire};
     let msgs = vec![
         Handshake::Hello {
-            player_id: 0xDEAD_BEEF_CAFE_F00D,
+            identity: Identity::Local(0xDEAD_BEEF_CAFE_F00D),
             version: PROTOCOL_VERSION,
             name: "ESPARTACO".into(),
+            pass_hash: 12345,
         },
         Handshake::Welcome {
-            player_id: 42,
+            identity: Identity::Steam(76561198000000000),
             version: PROTOCOL_VERSION,
-            seed: 0xC0FFEE,
-            input_delay: 2,
             name: "HOST".into(),
+            seed: 0xC0FFEE,
         },
         Handshake::Reject {
             reason: "BANNED: no-shows".into(),
         },
+        Handshake::Lobby(LobbyMsg::Pick {
+            character: 2,
+            palette: 3,
+            ready: true,
+        }),
+        Handshake::Lobby(LobbyMsg::Rules(RulesWire {
+            stage: 1,
+            stocks: 3,
+            time_secs: 480,
+        })),
+        Handshake::Lobby(LobbyMsg::Chat {
+            seq: 7,
+            text: "GG WP".into(),
+        }),
+        Handshake::Lobby(LobbyMsg::Start(StartWire {
+            rules: RulesWire {
+                stage: 2,
+                stocks: 4,
+                time_secs: 0,
+            },
+            seed: 0x1234_5678,
+            chars: [1, 2],
+            palettes: [0, 3],
+        })),
+        Handshake::Lobby(LobbyMsg::Leave),
+        Handshake::Announce(Announce {
+            version: PROTOCOL_VERSION,
+            name: "ROOM".into(),
+            port: 7777,
+            players: 1,
+            max_players: 2,
+            locked: true,
+        }),
     ];
     for m in msgs {
         let bytes = m.encode();
@@ -97,8 +135,8 @@ fn ban_list_parses_expires_and_blocks() {
     let text = "\
 # OVERFRAME ban list
 issuer Madrid Weekly TO
-ban 00000000000000aa until 2000000000 reason repeated no-shows
-ban 00000000000000bb reason cheating
+ban local:00000000000000aa until 2000000000 reason repeated no-shows
+ban steam:76561198000000000 reason cheating
 ban zzzz not-an-id
 sig abc123
 ";
@@ -108,14 +146,16 @@ sig abc123
     assert_eq!(list.verification(), Verification::Unverified);
 
     // Timed ban active before expiry, gone after.
-    assert!(list.is_banned(0xaa, 1_999_999_999).is_some());
-    assert!(list.is_banned(0xaa, 2_000_000_000).is_none());
-    // Permanent ban.
+    let local_aa = Identity::Local(0xaa);
+    assert!(list.is_banned(local_aa, 1_999_999_999).is_some());
+    assert!(list.is_banned(local_aa, 2_000_000_000).is_none());
+    // Permanent ban keyed on a Steam id.
     assert_eq!(
-        list.is_banned(0xbb, u64::MAX).map(|e| e.reason.as_str()),
+        list.is_banned(Identity::Steam(76561198000000000), u64::MAX)
+            .map(|e| e.reason.as_str()),
         Some("cheating")
     );
-    assert!(list.is_banned(0xcc, 0).is_none());
+    assert!(list.is_banned(Identity::Local(0xcc), 0).is_none());
 
     // Text round trip.
     let again = BanList::parse(&list.to_text());
@@ -124,7 +164,7 @@ sig abc123
     let empty = BanList::default();
     assert_eq!(empty.verification(), Verification::Unsigned);
     let _ = BanEntry {
-        player_id: 1,
+        identity: Identity::Local(1),
         until: None,
         reason: String::new(),
     };
@@ -229,14 +269,47 @@ fn host_and_guest_connect_and_play_in_sync_over_loopback() {
     let mut sg = Settings::default();
     sg.name = "GUEST".into();
 
-    let mut host = NetMatch::host(port, &sh, BanList::default()).expect("bind host");
+    // Host with distinct rules so we also prove they travel to the guest.
+    let rules = MatchConfig {
+        stocks: 3,
+        time_limit_secs: 0,
+        stage: StageId::Tidegate,
+        ..MatchConfig::default()
+    };
+    let mut host = NetMatch::host(port, &sh, rules, "", BanList::default()).expect("bind host");
     assert_eq!(host.role(), Role::Host);
     assert!(!host.room_code.is_empty(), "host shows a room code");
     let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
-    let mut guest = NetMatch::join(addr, &sg).expect("bind guest");
+    let mut guest = NetMatch::join(addr, &sg, "").expect("bind guest");
     assert_eq!(guest.role(), Role::Guest);
 
-    // Handshake + GGRS synchronisation.
+    // Both reach the lobby.
+    let ok = pump_until(&mut host, &mut guest, Duration::from_secs(8), |h, g| {
+        h.in_lobby() && g.in_lobby()
+    });
+    assert!(
+        ok,
+        "both should reach the lobby (host={:?}, guest={:?})",
+        host.phase(),
+        guest.phase()
+    );
+    assert_eq!(host.peer_name(), "GUEST");
+    assert_eq!(guest.peer_name(), "HOST");
+    assert_eq!(host.peer_identity(), sg.identity());
+    assert_eq!(guest.peer_identity(), sh.identity());
+
+    // Pick different characters and ready up; the guest should learn the rules.
+    host.set_my_character(CharacterId::Boulder);
+    guest.set_my_character(CharacterId::Viper);
+    host.toggle_ready();
+    guest.toggle_ready();
+    let synced = pump_until(&mut host, &mut guest, Duration::from_secs(5), |h, g| {
+        h.can_start() && g.lobby_view().stage == StageId::Tidegate
+    });
+    assert!(synced, "host can start and guest learned the stage");
+
+    // Host starts; both synchronise and run.
+    host.start_match();
     let ok = pump_until(&mut host, &mut guest, Duration::from_secs(10), |h, g| {
         h.is_running() && g.is_running()
     });
@@ -246,11 +319,7 @@ fn host_and_guest_connect_and_play_in_sync_over_loopback() {
         host.phase(),
         guest.phase()
     );
-    assert_eq!(host.seed(), guest.seed(), "seed travels in Welcome");
-    assert_eq!(host.peer_name(), "GUEST");
-    assert_eq!(guest.peer_name(), "HOST");
-    assert_eq!(guest.peer_id(), sh.player_id);
-    assert_eq!(host.peer_id(), sg.player_id);
+    assert_eq!(host.seed(), guest.seed(), "seed agreed");
 
     let mut state_h = host.initial_state();
     let mut state_g = guest.initial_state();
@@ -329,6 +398,12 @@ fn host_and_guest_connect_and_play_in_sync_over_loopback() {
         state_g.checksum(),
         "host and guest simulations must be identical"
     );
+    // The lobby choices reached the simulation identically on both sides.
+    assert_eq!(state_h.config.stage, StageId::Tidegate);
+    assert_eq!(state_h.config.stocks, 3);
+    assert_eq!(state_h.fighters[0].character.id, CharacterId::Boulder);
+    assert_eq!(state_h.fighters[1].character.id, CharacterId::Viper);
+    assert_eq!(state_g.fighters[0].character.id, CharacterId::Boulder);
     let s = host.stats().expect("stats available");
     assert!(!s.desynced, "GGRS must not have reported a desync");
     assert!(matches!(host.phase(), Phase::Running));
@@ -341,13 +416,13 @@ fn host_rejects_banned_guest() {
     let sg = Settings::default();
     let mut bans = BanList::default();
     bans.entries.push(BanEntry {
-        player_id: sg.player_id,
+        identity: sg.identity(),
         until: None,
         reason: "test".into(),
     });
-    let mut host = NetMatch::host(port, &sh, bans).unwrap();
+    let mut host = NetMatch::host(port, &sh, MatchConfig::default(), "", bans).unwrap();
     let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
-    let mut guest = NetMatch::join(addr, &sg).unwrap();
+    let mut guest = NetMatch::join(addr, &sg, "").unwrap();
     let ok = pump_until(&mut host, &mut guest, Duration::from_secs(5), |_, g| {
         matches!(g.phase(), Phase::Ended(_))
     });
@@ -357,5 +432,31 @@ fn host_rejects_banned_guest() {
         other => panic!("unexpected phase {other:?}"),
     }
     // The host keeps waiting for someone else.
+    assert!(matches!(host.phase(), Phase::Handshaking));
+}
+
+#[test]
+fn wrong_password_is_rejected() {
+    let port = free_port();
+    let sh = Settings::default();
+    let sg = Settings::default();
+    let mut host = NetMatch::host(
+        port,
+        &sh,
+        MatchConfig::default(),
+        "letmein",
+        BanList::default(),
+    )
+    .unwrap();
+    let addr: SocketAddr = format!("127.0.0.1:{port}").parse().unwrap();
+    let mut guest = NetMatch::join(addr, &sg, "nope").unwrap();
+    let ok = pump_until(&mut host, &mut guest, Duration::from_secs(5), |_, g| {
+        matches!(g.phase(), Phase::Ended(_))
+    });
+    assert!(ok, "guest with the wrong password should be rejected");
+    match guest.phase() {
+        Phase::Ended(reason) => assert!(reason.contains("PASSWORD"), "reason = {reason}"),
+        other => panic!("unexpected phase {other:?}"),
+    }
     assert!(matches!(host.phase(), Phase::Handshaking));
 }

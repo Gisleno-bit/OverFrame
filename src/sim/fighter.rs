@@ -62,6 +62,8 @@ pub enum State {
 pub struct Fighter {
     pub character: &'static Character,
     pub port: usize,
+    /// Colour palette index (0..PALETTES); visual only.
+    pub palette: u8,
 
     pub pos: Vec2,
     pub vel: Vec2,
@@ -121,6 +123,7 @@ impl Fighter {
         Fighter {
             character,
             port,
+            palette: 0,
             pos: spawn,
             vel: Vec2::ZERO,
             facing: if spawn.x <= 0.0 { 1.0 } else { -1.0 },
@@ -192,7 +195,7 @@ impl Fighter {
         if self.already_hit {
             return None;
         }
-        let md = attacks::data(id);
+        let md = attacks::data(self.character.id, id);
         if !md.is_active(self.state_frame) {
             return None;
         }
@@ -285,7 +288,7 @@ impl Fighter {
             }
             State::JumpSquat => self.tick_jumpsquat(input),
             State::Attack { id, .. } => {
-                let md = attacks::data(id);
+                let md = attacks::data(self.character.id, id);
                 if self.state_frame >= md.total() {
                     self.set_state(if self.grounded {
                         State::Stand
@@ -801,7 +804,7 @@ impl Fighter {
 
         match self.state {
             State::Attack { id, aerial: true } => {
-                let md = attacks::data(id);
+                let md = attacks::data(self.character.id, id);
                 let mut lag = md.landing_lag;
                 if self.lcancel_armed {
                     lag = lag.div_ceil(2);
@@ -1003,7 +1006,7 @@ impl Fighter {
     }
 
     fn tick_throw(&mut self, id: MoveId) {
-        let md = attacks::data(id);
+        let md = attacks::data(self.character.id, id);
         if self.state_frame >= md.total() {
             self.grabbing = None;
             self.set_state(State::Stand);

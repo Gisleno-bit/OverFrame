@@ -23,6 +23,7 @@ pub fn match_state() -> GameState {
         MatchConfig {
             stocks: 4,
             seed: 0xC0FFEE,
+            ..MatchConfig::default()
         },
     );
     gs.fighters[0].pos = Vec2::new(-34.0, 0.0);

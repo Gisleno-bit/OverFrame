@@ -122,8 +122,45 @@ pub const PORT_COLORS: [Color; 4] = [
     Color::rgb(240, 205, 80),
 ];
 
-const BG_TOP: Color = Color::rgb(18, 20, 34);
-const BG_BOT: Color = Color::rgb(30, 26, 52);
+#[inline]
+fn t2c(t: (u8, u8, u8)) -> Color {
+    Color::rgb(t.0, t.1, t.2)
+}
+
+/// Per-character palette tints. `character.index()` picks the row, the palette
+/// index picks the column. Original colours; the first column is each fighter's
+/// signature look.
+pub const CHAR_PALETTES: [[Color; 4]; 3] = [
+    // Kestrel — warm.
+    [
+        Color::rgb(255, 92, 74),
+        Color::rgb(120, 200, 120),
+        Color::rgb(120, 150, 255),
+        Color::rgb(240, 210, 90),
+    ],
+    // Boulder — earthy/heavy.
+    [
+        Color::rgb(150, 130, 100),
+        Color::rgb(120, 120, 140),
+        Color::rgb(90, 140, 130),
+        Color::rgb(190, 110, 80),
+    ],
+    // Viper — cool/acid.
+    [
+        Color::rgb(90, 220, 200),
+        Color::rgb(200, 90, 220),
+        Color::rgb(230, 230, 120),
+        Color::rgb(90, 160, 255),
+    ],
+];
+
+/// The accent colour for a fighter (character palette, falling back to port).
+pub fn fighter_color(character_index: usize, palette: u8) -> Color {
+    CHAR_PALETTES
+        .get(character_index)
+        .map(|row| row[(palette as usize) % row.len()])
+        .unwrap_or(PORT_COLORS[0])
+}
 
 /// Draw a whole frame.
 pub fn draw_scene<P: Painter>(p: &mut P, gs: &GameState, opts: SceneOpts) {
@@ -171,11 +208,13 @@ pub fn draw_scene<P: Painter>(p: &mut P, gs: &GameState, opts: SceneOpts) {
 }
 
 fn draw_background<P: Painter>(p: &mut P, w: f32, h: f32, gs: &GameState) {
-    // Vertical gradient in bands.
+    // Vertical gradient in bands, using the stage theme.
+    let top = t2c(gs.stage.theme.bg_top);
+    let bot = t2c(gs.stage.theme.bg_bottom);
     let bands = 48;
     for i in 0..bands {
         let t = i as f32 / bands as f32;
-        let c = BG_TOP.lerp(BG_BOT, t);
+        let c = top.lerp(bot, t);
         p.fill_rect(0.0, h * t, w, h / bands as f32 + 1.0, c);
     }
     // Hit-flash brighten.
@@ -207,8 +246,8 @@ fn draw_stage<P: Painter>(p: &mut P, v: &View, gs: &GameState) {
         if plat.solid {
             // Main stage: a solid slab with a bright lip.
             let depth = v.s(60.0);
-            p.fill_rect(x0, y, width, depth, Color::rgb(44, 48, 74));
-            p.fill_rect(x0, y, width, v.s(4.0).max(3.0), Color::rgb(120, 200, 230));
+            p.fill_rect(x0, y, width, depth, t2c(stage.theme.slab));
+            p.fill_rect(x0, y, width, v.s(4.0).max(3.0), t2c(stage.theme.lip));
             // side bevels
             p.fill_rect(x0, y, v.s(3.0).max(2.0), depth, Color::rgba(0, 0, 0, 60));
             p.fill_rect(
@@ -221,8 +260,15 @@ fn draw_stage<P: Painter>(p: &mut P, v: &View, gs: &GameState) {
         } else {
             // Soft platform: a thin translucent bar with a glowing top.
             let thick = v.s(6.0).max(4.0);
-            p.fill_rect(x0, y, width, thick, Color::rgba(90, 110, 170, 180));
-            p.fill_rect(x0, y, width, 2.0, Color::rgb(150, 210, 255));
+            let soft = stage.theme.soft;
+            p.fill_rect(
+                x0,
+                y,
+                width,
+                thick,
+                Color::rgba(soft.0, soft.1, soft.2, 180),
+            );
+            p.fill_rect(x0, y, width, 2.0, t2c(stage.theme.soft_glow));
         }
         let _ = i;
     }
@@ -243,7 +289,7 @@ fn draw_fighter<P: Painter>(p: &mut P, v: &View, f: &Fighter, opts: SceneOpts) {
         // still draw, but faded
     }
 
-    let base = PORT_COLORS[f.port % 4];
+    let base = fighter_color(f.character.id.index(), f.palette);
     // State-driven tint.
     let mut body = base;
     if f.anim_flash > 0 || matches!(f.state, State::Hitstun { .. }) {
@@ -420,25 +466,19 @@ fn draw_hud<P: Painter>(p: &mut P, w: f32, h: f32, gs: &GameState, local: Option
 
     for (i, f) in gs.fighters.iter().enumerate() {
         let x = gap + (panel_w + gap) * i as f32;
-        let accent = PORT_COLORS[f.port % 4];
+        let accent = fighter_color(f.character.id.index(), f.palette);
 
         // Panel background.
         p.fill_rect(x, base_y, panel_w, 56.0, Color::rgba(10, 12, 22, 170));
         p.fill_rect(x, base_y, panel_w, 3.0, accent);
 
-        // Label + stocks.
-        font::draw_text(
-            p,
-            &if local == Some(i) {
-                format!("P{} YOU", i + 1)
-            } else {
-                format!("P{}", i + 1)
-            },
-            x + 8.0,
-            base_y + 8.0,
-            2.0,
-            accent,
-        );
+        // Label (character name; "YOU" online) + stocks.
+        let label = if local == Some(i) {
+            format!("P{} {} YOU", i + 1, f.character.name)
+        } else {
+            format!("P{} {}", i + 1, f.character.name)
+        };
+        font::draw_text(p, &label.to_uppercase(), x + 8.0, base_y + 8.0, 1.5, accent);
         // Stock icons, capped so large training-mode stock counts stay tidy.
         let shown = f.stocks.clamp(0, 5);
         for s in 0..shown {

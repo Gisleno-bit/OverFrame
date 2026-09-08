@@ -4,10 +4,12 @@
 
 ![OVERFRAME demo](docs/media/overframe-demo.gif)
 
+![Roster](docs/media/roster.png)
+
 *The clip above is rendered by the actual game engine (not a pre-baked animation): dash-dance → wavedash → walk-in → tilt → forward smash → KO.*
 
 [![CI](https://github.com/Gisleno-bit/overframe/actions/workflows/ci.yml/badge.svg)](https://github.com/Gisleno-bit/overframe/actions/workflows/ci.yml)
-&nbsp;License: MIT &nbsp;•&nbsp; Language: Rust &nbsp;•&nbsp; Status: **Fase 2 — online play + gamepads**
+&nbsp;License: MIT &nbsp;•&nbsp; Language: Rust &nbsp;•&nbsp; Status: **Fase 3 (in progress) — roster, stages, online lobbies**
 
 ---
 
@@ -20,7 +22,20 @@ OVERFRAME is a platform fighter that reproduces the *feel* of classic competitiv
 - **Free & open source (MIT).** No price, no lock-in. Fork it, host it, mod it.
 - **Rollback-ready.** The simulation is deterministic and save/load-able, and it's already wired to [GGRS](https://github.com/gschup/ggrs). A GGRS `SyncTest` runs in CI and proves the engine is rollback-safe.
 
-The prototype ships one fighter — **Kestrel**, an agile fast-faller — on one stage, **The Lattice**.
+The build ships a **3-fighter roster** across the classic archetypes and **3
+stages**:
+
+| Fighter | Archetype | Signature trait |
+|---|---|---|
+| **Kestrel** | Fast-faller | *Momentum* — fastest fall speed, longest wavedash |
+| **Boulder** | Heavyweight | *Bulwark* — super armour while charging a smash |
+| **Viper** | Lightweight | *Skyline* — two air jumps, best air control |
+
+Stages: **The Lattice** (floating-platform standard), **Meridian** (flat
+neutral), **Tidegate** (asymmetric). Characters, stages, names, colours and
+frame data are all original; the fighters are 2D placeholder art (an original,
+labelled art style, not lookalikes) with a documented path to original 3D models
+(`docs/DESIGN.md`).
 
 ## Is this legal? (short version)
 
@@ -91,7 +106,7 @@ Gamepads are read with [`gilrs`](https://gitlab.com/gilrs-project/gilrs): XInput
 - **L-cancel** — press Shield in the last few frames before landing an aerial to halve its landing lag.
 - **Ledge, roll, spot-dodge, air-dodge, tech** — all present. See the in-game **Controls** screen and [`docs/DESIGN.md`](docs/DESIGN.md).
 
-Menu: **Versus (2P local)**, **Online** (host / join), **Training** (with hit/hurtbox display — `Tab` to toggle, `Backspace` to reset), **Watch Demo**, **Options** (input delay, port, gamepad rebinding), **Controls**.
+Menu: **Versus** (2P local, with character/stage select and match rules), **Online** (host / join with a LAN room browser and lobby), **Training** (character + stage, hit/hurtbox display — `Tab` toggle, `Backspace` reset), **Options** (input delay, port, gamepad rebinding), **Controls**.
 
 ## Play online
 
@@ -99,9 +114,14 @@ Menu: **Versus (2P local)**, **Online** (host / join), **Training** (with hit/hu
 
 Online play is **peer-to-peer rollback** (GGRS) over a single UDP port — no account, no server, no matchmaking service.
 
-1. **Host** → *Online → Host game*. The screen shows a **room code** (e.g. `R0004-0GYF8`) that encodes your LAN address and port.
-2. **Join** → *Online → Join game*, type the code (or a raw `ip:port`) and press Enter.
-3. Both sides handshake, GGRS synchronises, and the match starts. The top-left HUD shows **ping**, **rollback frames** on the last tick, how many frames you are **ahead** of the peer, and the **input delay**; the host also sees the code so it can be re-shared.
+1. **Host** → *Online → Host game*. You land in a **lobby** with a **room code**
+   (e.g. `R0004-0GYF8`). The host sets the stage, stocks and time.
+2. **Join** → *Online → Join game*. **LAN rooms appear automatically** in the
+   browser; pick one, or type a room code / `ip:port`. Optional room password.
+3. In the lobby both players pick **character + palette**, **chat**, and press
+   **Ready**. When both are ready the host starts; GGRS synchronises and the
+   match begins. The top-left HUD shows **ping**, **rollback frames**, how many
+   frames you are **ahead**, and the **input delay**.
 
 | Situation | What to do |
 |---|---|
@@ -158,14 +178,19 @@ cargo test
 
 `tests/mechanics.rs` asserts the *relationships* that make it feel right — a full hop clears a short hop, fast-falling lands sooner, dashing outruns walking, an angled air-dodge wavedashes, L-cancel cuts landing lag, knockback grows with percent, and the sim is deterministic. `tests/determinism.rs` is the GGRS `SyncTest` rollback check.
 
-`tests/netcode_flow.rs` covers the online layer end to end: room-code and handshake round-trips, the ban-list format, and — the important one — **a real host and guest connecting over loopback UDP, synchronising through GGRS, playing 300 frames with deliberately uneven pacing so rollbacks actually happen, and finishing on byte-identical states**. It also checks that a banned id is refused. `tests/gamepad_map.rs` covers the gamepad mapping, deadzones, rebinding and persistence without hardware.
+`tests/content.rs` checks every character has a complete, sane moveset and a genuinely distinct archetype, and that stages are well-formed. `tests/netcode_flow.rs` covers the online layer end to end: room-code and handshake round-trips, the ban-list format, and — the important one — **a real host and guest connecting over loopback UDP, synchronising through GGRS, playing 300 frames with deliberately uneven pacing so rollbacks actually happen, and finishing on byte-identical states**. It also checks that a banned id is refused. `tests/gamepad_map.rs` covers the gamepad mapping, deadzones, rebinding and persistence without hardware.
 
 ## Roadmap
 
 - **Fase 1 — prototype (this repo).** One fighter, one stage, full movement tech, knockback/percent/stocks, shields/rolls/ledges, local 2-player, training mode with hitbox display, deterministic rollback-ready core. ✅
 - **Fase 2 — online (this release).** GGRS P2P rollback netcode over direct UDP with room codes, host/join UI, live ping/rollback HUD, gamepad support with in-game rebinding, persistent player identity and the ban-list data format. ✅ Still open from Fase 2: fixed-point determinism hardening (see below).
-- **Fase 3 — content.** Expand the roster and stages, all-original art and audio, a real animation system.
-- **Fase 4 — launch.** Ship as free software; community tournament support.
+- **Fase 3 — content + Steam (in progress).** 3 fighters across archetypes, 3
+  stages, character/stage select, match rules (stocks/time), LAN lobbies with a
+  room browser + chat, Steam-ID-ready ban list. ✅ Remaining: more fighters/stages
+  toward 8-10, original 3D models + animation, and the Steam integration
+  (matchmaking, invites, SDR transport) planned in `docs/STEAM.md`.
+- **Fase 4 — launch.** Ship free on Steam (Early Access); community tournament
+  support.
 
 ## Contributing
 

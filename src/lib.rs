@@ -25,6 +25,8 @@ pub mod viz;
 pub mod config;
 /// Gamepad → simulation input mapping, independent of any input library.
 pub mod gamepad;
+/// Stable player identity (local id, or a Steam id in the Steam build).
+pub mod identity;
 
 #[cfg(feature = "gui")]
 pub mod render;

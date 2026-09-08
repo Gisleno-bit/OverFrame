@@ -12,17 +12,20 @@
 //! ```text
 //! # OVERFRAME ban list
 //! issuer Madrid Weekly TO
-//! ban 3fa9c1d2e4b5a678 until 1767225600 reason repeated no-shows
-//! ban 00ddeeff00112233 reason cheating
+//! ban local:3fa9c1d2e4b5a678 until 1767225600 reason repeated no-shows
+//! ban steam:76561198000000000 reason cheating
+//! ban 00ddeeff00112233 reason legacy bare hex = local
 //! sig <base64 signature over all lines above, Fase 3>
 //! ```
 
 use std::path::PathBuf;
 
+use crate::identity::Identity;
+
 /// One banned identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BanEntry {
-    pub player_id: u64,
+    pub identity: Identity,
     /// Unix seconds after which the ban no longer applies (`None` = permanent).
     pub until: Option<u64>,
     pub reason: String,
@@ -63,7 +66,7 @@ impl BanList {
                     list.signature = words.next().map(|s| s.to_owned());
                 }
                 Some("ban") => {
-                    let id = match words.next().and_then(|h| u64::from_str_radix(h, 16).ok()) {
+                    let identity = match words.next().and_then(Identity::parse) {
                         Some(id) => id,
                         None => continue,
                     };
@@ -82,7 +85,7 @@ impl BanList {
                         }
                     }
                     list.entries.push(BanEntry {
-                        player_id: id,
+                        identity,
                         until,
                         reason: reason.join(" "),
                     });
@@ -100,7 +103,7 @@ impl BanList {
             s.push_str(&format!("issuer {}\n", self.issuer));
         }
         for e in &self.entries {
-            s.push_str(&format!("ban {:016x}", e.player_id));
+            s.push_str(&format!("ban {}", e.identity));
             if let Some(u) = e.until {
                 s.push_str(&format!(" until {u}"));
             }
@@ -115,11 +118,28 @@ impl BanList {
         s
     }
 
-    /// Is `player_id` banned at time `now` (unix seconds)?
-    pub fn is_banned(&self, player_id: u64, now: u64) -> Option<&BanEntry> {
+    /// Is `identity` banned at time `now` (unix seconds)?
+    pub fn is_banned(&self, identity: Identity, now: u64) -> Option<&BanEntry> {
         self.entries
             .iter()
-            .find(|e| e.player_id == player_id && e.until.map_or(true, |u| now < u))
+            .find(|e| e.identity == identity && e.until.map_or(true, |u| now < u))
+    }
+
+    /// Add a permanent ban (no-op if already listed) and persist to the local
+    /// file. Used by the host's in-lobby "kick & ban".
+    pub fn add_and_save(&mut self, identity: Identity, reason: &str) -> std::io::Result<()> {
+        if !self.entries.iter().any(|e| e.identity == identity) {
+            self.entries.push(BanEntry {
+                identity,
+                until: None,
+                reason: reason.to_owned(),
+            });
+        }
+        let path = Self::path();
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(path, self.to_text())
     }
 
     /// Signature status. Verification itself lands in Fase 3.

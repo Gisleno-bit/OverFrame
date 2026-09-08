@@ -15,6 +15,8 @@
 
 pub mod banlist;
 pub mod handshake;
+pub mod lobby;
+pub mod platform;
 pub mod roomcode;
 pub mod session;
 pub mod socket;
@@ -26,7 +28,9 @@ use ggrs::{Config, GgrsRequest};
 use crate::sim::input::NetInput;
 use crate::sim::{GameState, MatchConfig, PlayerInput};
 
-pub use session::{Advance, NetMatch, NetStats, Phase, Role};
+pub use crate::identity::Identity;
+pub use lobby::{Browser, Room};
+pub use session::{Advance, LobbyView, NetMatch, NetStats, Phase, Pick, Role};
 
 // The wire input must be Plain-Old-Data for GGRS. Assert it here so a mistake in
 // the layout is a compile error rather than a silent desync.
