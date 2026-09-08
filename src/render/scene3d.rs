@@ -1152,9 +1152,7 @@ fn upload_static(
     let mut start = 0;
     while start < data.idx.len() {
         let end = (start + MAX_BATCH_INDICES).min(data.idx.len());
-        for r in remap.iter_mut() {
-            *r = u32::MAX;
-        }
+        remap.fill(u32::MAX);
         let mut vertices: Vec<Vertex> = Vec::new();
         let mut indices: Vec<u16> = Vec::with_capacity(end - start);
         for &i in &data.idx[start..end] {

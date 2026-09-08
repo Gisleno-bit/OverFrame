@@ -1,0 +1,6 @@
+# Pinned so `cargo clippy -- -D warnings` means the same thing on every machine
+# and in CI (new stable releases add lints that would otherwise break the build
+# without any code change). Bump deliberately, fixing new lints in the same PR.
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy"]

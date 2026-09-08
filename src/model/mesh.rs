@@ -53,9 +53,7 @@ impl MeshData {
 
     /// Assign every vertex to `slot`.
     pub fn slot(mut self, slot: u8) -> Self {
-        for s in &mut self.slot {
-            *s = slot;
-        }
+        self.slot.fill(slot);
         self
     }
 

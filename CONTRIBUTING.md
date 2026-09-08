@@ -32,9 +32,12 @@ cargo test --no-default-features --features netcode   # fast tests + rollback ch
 ## Before you open a PR
 
 - `cargo fmt --all`
-- `cargo clippy --no-default-features --features netcode -- -D warnings`
-- `cargo test --no-default-features --features netcode` (and `cargo test` if you
-  touched the GUI)
+- `cargo clippy --no-default-features --features "netcode gltf" --all-targets -- -D warnings`
+  (the toolchain is pinned in `rust-toolchain.toml` so this means the same
+  thing everywhere; rustup installs it automatically. Bumping the pin is its
+  own PR that also fixes whatever new lints appear.)
+- `cargo test --no-default-features --features "netcode gltf"` (and
+  `cargo test` if you touched the GUI)
 - Keep the **simulation pure**: no rendering, window, audio, threading or
   wall-clock in `src/sim`. If it can't be saved/loaded and replayed identically,
   it doesn't belong in the sim. Determinism is not optional — rollback depends on
