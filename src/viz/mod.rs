@@ -110,6 +110,8 @@ pub struct SceneOpts {
     pub training: bool,
     /// Draw a subtle "OVERFRAME" watermark.
     pub watermark: bool,
+    /// Online: which fighter is controlled locally (its HUD panel says "YOU").
+    pub local_player: Option<usize>,
 }
 
 /// Player accent colours (P1..P4).
@@ -138,7 +140,7 @@ pub fn draw_scene<P: Painter>(p: &mut P, gs: &GameState, opts: SceneOpts) {
 
     draw_projectiles(p, &view, gs);
     draw_fx(p, &view, gs);
-    draw_hud(p, w, h, gs);
+    draw_hud(p, w, h, gs, opts.local_player);
 
     if opts.training {
         font::draw_text(
@@ -410,7 +412,7 @@ fn draw_fx<P: Painter>(p: &mut P, v: &View, gs: &GameState) {
     }
 }
 
-fn draw_hud<P: Painter>(p: &mut P, w: f32, h: f32, gs: &GameState) {
+fn draw_hud<P: Painter>(p: &mut P, w: f32, h: f32, gs: &GameState, local: Option<usize>) {
     let n = gs.fighters.len().max(1);
     let panel_w = 150.0f32.min(w / n as f32 - 20.0);
     let gap = (w - panel_w * n as f32) / (n as f32 + 1.0);
@@ -427,7 +429,11 @@ fn draw_hud<P: Painter>(p: &mut P, w: f32, h: f32, gs: &GameState) {
         // Label + stocks.
         font::draw_text(
             p,
-            &format!("P{}", i + 1),
+            &if local == Some(i) {
+                format!("P{} YOU", i + 1)
+            } else {
+                format!("P{}", i + 1)
+            },
             x + 8.0,
             base_y + 8.0,
             2.0,
