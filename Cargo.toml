@@ -34,7 +34,7 @@ headless = ["dep:image"]
 gltf = ["dep:gltf"]
 
 [dependencies]
-macroquad = { version = "0.4", optional = true }
+macroquad = { version = "0.4", features = ["audio"], optional = true }
 ggrs = { version = "0.10", optional = true }
 bytemuck = { version = "1", features = ["derive"], optional = true }
 image = { version = "0.25", default-features = false, features = ["gif", "png"], optional = true }
@@ -48,7 +48,10 @@ gltf = { version = "1.4", default-features = false, features = ["utils", "names"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
-panic = "abort"
+# Keep unwinding: the audio mixer runs on its own thread and, on a machine
+# with no output device, that thread panics — the game must carry on silent
+# rather than abort.
+panic = "unwind"
 
 [profile.dev]
 opt-level = 1

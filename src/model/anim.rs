@@ -610,9 +610,28 @@ pub fn fighter_pose(rig: &Rig, f: &Fighter, st: &AnimStyle, frame: u64) -> Pose 
             let mut p = tumble_limbs(rig);
             both_legs(&mut p, rig, 50.0, -80.0);
             both_arms(&mut p, rig, 60.0, 90.0, 30.0);
-            let k = (sf as f32 / 28.0).min(1.0);
+            let dur = crate::sim::constants::AIRDODGE_INTANGIBLE.1 as f32;
+            let k = (sf as f32 / dur).min(1.0);
             spin_body(&mut p, rig, -f.facing * 360.0 * ease(k), centre);
             p
+        }
+        State::Helpless => {
+            // Limp fall: arms up, legs dangling, slight backward lean.
+            let mut p = rig.rest_pose();
+            leg(&mut p, rig, "r", 20.0, -30.0, Some(-20.0));
+            leg(&mut p, rig, "l", -10.0, -20.0, Some(-20.0));
+            arm(&mut p, rig, "r", -140.0, 20.0, 40.0);
+            arm(&mut p, rig, "l", -150.0, 25.0, 40.0);
+            lean(&mut p, rig, -14.0);
+            p.rot(rig, "head", 0.0, 0.0, 12.0);
+            p
+        }
+        State::ShieldDrop => {
+            let s = shield(rig, st);
+            s.blend(
+                &base_ground,
+                ease(sf as f32 / crate::sim::constants::SHIELD_DROP as f32),
+            )
         }
         State::Grab => {
             let g = grab_reach(rig);

@@ -131,6 +131,10 @@ pub struct InputHub {
     /// Last-known gamepad names for the options screen.
     pub names: Vec<String>,
     pub init_error: Option<String>,
+    /// Force-feedback effect per pad slot (built lazily; None if unsupported).
+    rumble_fx: [Option<gilrs::ff::Effect>; 2],
+    rumble_tried: [bool; 2],
+    pub rumble_enabled: bool,
 }
 
 impl InputHub {
@@ -147,9 +151,66 @@ impl InputHub {
             any_pressed: None,
             names: Vec::new(),
             init_error,
+            rumble_fx: [None, None],
+            rumble_tried: [false, false],
+            rumble_enabled: true,
         };
         hub.refresh_order();
         hub
+    }
+
+    /// Short controller vibration on the pad driving `slot` (0..2);
+    /// `strength` 0..1. Silently does nothing without a pad or force feedback.
+    pub fn rumble(&mut self, slot: usize, strength: f32) {
+        if !self.rumble_enabled || slot > 1 {
+            return;
+        }
+        let Some(id) = self.order.get(slot).copied() else {
+            return;
+        };
+        if self.rumble_fx[slot].is_none() && !self.rumble_tried[slot] {
+            self.rumble_tried[slot] = true;
+            if let Some(g) = self.gilrs.as_mut() {
+                if g.gamepad(id).is_ff_supported() {
+                    use gilrs::ff::{
+                        BaseEffect, BaseEffectType, EffectBuilder, Repeat, Replay, Ticks,
+                    };
+                    let built = EffectBuilder::new()
+                        .add_effect(BaseEffect {
+                            kind: BaseEffectType::Strong { magnitude: 0xE000 },
+                            scheduling: Replay {
+                                after: Ticks::from_ms(0),
+                                play_for: Ticks::from_ms(110),
+                                with_delay: Ticks::from_ms(0),
+                            },
+                            envelope: Default::default(),
+                        })
+                        .add_effect(BaseEffect {
+                            kind: BaseEffectType::Weak { magnitude: 0x9000 },
+                            scheduling: Replay {
+                                after: Ticks::from_ms(0),
+                                play_for: Ticks::from_ms(70),
+                                with_delay: Ticks::from_ms(0),
+                            },
+                            envelope: Default::default(),
+                        })
+                        .repeat(Repeat::For(Ticks::from_ms(110)))
+                        .gamepads(&[id])
+                        .finish(g);
+                    self.rumble_fx[slot] = built.ok();
+                }
+            }
+        }
+        if let Some(fx) = &self.rumble_fx[slot] {
+            let _ = fx.set_gain(strength.clamp(0.1, 1.0));
+            let _ = fx.play();
+        }
+    }
+
+    /// Forget built rumble effects (pads changed).
+    fn reset_rumble(&mut self) {
+        self.rumble_fx = [None, None];
+        self.rumble_tried = [false, false];
     }
 
     fn refresh_order(&mut self) {
@@ -194,6 +255,9 @@ impl InputHub {
         }
         if topology_changed || self.order.is_empty() {
             self.refresh_order();
+            if topology_changed {
+                self.reset_rumble();
+            }
         }
         for (id, pb) in hot {
             self.any_pressed = Some(pb);

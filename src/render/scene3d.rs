@@ -431,7 +431,15 @@ impl Scene3D {
         let model = &self.models[f.character.id.index()];
         let mut pose = anim::fighter_pose(&model.rig, f, &model.style, frame);
         (model.secondary)(&model.rig, &mut pose, f, frame);
-        let world = model.rig.world(&pose, &Self::fighter_root(f, eased));
+        let mut root = Self::fighter_root(f, eased);
+        // Hitlag shake: the victim vibrates in place while frozen (the
+        // classic freeze-frame "rattle"); harder hits rattle wider.
+        if f.hitlag > 0 && matches!(f.state, State::Hitstun { .. }) {
+            let amp = 0.9 + (f.hitlag as f32).min(12.0) * 0.12;
+            let s = if frame % 2 == 0 { 1.0 } else { -1.0 };
+            root.t = root.t + v3(s * amp, (frame % 4 == 0) as i32 as f32 * amp * 0.4, 0.0);
+        }
+        let world = model.rig.world(&pose, &root);
         let tint = Self::tint_for(f);
         self.verts.clear();
         self.idx.clear();
@@ -688,8 +696,20 @@ impl Scene3D {
             let p = v3(fx.pos.x, fx.pos.y, 6.0);
             match fx.kind {
                 FxKind::Hit => {
-                    let r = (6.0 + fx.magnitude.min(30.0) * 0.4) * (0.6 + t * 0.9);
+                    // Impact frame: a hard white flash for the first two
+                    // frames, then a warm spark + ring that fades, plus
+                    // impact lines streaking along the launch direction.
+                    let strong = fx.magnitude.min(40.0);
+                    let r = (5.0 + strong * 0.45) * (0.7 + t * 0.8);
                     let a = (1.0 - t).clamp(0.0, 1.0);
+                    if fx.life + 2 >= fx.max_life {
+                        self.billboard(
+                            p,
+                            r * 3.0,
+                            Color::new(1.0, 1.0, 1.0, 0.95),
+                            &self.tex_spark,
+                        );
+                    }
                     self.billboard(
                         p,
                         r * 2.2,
@@ -703,6 +723,24 @@ impl Scene3D {
                         Color::new(1.0, 0.9, 0.7, 0.55 * a),
                         &self.tex_ring,
                     );
+                    // Impact lines: a fan around the launch direction, growing
+                    // and thinning as they fade.
+                    let dir = v3(fx.dir.x, fx.dir.y, 0.0);
+                    let n = if strong > 18.0 { 7 } else { 5 };
+                    for k in 0..n {
+                        let spread = (k as f32 / (n - 1) as f32 - 0.5) * 1.6;
+                        let (sn, cs) = spread.sin_cos();
+                        let d = v3(dir.x * cs - dir.y * sn, dir.x * sn + dir.y * cs, 0.0);
+                        let len = (r * (1.6 + t * 2.6)) * (0.7 + 0.3 * (k % 2) as f32);
+                        let start = p + d * (r * 0.8 + t * r * 1.5);
+                        let width = (r * 0.22 * (1.0 - t)).max(0.4);
+                        self.streak(
+                            start,
+                            start + d * len,
+                            width,
+                            Color::new(1.0, 0.95, 0.8, 0.8 * a),
+                        );
+                    }
                 }
                 FxKind::Shield => {
                     let r = 14.0 * (0.5 + t);
@@ -711,6 +749,30 @@ impl Scene3D {
                         r * 2.0,
                         Color::new(0.5, 0.8, 1.0, 0.7 * (1.0 - t)),
                         &self.tex_ring,
+                    );
+                    // Short streaks skidding back from the shield.
+                    let d = v3(fx.dir.x, 0.2, 0.0);
+                    self.streak(
+                        p,
+                        p + d * (10.0 + t * 14.0),
+                        1.2 * (1.0 - t),
+                        Color::new(0.7, 0.9, 1.0, 0.6 * (1.0 - t)),
+                    );
+                }
+                FxKind::Powershield => {
+                    let r = 18.0 * (0.6 + t * 1.2);
+                    let a = 1.0 - t;
+                    self.billboard(
+                        p,
+                        r * 2.4,
+                        Color::new(1.0, 1.0, 1.0, 0.9 * a),
+                        &self.tex_ring,
+                    );
+                    self.billboard(
+                        p,
+                        r * 1.4,
+                        Color::new(0.8, 0.95, 1.0, 0.7 * a),
+                        &self.tex_spark,
                     );
                 }
                 FxKind::Blast => {
@@ -730,16 +792,50 @@ impl Scene3D {
                     );
                 }
                 FxKind::Dust => {
-                    let r = 6.0 * (0.6 + t * 1.2);
-                    self.billboard(
-                        v3(fx.pos.x, fx.pos.y + r * 0.4, 8.0),
-                        r * 2.0,
-                        Color::new(0.85, 0.85, 0.9, 0.45 * (1.0 - t)),
-                        &self.tex_soft,
-                    );
+                    // Puffs drift along the effect direction (up for landings,
+                    // backwards for dashes and wavedashes).
+                    let r = (4.0 + fx.magnitude.min(20.0) * 0.25) * (0.6 + t * 1.3);
+                    let drift = v3(fx.dir.x, fx.dir.y, 0.0) * (t * 10.0);
+                    for k in 0..3 {
+                        let off = v3(
+                            ((k as f32) - 1.0) * r * 0.9,
+                            r * 0.4 + k as f32 * 0.6,
+                            8.0 + k as f32,
+                        );
+                        self.billboard(
+                            v3(fx.pos.x, fx.pos.y, 0.0) + off + drift,
+                            r * 1.8,
+                            Color::new(0.85, 0.85, 0.9, 0.35 * (1.0 - t)),
+                            &self.tex_soft,
+                        );
+                    }
                 }
+                FxKind::Land | FxKind::Jump | FxKind::Swing | FxKind::Tech => {}
             }
         }
+    }
+
+    /// A thin quad from `a` to `b` in the play plane (impact lines, skids).
+    fn streak(&self, a: V3, b: V3, width: f32, color: Color) {
+        let d = b - a;
+        let l = d.len();
+        if l < 1e-3 {
+            return;
+        }
+        let n = v3(-d.y / l, d.x / l, 0.0) * (width * 0.5);
+        let c: [u8; 4] = color.into();
+        let q = |p: V3| Vertex {
+            position: mq(p),
+            uv: vec2(0.5, 0.5),
+            color: c,
+            normal: vec4(0.0, 0.0, 1.0, 0.0),
+        };
+        let m = Mesh {
+            vertices: vec![q(a - n), q(b - n * 0.3), q(b + n * 0.3), q(a + n)],
+            indices: vec![0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2],
+            texture: Some(self.tex_soft.clone()),
+        };
+        draw_mesh(&m);
     }
 
     /// A camera-facing textured quad.

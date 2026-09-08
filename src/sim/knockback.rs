@@ -32,10 +32,49 @@ pub fn hitstun(kb: f32) -> u32 {
     (kb * k::HITSTUN_SCALE) as u32
 }
 
-/// Frozen "hitlag" frames (both attacker and victim) for a given move damage.
+/// Frozen "hitlag" frames for a hit of `damage`: `floor(d/3 + 3)`, ×1.5 if
+/// `electric`, ×2/3 if the victim `crouch_cancels` (victim side only), capped
+/// at [`k::HITLAG_CAP`]. Attacker and victim freeze for the same base amount.
 #[inline]
-pub fn hitlag(damage: f32) -> u32 {
-    (k::HITLAG_BASE + damage * k::HITLAG_PER_DAMAGE) as u32
+pub fn hitlag(damage: f32, electric: bool, crouch_cancel: bool) -> u32 {
+    let mut f = (damage / 3.0 + 3.0).floor();
+    if electric {
+        f = (f * k::HITLAG_ELECTRIC).floor();
+    }
+    if crouch_cancel {
+        f = (f * k::CROUCH_CANCEL).floor();
+    }
+    (f as u32).min(k::HITLAG_CAP)
+}
+
+/// Shieldstun in frames for a blocked hit of `damage` (full shield):
+/// `floor((d × 0.45 + 2) × 200/201)`.
+#[inline]
+pub fn shieldstun(damage: f32) -> u32 {
+    ((damage * 0.45 + 2.0) * (200.0 / 201.0)) as u32
+}
+
+/// Shield pushback speed (world units/frame) given to the *defender* on
+/// block: `min(2, d × 0.09 + 0.4)` reference units.
+#[inline]
+pub fn shield_push(damage: f32) -> f32 {
+    (damage * 0.09 + 0.4).min(2.0) * k::REF_UNIT
+}
+
+/// Resolve a move's launch angle in degrees: 361 is the "Sakurai angle",
+/// which sends grounded victims along the ground below a knockback threshold
+/// and at 44° otherwise.
+#[inline]
+pub fn resolve_angle(angle_deg: f32, kb: f32, victim_grounded: bool) -> f32 {
+    if angle_deg >= 360.0 {
+        if victim_grounded && kb <= k::SAKURAI_GROUND_KB {
+            0.0
+        } else {
+            k::SAKURAI_ANGLE_DEG
+        }
+    } else {
+        angle_deg
+    }
 }
 
 /// Apply directional influence to a launch angle.
@@ -62,4 +101,41 @@ pub fn launch_velocity(kb: f32, angle: f32) -> Vec2 {
 #[inline]
 pub fn causes_tumble(kb: f32) -> bool {
     kb >= k::TUMBLE_THRESHOLD
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hitlag_matches_reference_formula() {
+        // floor(d/3 + 3): 3% → 4, 9% → 6, 12% → 7, 20% → 9, 45% → 18, cap 20.
+        assert_eq!(hitlag(3.0, false, false), 4);
+        assert_eq!(hitlag(9.0, false, false), 6);
+        assert_eq!(hitlag(12.0, false, false), 7);
+        assert_eq!(hitlag(20.0, false, false), 9);
+        assert_eq!(hitlag(60.0, false, false), 20, "capped");
+        assert_eq!(hitlag(12.0, true, false), 10, "electric ×1.5");
+        assert_eq!(hitlag(12.0, false, true), 4, "crouch cancel ×2/3");
+    }
+
+    #[test]
+    fn shieldstun_and_push_match_reference() {
+        // 13% → 7 frames on a full shield; 8% → 5.
+        assert_eq!(shieldstun(13.0), 7);
+        assert_eq!(shieldstun(8.0), 5);
+        assert!(shield_push(12.0) > shield_push(4.0));
+        assert!(
+            (shield_push(30.0) - 2.0 * k::REF_UNIT).abs() < 1e-5,
+            "capped at 2"
+        );
+    }
+
+    #[test]
+    fn sakurai_angle_keeps_weak_grounded_hits_on_the_ground() {
+        assert_eq!(resolve_angle(361.0, 20.0, true), 0.0);
+        assert_eq!(resolve_angle(361.0, 60.0, true), k::SAKURAI_ANGLE_DEG);
+        assert_eq!(resolve_angle(361.0, 20.0, false), k::SAKURAI_ANGLE_DEG);
+        assert_eq!(resolve_angle(80.0, 20.0, true), 80.0);
+    }
 }

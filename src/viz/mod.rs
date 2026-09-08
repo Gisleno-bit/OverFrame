@@ -377,11 +377,15 @@ fn draw_fighter<P: Painter>(p: &mut P, v: &View, f: &Fighter, opts: SceneOpts) {
         }
     }
 
-    // Training: hurtbox outline + state label.
+    // Training: hurt capsule + state label.
     if opts.training {
-        let bc = f.body_center();
-        let (bx, by) = v.p(bc);
-        p.fill_circle(bx, by, v.s(f.hurt_radius()), Color::rgba(120, 220, 120, 45));
+        let (a, b) = f.hurt_segment();
+        let r = v.s(f.hurt_radius());
+        let (ax, ay) = v.p(a);
+        let (bx, by) = v.p(b);
+        p.fill_circle(ax, ay, r, Color::rgba(120, 220, 120, 45));
+        p.fill_circle(bx, by, r, Color::rgba(120, 220, 120, 45));
+        p.fill_rect(ax - r, by, r * 2.0, ay - by, Color::rgba(120, 220, 120, 45));
         let label = state_name(&f.state);
         font::draw_text(
             p,
@@ -455,6 +459,16 @@ fn draw_fx<P: Painter>(p: &mut P, v: &View, gs: &GameState) {
                     Color::rgba(200, 200, 210, (120.0 * (1.0 - t)) as u8),
                 );
             }
+            FxKind::Powershield => {
+                let r = v.s(16.0) * (0.6 + t);
+                p.fill_circle(
+                    x,
+                    y,
+                    r,
+                    Color::rgba(255, 255, 255, (200.0 * (1.0 - t)) as u8),
+                );
+            }
+            FxKind::Land | FxKind::Jump | FxKind::Swing | FxKind::Tech => {}
         }
     }
 }
@@ -549,6 +563,8 @@ pub fn state_name(s: &State) -> &'static str {
         State::Roll { .. } => "ROLL",
         State::Spotdodge => "SPOTDODGE",
         State::Airdodge => "AIRDODGE",
+        State::Helpless => "HELPLESS",
+        State::ShieldDrop => "SHIELDDROP",
         State::Grab => "GRAB",
         State::Hold => "HOLD",
         State::Grabbed => "GRABBED",

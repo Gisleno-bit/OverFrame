@@ -66,27 +66,29 @@ pub const KESTREL: Character = Character {
     trait_name: "MOMENTUM",
     trait_desc: "FASTEST FALL SPEED AND LONGEST WAVEDASH",
 
-    walk_max: 1.55,
-    dash_max: 2.30,
-    run_max: 2.05,
-    ground_accel: 0.22,
-    ground_friction: 0.090,
-    traction: 0.050,
+    // Fast-faller class (reference units in comments; ×2.2 world units).
+    walk_max: 3.45,         // 1.57
+    dash_max: 4.10,         // 1.86 initial dash
+    run_max: 4.70,          // 2.14
+    ground_accel: 0.44,     // dash accel ≈ 0.2
+    ground_friction: 0.180, // traction 0.08
+    traction: 0.150,
 
-    air_max: 1.85,
-    air_accel: 0.115,
-    air_friction: 0.020,
+    air_max: 1.85,       // 0.84
+    air_accel: 0.22,     // 0.10
+    air_friction: 0.045, // 0.02
 
-    gravity: 0.290,
-    max_fall: 3.20,
-    fastfall: 4.85,
-    fullhop_v: 5.60,
-    shorthop_v: 3.70,
-    doublejump_v: 4.80,
+    gravity: 0.50,    // 0.23
+    max_fall: 6.10,   // 2.8
+    fastfall: 7.40,   // 3.4
+    fullhop_v: 8.10,  // full hop ≈ 30 ref units
+    shorthop_v: 4.85, // short hop ≈ 10.7 ref units
+    doublejump_v: 7.90,
     air_jumps: 1,
-    jumpsquat: 4,
+    jumpsquat: 3,
+    dash_frames: 11,
 
-    airdodge_speed: 3.10,
+    airdodge_speed: 6.60, // 3.0
 
     weight: 90.0,
     half_width: 9.0,
@@ -104,29 +106,32 @@ pub const BOULDER: Character = Character {
     trait_name: "BULWARK",
     trait_desc: "SUPER ARMOUR WHILE CHARGING A SMASH ATTACK",
 
-    walk_max: 1.05,
-    dash_max: 1.75,
-    run_max: 1.60,
-    ground_accel: 0.16,
-    ground_friction: 0.110,
-    traction: 0.070,
+    // Heavyweight class: slow on the ground, average fall, big jumps are not
+    // its thing.
+    walk_max: 1.65, // 0.75
+    dash_max: 3.20, // 1.45
+    run_max: 3.50,  // 1.6
+    ground_accel: 0.28,
+    ground_friction: 0.200,
+    traction: 0.170,
 
-    air_max: 1.30,
-    air_accel: 0.070,
-    air_friction: 0.018,
+    air_max: 1.40, // 0.64
+    air_accel: 0.12,
+    air_friction: 0.030,
 
-    gravity: 0.240,
-    max_fall: 2.70,
-    fastfall: 3.90,
-    fullhop_v: 5.10,
-    shorthop_v: 3.30,
-    doublejump_v: 4.40,
+    gravity: 0.26,    // 0.12
+    max_fall: 4.60,   // 2.1
+    fastfall: 6.40,   // 2.9
+    fullhop_v: 5.35,  // full hop ≈ 25 ref units
+    shorthop_v: 3.25, // ≈ 9
+    doublejump_v: 5.20,
     air_jumps: 1,
     jumpsquat: 6,
+    dash_frames: 13,
 
-    airdodge_speed: 2.60,
+    airdodge_speed: 5.90,
 
-    weight: 122.0,
+    weight: 118.0,
     half_width: 12.0,
     height: 36.0,
 
@@ -143,27 +148,30 @@ pub const VIPER: Character = Character {
     trait_name: "SKYLINE",
     trait_desc: "TWO AIR JUMPS AND THE BEST AIR CONTROL",
 
-    walk_max: 1.75,
-    dash_max: 2.45,
-    run_max: 2.25,
-    ground_accel: 0.26,
-    ground_friction: 0.080,
-    traction: 0.055,
+    // Lightweight / acrobat class: quick dash with a short dash-dance, floaty
+    // but with a real fast-fall, the best air control in the cast.
+    walk_max: 2.90, // 1.32
+    dash_max: 3.90, // 1.77
+    run_max: 4.20,  // 1.9
+    ground_accel: 0.48,
+    ground_friction: 0.150,
+    traction: 0.120,
 
-    air_max: 2.15,
-    air_accel: 0.150,
-    air_friction: 0.022,
+    air_max: 2.15, // 0.98
+    air_accel: 0.28,
+    air_friction: 0.040,
 
-    gravity: 0.215,
-    max_fall: 2.60,
-    fastfall: 3.80,
-    fullhop_v: 5.30,
-    shorthop_v: 3.40,
-    doublejump_v: 4.30,
+    gravity: 0.30,    // 0.136
+    max_fall: 4.80,   // 2.2
+    fastfall: 6.60,   // 3.0
+    fullhop_v: 6.70,  // full hop ≈ 34 ref units
+    shorthop_v: 4.30, // ≈ 14
+    doublejump_v: 6.30,
     air_jumps: 2,
     jumpsquat: 3,
+    dash_frames: 7,
 
-    airdodge_speed: 3.30,
+    airdodge_speed: 6.80,
 
     weight: 68.0,
     half_width: 7.5,

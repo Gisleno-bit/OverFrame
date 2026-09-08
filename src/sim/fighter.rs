@@ -37,21 +37,41 @@ pub enum State {
     Run,
     JumpSquat,
     Air,
-    LandLag { total: u32 },
+    LandLag {
+        total: u32,
+    },
     Waveland,
-    Attack { id: MoveId, aerial: bool },
+    Attack {
+        id: MoveId,
+        aerial: bool,
+    },
     Shield,
-    ShieldStun { total: u32 },
-    Roll { dir: f32 },
+    ShieldStun {
+        total: u32,
+    },
+    Roll {
+        dir: f32,
+    },
     Spotdodge,
     Airdodge,
+    /// Falling with no actions until landing (after an air-dodge or an aerial
+    /// up-special). Drift is allowed.
+    Helpless,
+    /// Lowering the shield: brief lag before acting again.
+    ShieldDrop,
     Grab,
     Hold,
     Grabbed,
-    Throw { id: MoveId },
+    Throw {
+        id: MoveId,
+    },
     LedgeGrab,
-    LedgeAction { kind: LedgeKind },
-    Hitstun { tumble: bool },
+    LedgeAction {
+        kind: LedgeKind,
+    },
+    Hitstun {
+        tumble: bool,
+    },
     Knockdown,
     Dead,
 }
@@ -106,6 +126,17 @@ pub struct Fighter {
     pub respawn_timer: u32,
 
     pub kb_vel: Vec2,
+    /// Separate fall velocity accumulated by gravity during knockback (the
+    /// knockback vector itself decays uniformly; this is capped by fall speed).
+    pub kb_fall: f32,
+    /// Hitstun taken while staying on the ground (weak grounded hits): no
+    /// gravity, slide with friction.
+    pub ground_stun: bool,
+    /// Stick as of the previous frame (for SDI pulse detection).
+    pub prev_stick: Vec2,
+    /// Position at the start of this tick (hitboxes are swept between the two
+    /// so fast movement can't tunnel through a hurtbox).
+    pub prev_pos: Vec2,
     pub anim_flash: u32,
 }
 
@@ -113,6 +144,20 @@ pub struct Fighter {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TickOut {
     pub spawn_projectile: bool,
+    /// Feedback events raised this tick (see [`ev`]), consumed by the match
+    /// state to spawn effects / sounds.
+    pub events: u8,
+}
+
+/// Bit flags for [`TickOut::events`].
+pub mod ev {
+    pub const LAND: u8 = 1;
+    pub const JUMP: u8 = 2;
+    pub const SWING: u8 = 4;
+    pub const DASH: u8 = 8;
+    pub const TECH: u8 = 16;
+    pub const WAVEDASH: u8 = 32;
+    pub const DOUBLE_JUMP: u8 = 64;
 }
 
 const DEADZONE: f32 = 0.30;
@@ -154,6 +199,10 @@ impl Fighter {
             already_hit: false,
             respawn_timer: 0,
             kb_vel: Vec2::ZERO,
+            kb_fall: 0.0,
+            ground_stun: false,
+            prev_stick: Vec2::ZERO,
+            prev_pos: spawn,
             anim_flash: 0,
         }
     }
@@ -169,9 +218,30 @@ impl Fighter {
     pub fn body_center(&self) -> Vec2 {
         Vec2::new(self.pos.x, self.pos.y + self.character.height * 0.5)
     }
+    /// Hurtbox radius: the fighter is a vertical capsule of this radius (see
+    /// [`Fighter::hurt_segment`]), a little wider than the drawn body.
     #[inline]
     pub fn hurt_radius(&self) -> f32 {
-        self.character.height * 0.5
+        self.character.half_width + 1.5
+    }
+
+    /// The hurt capsule's axis (feet → head, inset by the radius). Crouching
+    /// and lying down shrink it.
+    pub fn hurt_segment(&self) -> (Vec2, Vec2) {
+        let r = self.hurt_radius();
+        let h = match self.state {
+            State::Crouch | State::Spotdodge | State::ShieldStun { .. } => {
+                self.character.height * 0.62
+            }
+            State::Knockdown => self.character.height * 0.4,
+            State::Shield | State::ShieldDrop => self.character.height * 0.85,
+            _ => self.character.height,
+        };
+        let top = (h - r).max(r + 0.5);
+        (
+            Vec2::new(self.pos.x, self.pos.y + r),
+            Vec2::new(self.pos.x, self.pos.y + top),
+        )
     }
     #[inline]
     pub fn is_intangible(&self) -> bool {
@@ -196,15 +266,19 @@ impl Fighter {
             return None;
         }
         let md = attacks::data(self.character.id, id);
-        if !md.is_active(self.state_frame) {
-            return None;
-        }
-        let hb = md.hitbox;
+        let hb = md.hitbox_at(self.state_frame)?;
         let world = Vec2::new(
             self.pos.x + self.facing * hb.offset.x,
             self.pos.y + hb.offset.y + self.character.height * 0.5,
         );
         Some((hb, world))
+    }
+
+    /// Where the active hitbox was at the start of this tick (for sweeping).
+    pub fn active_hitbox_prev(&self) -> Option<Vec2> {
+        let (hb, world) = self.active_hitbox()?;
+        let _ = hb;
+        Some(world + (self.prev_pos - self.pos))
     }
 
     #[inline]
@@ -219,6 +293,7 @@ impl Fighter {
     // ============================ main tick ============================
     pub fn tick(&mut self, input: &PlayerInput, stage: &Stage) -> TickOut {
         let mut out = TickOut::default();
+        self.prev_pos = self.pos;
 
         self.intangible = self.intangible.saturating_sub(1);
         self.tech_lockout = self.tech_lockout.saturating_sub(1);
@@ -230,9 +305,28 @@ impl Fighter {
 
         if self.hitlag > 0 {
             self.hitlag -= 1;
+            // Smash DI: a fresh hard stick input during hitlag nudges the
+            // victim; ASDI (the stick held on the last freeze frame) nudges
+            // half as far. Only while being hit, never into the ground.
+            if matches!(self.state, State::Hitstun { .. }) {
+                let st = input.stick;
+                let hard = st.length() > HARD;
+                let was_hard = self.prev_stick.length() > HARD;
+                let turned = hard
+                    && was_hard
+                    && (st.normalized_or_zero() - self.prev_stick.normalized_or_zero()).length()
+                        > 0.55;
+                if hard && (!was_hard || turned) {
+                    self.sdi_nudge(st.normalized_or_zero() * k::SDI_STEP, stage, false);
+                } else if self.hitlag == 0 && hard {
+                    self.sdi_nudge(st.normalized_or_zero() * k::ASDI_STEP, stage, true);
+                }
+            }
+            self.prev_stick = input.stick;
             self.remember_inputs(input);
             return out;
         }
+        self.prev_stick = input.stick;
 
         if matches!(self.state, State::Dead) {
             if self.respawn_timer > 0 {
@@ -276,6 +370,10 @@ impl Fighter {
             State::Roll { dir } => self.tick_roll(dir),
             State::Spotdodge => self.tick_spotdodge(),
             State::Airdodge => self.tick_airdodge(),
+            State::Helpless => {}
+            State::ShieldDrop if self.state_frame >= k::SHIELD_DROP => {
+                self.set_state(State::Stand);
+            }
             State::LandLag { total } if self.state_frame >= total => {
                 self.set_state(if self.grounded {
                     State::Stand
@@ -287,11 +385,14 @@ impl Fighter {
                 self.set_state(State::Stand);
             }
             State::JumpSquat => self.tick_jumpsquat(input),
-            State::Attack { id, .. } => {
+            State::Attack { id, aerial } => {
                 let md = attacks::data(self.character.id, id);
                 if self.state_frame >= md.total() {
                     self.set_state(if self.grounded {
                         State::Stand
+                    } else if aerial && id == MoveId::SpecialUp {
+                        // Recovery moves leave you helpless until you land.
+                        State::Helpless
                     } else {
                         State::Air
                     });
@@ -301,8 +402,22 @@ impl Fighter {
         }
 
         // ---- free-state intent ----
+        let before = self.state;
         if self.is_actionable() && self.handle_free_intent(input) {
             out.spawn_projectile = true;
+        }
+        if before != self.state {
+            match self.state {
+                State::Attack { .. } => out.events |= ev::SWING,
+                State::Dash if !matches!(before, State::Dash) => out.events |= ev::DASH,
+                State::Air if !self.grounded && !matches!(before, State::Air) => {
+                    out.events |= ev::DOUBLE_JUMP
+                }
+                _ => {}
+            }
+        }
+        if matches!(before, State::JumpSquat) && matches!(self.state, State::Air) {
+            out.events |= ev::JUMP;
         }
 
         // ---- velocity from physics ----
@@ -321,11 +436,44 @@ impl Fighter {
         }
 
         // ---- stage collision ----
+        let was_grounded = self.grounded;
         self.collide_stage(stage, input);
+        if self.grounded && !was_grounded {
+            out.events |= if matches!(self.state, State::Waveland) {
+                ev::WAVEDASH
+            } else {
+                ev::LAND
+            };
+        }
 
         self.remember_inputs(input);
         self.state_frame = self.state_frame.saturating_add(1);
         out
+    }
+
+    /// Move the fighter by an SDI/ASDI nudge. SDI may not cross into the
+    /// ground; ASDI may (which is what lets a grounded victim land at once).
+    fn sdi_nudge(&mut self, delta: Vec2, stage: &Stage, allow_ground: bool) {
+        let mut d = delta;
+        let main = stage.main();
+        let over = self.pos.x >= main.left && self.pos.x <= main.right;
+        if !allow_ground && over && self.pos.y + d.y < main.y {
+            d.y = (main.y - self.pos.y).max(0.0);
+        }
+        self.pos += d;
+        if allow_ground && over && self.pos.y <= main.y && self.pos.y >= main.y - k::ASDI_STEP {
+            // ASDI down onto the stage: land now (hitstun is cancelled by the
+            // landing, as in the reference game).
+            self.pos.y = main.y;
+            self.grounded = true;
+            self.kb_vel = Vec2::ZERO;
+            self.kb_fall = 0.0;
+            self.vel = Vec2::ZERO;
+            self.hitstun_timer = 0;
+            self.set_state(State::LandLag {
+                total: k::LANDING_LAG_NORMAL,
+            });
+        }
     }
 
     #[inline]
@@ -344,6 +492,8 @@ impl Fighter {
         self.intangible = 120;
         self.fastfalling = false;
         self.kb_vel = Vec2::ZERO;
+        self.kb_fall = 0.0;
+        self.ground_stun = false;
         self.facing = if s.x <= 0.0 { 1.0 } else { -1.0 };
         self.set_state(State::Air);
     }
@@ -451,7 +601,13 @@ impl Fighter {
             let smash = self.cstick_flick(cst_len);
             if self.grounded {
                 let id = self.pick_ground_attack(input, smash);
-                self.vel.x = 0.0;
+                // Dash attack carries the run into the hit; everything else
+                // plants the feet.
+                if id == MoveId::DashAttack {
+                    self.vel.x = self.facing * ch.run_max * 0.85;
+                } else {
+                    self.vel.x = 0.0;
+                }
                 self.set_state(State::Attack { id, aerial: false });
             } else {
                 let id = self.pick_aerial(input, smash);
@@ -532,11 +688,17 @@ impl Fighter {
         );
 
         if !controllable {
-            if matches!(self.state, State::Waveland) {
-                self.vel.x = approach(self.vel.x, 0.0, ch.traction);
-            } else {
-                self.vel.x = approach(self.vel.x, 0.0, ch.ground_friction * 0.6);
-            }
+            let f = match self.state {
+                State::Waveland => ch.traction,
+                State::Attack {
+                    id: MoveId::DashAttack,
+                    ..
+                } => ch.ground_friction * 0.9,
+                State::LandLag { .. } | State::Attack { .. } => ch.ground_friction * 1.2,
+                State::ShieldStun { .. } => ch.traction * 0.8,
+                _ => ch.ground_friction * 0.6,
+            };
+            self.vel.x = approach(self.vel.x, 0.0, f);
             return;
         }
 
@@ -565,10 +727,10 @@ impl Fighter {
                     }
                 }
                 State::Dash => {
-                    if want != self.facing && self.state_frame < k::DASH_DANCE_WINDOW {
+                    if want != self.facing && self.state_frame < ch.dash_frames {
                         self.facing = want;
                         self.set_state(State::Dash);
-                    } else if self.state_frame >= k::DASH_DANCE_WINDOW {
+                    } else if self.state_frame >= ch.dash_frames {
                         self.set_state(State::Run);
                     }
                     self.vel.x =
@@ -647,7 +809,7 @@ impl Fighter {
         self.vel = self.airdodge_dir * self.character.airdodge_speed * damp;
         self.vel.y -= self.character.gravity * 0.6 * t;
         if self.state_frame >= k::AIRDODGE_DURATION {
-            self.set_state(State::Air);
+            self.set_state(State::Helpless);
         }
     }
 
@@ -713,7 +875,7 @@ impl Fighter {
             return;
         }
         if cur & buttons::SHIELD == 0 {
-            self.set_state(State::Stand);
+            self.set_state(State::ShieldDrop);
         }
     }
 
@@ -805,9 +967,13 @@ impl Fighter {
         match self.state {
             State::Attack { id, aerial: true } => {
                 let md = attacks::data(self.character.id, id);
-                let mut lag = md.landing_lag;
-                if self.lcancel_armed {
-                    lag = lag.div_ceil(2);
+                let mut lag = if md.autocancels(self.state_frame) {
+                    k::LANDING_LAG_NORMAL
+                } else {
+                    md.landing_lag
+                };
+                if self.lcancel_armed && lag > k::LANDING_LAG_NORMAL {
+                    lag /= 2;
                 }
                 self.lcancel_armed = false;
                 self.vel.x *= 0.5;
@@ -818,9 +984,11 @@ impl Fighter {
                 self.vel = Vec2::new(hspeed, 0.0);
                 self.set_state(State::Waveland);
             }
-            State::Air => {
+            State::Air | State::Helpless => {
                 self.vel.x *= 0.85;
-                self.set_state(State::LandLag { total: 2 });
+                self.set_state(State::LandLag {
+                    total: k::LANDING_LAG_NORMAL,
+                });
             }
             _ => {}
         }
@@ -915,15 +1083,41 @@ impl Fighter {
 
     fn tick_hitstun(&mut self, input: &PlayerInput, stage: &Stage, tumble: bool) {
         let ch = self.character;
-        self.kb_vel.x = approach(self.kb_vel.x, 0.0, k::KB_FRICTION);
-        self.kb_vel.y -= ch.gravity;
-        if self.kb_vel.y < -ch.max_fall {
-            self.kb_vel.y = -ch.max_fall;
+        if self.ground_stun {
+            // Weak grounded hit: slide along the floor, no gravity, then stand.
+            self.kb_vel.x = approach(self.kb_vel.x, 0.0, k::KB_DECAY + ch.ground_friction * 0.5);
+            self.kb_vel.y = 0.0;
+            self.vel = self.kb_vel;
+            self.pos += self.vel;
+            let main = stage.main();
+            if self.pos.x < main.left || self.pos.x > main.right {
+                // Slid off the edge: become airborne hitstun.
+                self.ground_stun = false;
+                self.grounded = false;
+            } else if self.hitstun_timer > 0 {
+                self.hitstun_timer -= 1;
+                if self.hitstun_timer == 0 {
+                    self.ground_stun = false;
+                    self.vel = Vec2::ZERO;
+                    self.set_state(State::Stand);
+                }
+            } else {
+                self.ground_stun = false;
+                self.set_state(State::Stand);
+            }
+            return;
         }
-        if self.state_frame > 2 && input.stick.x.abs() > DEADZONE {
-            self.kb_vel.x += input.stick.x.signum() * ch.air_accel * 0.25;
+        // Knockback decays uniformly along its direction; gravity is a
+        // separate fall velocity capped by fall speed.
+        let len = self.kb_vel.length();
+        if len > k::KB_DECAY {
+            self.kb_vel = self.kb_vel * ((len - k::KB_DECAY) / len);
+        } else {
+            self.kb_vel = Vec2::ZERO;
         }
-        self.vel = self.kb_vel;
+        self.kb_fall = (self.kb_fall - ch.gravity).max(-ch.max_fall);
+        let _ = input;
+        self.vel = self.kb_vel + Vec2::new(0.0, self.kb_fall);
         self.pos += self.vel;
 
         // Ground collision → tech or knockdown.
@@ -938,6 +1132,7 @@ impl Fighter {
             self.grounded = true;
             self.vel = Vec2::ZERO;
             self.kb_vel = Vec2::ZERO;
+            self.kb_fall = 0.0;
             if teching {
                 self.intangible = k::TECH_INTANGIBLE;
                 self.set_state(State::LandLag { total: 8 });
@@ -945,7 +1140,9 @@ impl Fighter {
                 self.tech_lockout = k::TECH_LOCKOUT;
                 self.set_state(State::Knockdown);
             } else {
-                self.set_state(State::LandLag { total: 4 });
+                self.set_state(State::LandLag {
+                    total: k::LANDING_LAG_NORMAL,
+                });
             }
             return;
         }
@@ -954,11 +1151,11 @@ impl Fighter {
             self.hitstun_timer -= 1;
             if self.hitstun_timer == 0 {
                 self.set_state(State::Air);
-                self.vel = self.kb_vel;
+                self.vel = self.kb_vel + Vec2::new(0.0, self.kb_fall);
             }
         } else {
             self.set_state(State::Air);
-            self.vel = self.kb_vel;
+            self.vel = self.kb_vel + Vec2::new(0.0, self.kb_fall);
         }
     }
 
@@ -1014,11 +1211,18 @@ impl Fighter {
     }
 
     /// Enter hitstun with a launch velocity and duration.
+    /// Launch the fighter. A non-tumble hit on a grounded fighter with no
+    /// upward component keeps them on the ground (grounded flinch/slide).
     pub fn apply_launch(&mut self, kb_vel: Vec2, hitstun: u32, tumble: bool, hitlag: u32) {
+        let stay_grounded = self.grounded && !tumble && kb_vel.y <= 0.001;
         self.kb_vel = kb_vel;
+        self.kb_fall = 0.0;
         self.vel = kb_vel;
-        self.grounded = false;
-        self.support = None;
+        self.ground_stun = stay_grounded;
+        if !stay_grounded {
+            self.grounded = false;
+            self.support = None;
+        }
         self.fastfalling = false;
         self.hitstun_timer = hitstun;
         self.hitlag = hitlag;
@@ -1045,15 +1249,22 @@ impl Fighter {
     }
 
     /// Take a hit while shielding: reduce shield, apply shield stun/pushback.
-    pub fn shield_hit(&mut self, damage: f32, push: f32) {
+    /// Block a hit. Returns `true` if it was a powershield (raised within
+    /// [`k::POWERSHIELD_WINDOW`] frames): no damage, stun or pushback.
+    pub fn shield_hit(&mut self, damage: f32) -> bool {
+        if matches!(self.state, State::Shield) && self.state_frame < k::POWERSHIELD_WINDOW {
+            self.anim_flash = 4;
+            return true;
+        }
         self.shield_health -= damage * k::SHIELD_DAMAGE_MULT;
-        let stun = (damage * k::SHIELDSTUN_MULT) as u32 + 1;
-        self.vel.x = -self.facing * push;
+        let stun = super::knockback::shieldstun(damage);
+        self.vel.x = -self.facing * super::knockback::shield_push(damage);
         if self.shield_health <= 0.0 {
             self.shield_health = 0.0;
             self.set_state(State::ShieldStun { total: 120 });
         } else {
             self.set_state(State::ShieldStun { total: stun });
         }
+        false
     }
 }

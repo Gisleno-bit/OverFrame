@@ -126,3 +126,41 @@ impl Rng {
         (self.next_u32() as f32 / u32::MAX as f32) * 2.0 - 1.0
     }
 }
+
+/// Shortest distance between two line segments `a0→a1` and `b0→b1` (2D).
+pub fn segment_distance(a0: Vec2, a1: Vec2, b0: Vec2, b1: Vec2) -> f32 {
+    // If the segments intersect the distance is zero; otherwise it is the
+    // minimum of the four endpoint-to-segment distances.
+    if segments_intersect(a0, a1, b0, b1) {
+        return 0.0;
+    }
+    point_segment_distance(a0, b0, b1)
+        .min(point_segment_distance(a1, b0, b1))
+        .min(point_segment_distance(b0, a0, a1))
+        .min(point_segment_distance(b1, a0, a1))
+}
+
+/// Distance from point `p` to segment `a→b`.
+pub fn point_segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f32 {
+    let ab = b - a;
+    let len2 = ab.x * ab.x + ab.y * ab.y;
+    if len2 <= 1e-8 {
+        return (p - a).length();
+    }
+    let t = clampf(((p.x - a.x) * ab.x + (p.y - a.y) * ab.y) / len2, 0.0, 1.0);
+    let q = Vec2::new(a.x + ab.x * t, a.y + ab.y * t);
+    (p - q).length()
+}
+
+fn orient(a: Vec2, b: Vec2, c: Vec2) -> f32 {
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+fn segments_intersect(a0: Vec2, a1: Vec2, b0: Vec2, b1: Vec2) -> bool {
+    let d1 = orient(b0, b1, a0);
+    let d2 = orient(b0, b1, a1);
+    let d3 = orient(a0, a1, b0);
+    let d4 = orient(a0, a1, b1);
+    ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0))
+        && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0))
+}

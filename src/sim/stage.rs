@@ -131,22 +131,26 @@ impl Stage {
             y: 0.0,
             solid: true,
         };
+        // Platform layout and blast zones follow the proportions of the
+        // classic three-platform tournament stage (side platforms about two
+        // fighter heights up, the top one twice that; blast zones ~3.2× the
+        // half-width out), so spacing and KO percents feel familiar.
         let soft_l = Platform {
-            left: -95.0,
-            right: -35.0,
-            y: 45.0,
+            left: -125.0,
+            right: -43.0,
+            y: 59.0,
             solid: false,
         };
         let soft_r = Platform {
-            left: 35.0,
-            right: 95.0,
-            y: 45.0,
+            left: 43.0,
+            right: 125.0,
+            y: 59.0,
             solid: false,
         };
         let soft_top = Platform {
-            left: -30.0,
-            right: 30.0,
-            y: 82.0,
+            left: -41.0,
+            right: 41.0,
+            y: 117.0,
             solid: false,
         };
         Stage {
@@ -154,10 +158,10 @@ impl Stage {
             name: "The Lattice",
             ledges: ledges_for(&main),
             platforms: vec![main, soft_l, soft_r, soft_top],
-            blast_left: -285.0,
-            blast_right: 285.0,
-            blast_top: 235.0,
-            blast_bottom: -190.0,
+            blast_left: -486.0,
+            blast_right: 486.0,
+            blast_top: 434.0,
+            blast_bottom: -236.0,
             spawns: vec![Vec2::new(-70.0, 1.0), Vec2::new(70.0, 1.0)],
             theme: Theme {
                 bg_top: (18, 20, 34),
@@ -183,10 +187,10 @@ impl Stage {
             name: "Meridian",
             ledges: ledges_for(&main),
             platforms: vec![main],
-            blast_left: -300.0,
-            blast_right: 300.0,
-            blast_top: 225.0,
-            blast_bottom: -180.0,
+            blast_left: -534.0,
+            blast_right: 534.0,
+            blast_top: 408.0,
+            blast_bottom: -304.0,
             spawns: vec![Vec2::new(-80.0, 1.0), Vec2::new(80.0, 1.0)],
             theme: Theme {
                 bg_top: (12, 26, 30),
@@ -210,14 +214,14 @@ impl Stage {
         };
         let low_left = Platform {
             left: -120.0,
-            right: -52.0,
-            y: 34.0,
+            right: -48.0,
+            y: 46.0,
             solid: false,
         };
         let high_right = Platform {
-            left: 30.0,
-            right: 100.0,
-            y: 70.0,
+            left: 28.0,
+            right: 104.0,
+            y: 96.0,
             solid: false,
         };
         Stage {
@@ -225,10 +229,10 @@ impl Stage {
             name: "Tidegate",
             ledges: ledges_for(&main),
             platforms: vec![main, low_left, high_right],
-            blast_left: -270.0,
-            blast_right: 270.0,
-            blast_top: 240.0,
-            blast_bottom: -185.0,
+            blast_left: -440.0,
+            blast_right: 470.0,
+            blast_top: 420.0,
+            blast_bottom: -250.0,
             spawns: vec![Vec2::new(-60.0, 1.0), Vec2::new(60.0, 1.0)],
             theme: Theme {
                 bg_top: (30, 16, 36),

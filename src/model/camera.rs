@@ -24,7 +24,7 @@ impl Default for MatchCamera {
 
 impl MatchCamera {
     pub const MIN_DIST: f32 = 170.0;
-    pub const MAX_DIST: f32 = 470.0;
+    pub const MAX_DIST: f32 = 840.0;
 
     pub fn new() -> Self {
         MatchCamera {
@@ -90,8 +90,8 @@ impl MatchCamera {
             self.target = target;
             self.initialised = true;
         } else {
-            self.pos = self.pos.lerp(want, 0.085);
-            self.target = self.target.lerp(target, 0.11);
+            self.pos = self.pos.lerp(want, 0.11);
+            self.target = self.target.lerp(target, 0.14);
         }
     }
 

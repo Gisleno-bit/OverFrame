@@ -49,12 +49,23 @@ pub struct Hitbox {
 }
 
 /// Frame data + hitbox for one move.
+///
+/// `startup` is the move's first active frame counted the way players count
+/// ("hits on frame 4" ⇒ `startup: 4`; the input frame is frame 1). The clean
+/// hit lasts `active` frames; `late_active` extra frames follow with a weaker
+/// "late" hitbox (damage and base knockback × `late_scale`) — the lingering
+/// second half of a sex kick. `endlag` frames complete the animation; the move
+/// is interruptible (IASA) at `total()`.
 #[derive(Clone, Copy, Debug)]
 pub struct MoveData {
     pub startup: u32,
     pub active: u32,
     pub endlag: u32,
     pub hitbox: Hitbox,
+    pub late_active: u32,
+    pub late_scale: f32,
+    /// Electric hits freeze both fighters 1.5× longer.
+    pub electric: bool,
     /// Landing lag for aerials (before L-cancel). 0 for grounded moves.
     pub landing_lag: u32,
     pub is_aerial: bool,
@@ -63,14 +74,54 @@ pub struct MoveData {
 }
 
 impl MoveData {
+    /// Interruptible-as-soon-as frame (the move's length).
     #[inline]
     pub fn total(&self) -> u32 {
-        self.startup + self.active + self.endlag
+        self.startup + self.active + self.late_active + self.endlag
     }
-    /// Is `frame` (0-based within the move) an active hitbox frame?
+    /// Is `frame` (0-based within the move) an active hitbox frame (clean or
+    /// late)?
     #[inline]
     pub fn is_active(&self, frame: u32) -> bool {
+        frame >= self.startup && frame < self.startup + self.active + self.late_active
+    }
+    /// Is `frame` inside the clean (strong) window?
+    #[inline]
+    pub fn is_clean(&self, frame: u32) -> bool {
         frame >= self.startup && frame < self.startup + self.active
+    }
+    /// The hitbox in effect on `frame`, if any (late hits are scaled down).
+    pub fn hitbox_at(&self, frame: u32) -> Option<Hitbox> {
+        if self.is_clean(frame) {
+            Some(self.hitbox)
+        } else if self.is_active(frame) {
+            Some(Hitbox {
+                damage: (self.hitbox.damage * self.late_scale).round(),
+                bkb: self.hitbox.bkb * self.late_scale,
+                ..self.hitbox
+            })
+        } else {
+            None
+        }
+    }
+    /// Landing inside the first frames before the hitbox comes out, or once
+    /// the swing is spent (last quarter of endlag), *autocancels*: normal
+    /// landing lag instead of the aerial's.
+    pub fn autocancels(&self, frame: u32) -> bool {
+        let early = frame + 1 < self.startup;
+        let late_start = self.startup + self.active + self.late_active + (self.endlag * 3) / 4;
+        early || frame >= late_start
+    }
+    /// Add a late (weaker, lingering) hit window.
+    pub const fn late(mut self, frames: u32, scale: f32) -> Self {
+        self.late_active = frames;
+        self.late_scale = scale;
+        self
+    }
+    /// Mark the move electric (longer hitlag).
+    pub const fn electric(mut self) -> Self {
+        self.electric = true;
+        self
     }
 }
 
@@ -103,6 +154,9 @@ const fn mv(
             kbg,
             bkb,
         },
+        late_active: 0,
+        late_scale: 1.0,
+        electric: false,
         landing_lag,
         is_aerial,
         reach,
@@ -150,31 +204,32 @@ pub const ALL_MOVES: [MoveId; 21] = [
     MoveId::ThrowD,
 ];
 
-/// Kestrel — balanced fast-faller: quick, medium damage, fair reach.
+/// Kestrel — balanced fast-faller: quick, medium damage, fair reach. Angle
+/// 361 is the Sakurai angle (see `knockback::resolve_angle`).
 #[rustfmt::skip]
 fn kestrel(id: MoveId) -> MoveData {
     use MoveId::*;
     match id {
         //         su ac el  offset        rad  dmg  ang   kbg   bkb  land aer reach
-        Jab => mv(3, 2, 8, (13.0, 6.0), 8.0, 3.0, 25.0, 20.0, 12.0, 0, false, 16.0),
-        Ftilt => mv(6, 3, 14, (18.0, 4.0), 9.0, 8.0, 32.0, 70.0, 15.0, 0, false, 22.0),
-        Utilt => mv(5, 4, 15, (4.0, 18.0), 10.0, 7.0, 95.0, 90.0, 18.0, 0, false, 22.0),
-        Dtilt => mv(5, 3, 12, (16.0, -4.0), 8.0, 6.0, 20.0, 40.0, 20.0, 0, false, 20.0),
-        Fsmash => mv(12, 3, 26, (22.0, 4.0), 11.0, 15.0, 38.0, 95.0, 25.0, 0, false, 28.0),
-        Usmash => mv(10, 4, 24, (2.0, 22.0), 12.0, 14.0, 90.0, 100.0, 28.0, 0, false, 28.0),
-        Dsmash => mv(9, 3, 24, (20.0, -2.0), 10.0, 13.0, 28.0, 90.0, 30.0, 0, false, 26.0),
-        DashAttack => mv(8, 4, 20, (16.0, 6.0), 10.0, 9.0, 55.0, 60.0, 35.0, 0, false, 22.0),
+        Jab => mv(1, 2, 14, (13.0, 6.0), 7.5, 3.0, 361.0, 20.0, 12.0, 0, false, 16.0),
+        Ftilt => mv(4, 3, 18, (18.0, 4.0), 8.5, 8.0, 361.0, 70.0, 15.0, 0, false, 22.0),
+        Utilt => mv(4, 4, 15, (4.0, 18.0), 9.5, 7.0, 95.0, 90.0, 18.0, 0, false, 22.0),
+        Dtilt => mv(6, 3, 18, (16.0, -4.0), 8.0, 7.0, 25.0, 45.0, 20.0, 0, false, 20.0),
+        Fsmash => mv(11, 3, 26, (22.0, 4.0), 10.5, 15.0, 38.0, 95.0, 25.0, 0, false, 28.0),
+        Usmash => mv(7, 3, 22, (2.0, 22.0), 11.5, 15.0, 85.0, 105.0, 30.0, 0, false, 28.0).late(8, 0.7),
+        Dsmash => mv(6, 3, 30, (20.0, -2.0), 10.0, 14.0, 28.0, 90.0, 30.0, 0, false, 26.0),
+        DashAttack => mv(4, 4, 22, (16.0, 6.0), 10.0, 8.0, 70.0, 60.0, 35.0, 0, false, 22.0).late(6, 0.7),
 
-        Nair => mv(4, 6, 14, (12.0, 4.0), 11.0, 8.0, 45.0, 55.0, 15.0, 8, true, 20.0),
-        Fair => mv(7, 4, 18, (18.0, 6.0), 9.0, 10.0, 40.0, 75.0, 15.0, 12, true, 24.0),
-        Bair => mv(6, 4, 16, (-18.0, 4.0), 9.0, 11.0, 40.0, 80.0, 18.0, 10, true, 24.0),
-        Uair => mv(5, 4, 14, (2.0, 18.0), 10.0, 9.0, 85.0, 70.0, 20.0, 9, true, 22.0),
-        Dair => mv(9, 5, 22, (8.0, -16.0), 9.0, 12.0, 270.0, 45.0, 40.0, 18, true, 22.0),
+        Nair => mv(3, 4, 10, (12.0, 4.0), 10.5, 11.0, 361.0, 100.0, 10.0, 15, true, 20.0).late(24, 0.75),
+        Fair => mv(7, 4, 27, (18.0, 6.0), 9.0, 11.0, 40.0, 75.0, 15.0, 20, true, 24.0),
+        Bair => mv(4, 4, 17, (-18.0, 4.0), 9.0, 13.0, 361.0, 80.0, 18.0, 20, true, 24.0).late(12, 0.6),
+        Uair => mv(7, 4, 25, (2.0, 18.0), 10.0, 12.0, 85.0, 70.0, 20.0, 18, true, 22.0),
+        Dair => mv(7, 5, 29, (8.0, -16.0), 9.0, 12.0, 270.0, 45.0, 40.0, 20, true, 22.0),
 
-        SpecialN => mv(10, 1, 22, (16.0, 6.0), 2.0, 0.0, 0.0, 0.0, 0.0, 0, false, 20.0),
+        SpecialN => mv(9, 1, 22, (16.0, 6.0), 2.0, 0.0, 0.0, 0.0, 0.0, 0, false, 20.0),
         SpecialUp => mv(6, 8, 26, (4.0, 14.0), 12.0, 6.0, 80.0, 60.0, 30.0, 0, false, 22.0),
         SpecialSide => mv(10, 6, 24, (18.0, 4.0), 10.0, 9.0, 30.0, 55.0, 45.0, 0, false, 24.0),
-        SpecialDown => mv(8, 3, 26, (0.0, 0.0), 22.0, 5.0, 70.0, 45.0, 35.0, 0, false, 24.0),
+        SpecialDown => mv(0, 3, 28, (0.0, 0.0), 22.0, 5.0, 70.0, 45.0, 35.0, 0, false, 24.0).electric(),
 
         // Throws: the "hitbox" carries the throw's launch parameters. Startup is
         // the release frame; active/endlag frame the release + throw endlag.
@@ -192,25 +247,25 @@ fn boulder(id: MoveId) -> MoveData {
     use MoveId::*;
     match id {
         //         su  ac el  offset        rad   dmg  ang   kbg   bkb  land aer  reach
-        Jab => mv(5, 2, 12, (15.0, 7.0), 10.0, 5.0, 30.0, 25.0, 18.0, 0, false, 18.0),
-        Ftilt => mv(9, 4, 20, (21.0, 5.0), 12.0, 12.0, 35.0, 75.0, 22.0, 0, false, 26.0),
-        Utilt => mv(8, 5, 20, (4.0, 22.0), 13.0, 11.0, 92.0, 95.0, 24.0, 0, false, 26.0),
-        Dtilt => mv(7, 4, 18, (19.0, -5.0), 10.0, 9.0, 24.0, 45.0, 26.0, 0, false, 24.0),
-        Fsmash => mv(18, 4, 34, (26.0, 5.0), 15.0, 21.0, 40.0, 100.0, 35.0, 0, false, 34.0),
-        Usmash => mv(15, 5, 32, (2.0, 27.0), 15.0, 19.0, 90.0, 105.0, 36.0, 0, false, 34.0),
-        Dsmash => mv(13, 4, 32, (24.0, -3.0), 13.0, 18.0, 25.0, 95.0, 40.0, 0, false, 30.0),
-        DashAttack => mv(11, 5, 26, (19.0, 7.0), 13.0, 13.0, 60.0, 65.0, 45.0, 0, false, 26.0),
+        Jab => mv(4, 2, 16, (15.0, 7.0), 9.5, 5.0, 361.0, 25.0, 18.0, 0, false, 18.0),
+        Ftilt => mv(8, 4, 24, (21.0, 5.0), 11.5, 12.0, 361.0, 75.0, 22.0, 0, false, 26.0),
+        Utilt => mv(8, 5, 22, (4.0, 22.0), 12.5, 11.0, 92.0, 95.0, 24.0, 0, false, 26.0),
+        Dtilt => mv(8, 4, 22, (19.0, -5.0), 10.0, 10.0, 24.0, 45.0, 26.0, 0, false, 24.0),
+        Fsmash => mv(17, 4, 34, (26.0, 5.0), 14.5, 21.0, 40.0, 100.0, 35.0, 0, false, 34.0),
+        Usmash => mv(13, 4, 30, (2.0, 27.0), 14.5, 19.0, 88.0, 105.0, 36.0, 0, false, 34.0).late(8, 0.7),
+        Dsmash => mv(11, 4, 34, (24.0, -3.0), 12.5, 18.0, 25.0, 95.0, 40.0, 0, false, 30.0),
+        DashAttack => mv(9, 5, 28, (19.0, 7.0), 12.5, 13.0, 65.0, 65.0, 45.0, 0, false, 26.0).late(6, 0.7),
 
-        Nair => mv(6, 8, 18, (14.0, 5.0), 14.0, 11.0, 45.0, 60.0, 20.0, 12, true, 24.0),
-        Fair => mv(11, 5, 24, (22.0, 6.0), 12.0, 15.0, 42.0, 85.0, 22.0, 18, true, 28.0),
-        Bair => mv(9, 5, 22, (-22.0, 5.0), 12.0, 15.0, 40.0, 88.0, 24.0, 16, true, 28.0),
-        Uair => mv(8, 5, 20, (2.0, 22.0), 13.0, 13.0, 85.0, 78.0, 26.0, 14, true, 26.0),
-        Dair => mv(14, 6, 28, (9.0, -19.0), 12.0, 16.0, 270.0, 55.0, 45.0, 24, true, 26.0),
+        Nair => mv(5, 6, 14, (14.0, 5.0), 13.5, 14.0, 361.0, 100.0, 12.0, 20, true, 24.0).late(22, 0.7),
+        Fair => mv(11, 5, 30, (22.0, 6.0), 12.0, 16.0, 42.0, 85.0, 22.0, 24, true, 28.0),
+        Bair => mv(8, 5, 25, (-22.0, 5.0), 12.0, 16.0, 361.0, 88.0, 24.0, 22, true, 28.0).late(10, 0.6),
+        Uair => mv(9, 5, 26, (2.0, 22.0), 12.5, 14.0, 85.0, 78.0, 26.0, 20, true, 26.0),
+        Dair => mv(13, 6, 30, (9.0, -19.0), 12.0, 17.0, 270.0, 55.0, 45.0, 26, true, 26.0),
 
         SpecialN => mv(14, 1, 28, (18.0, 7.0), 2.0, 0.0, 0.0, 0.0, 0.0, 0, false, 22.0),
         SpecialUp => mv(9, 10, 32, (5.0, 16.0), 15.0, 9.0, 82.0, 62.0, 40.0, 0, false, 26.0),
         SpecialSide => mv(14, 8, 30, (22.0, 5.0), 13.0, 13.0, 32.0, 60.0, 55.0, 0, false, 28.0),
-        SpecialDown => mv(12, 4, 34, (0.0, 0.0), 30.0, 8.0, 75.0, 50.0, 48.0, 0, false, 30.0),
+        SpecialDown => mv(12, 4, 34, (0.0, 0.0), 30.0, 9.0, 75.0, 50.0, 48.0, 0, false, 30.0),
 
         ThrowF => mv(10, 1, 24, (18.0, 9.0), 6.0, 11.0, 42.0, 68.0, 55.0, 0, false, 0.0),
         ThrowB => mv(12, 1, 26, (-18.0, 9.0), 6.0, 12.0, 45.0, 70.0, 60.0, 0, false, 0.0),
@@ -227,25 +282,25 @@ fn viper(id: MoveId) -> MoveData {
     use MoveId::*;
     match id {
         //         su ac el  offset        rad  dmg  ang   kbg   bkb  land aer reach
-        Jab => mv(2, 2, 6, (12.0, 5.0), 7.0, 2.0, 22.0, 15.0, 10.0, 0, false, 14.0),
-        Ftilt => mv(4, 3, 11, (16.0, 4.0), 8.0, 6.0, 30.0, 60.0, 12.0, 0, false, 20.0),
-        Utilt => mv(4, 4, 12, (3.0, 16.0), 9.0, 5.0, 96.0, 80.0, 15.0, 0, false, 20.0),
-        Dtilt => mv(4, 3, 10, (15.0, -4.0), 7.0, 5.0, 18.0, 35.0, 18.0, 0, false, 18.0),
-        Fsmash => mv(9, 3, 22, (20.0, 4.0), 10.0, 12.0, 36.0, 88.0, 22.0, 0, false, 26.0),
-        Usmash => mv(8, 4, 20, (2.0, 20.0), 11.0, 11.0, 90.0, 92.0, 25.0, 0, false, 26.0),
-        Dsmash => mv(7, 3, 20, (18.0, -2.0), 9.0, 10.0, 26.0, 84.0, 26.0, 0, false, 24.0),
-        DashAttack => mv(6, 4, 16, (15.0, 6.0), 9.0, 7.0, 55.0, 55.0, 30.0, 0, false, 20.0),
+        Jab => mv(1, 2, 11, (12.0, 5.0), 7.0, 2.0, 361.0, 15.0, 10.0, 0, false, 14.0),
+        Ftilt => mv(4, 3, 14, (16.0, 4.0), 8.0, 6.0, 361.0, 60.0, 12.0, 0, false, 20.0),
+        Utilt => mv(3, 4, 13, (3.0, 16.0), 9.0, 5.0, 96.0, 80.0, 15.0, 0, false, 20.0),
+        Dtilt => mv(4, 3, 14, (15.0, -4.0), 7.0, 6.0, 20.0, 40.0, 18.0, 0, false, 18.0),
+        Fsmash => mv(8, 3, 26, (20.0, 4.0), 9.5, 12.0, 36.0, 88.0, 22.0, 0, false, 26.0),
+        Usmash => mv(6, 4, 22, (2.0, 20.0), 10.5, 12.0, 90.0, 92.0, 25.0, 0, false, 26.0).late(6, 0.7),
+        Dsmash => mv(5, 3, 26, (18.0, -2.0), 9.0, 10.0, 26.0, 84.0, 26.0, 0, false, 24.0),
+        DashAttack => mv(4, 4, 20, (15.0, 6.0), 9.0, 7.0, 70.0, 55.0, 30.0, 0, false, 20.0).late(5, 0.7),
 
-        Nair => mv(3, 6, 10, (11.0, 4.0), 10.0, 6.0, 45.0, 48.0, 12.0, 6, true, 18.0),
-        Fair => mv(5, 4, 14, (17.0, 6.0), 8.0, 8.0, 38.0, 68.0, 12.0, 9, true, 22.0),
-        Bair => mv(5, 4, 12, (-17.0, 4.0), 8.0, 9.0, 40.0, 74.0, 15.0, 8, true, 22.0),
-        Uair => mv(4, 4, 11, (2.0, 17.0), 9.0, 7.0, 85.0, 64.0, 16.0, 7, true, 20.0),
-        Dair => mv(7, 5, 18, (7.0, -15.0), 8.0, 9.0, 270.0, 40.0, 32.0, 14, true, 20.0),
+        Nair => mv(2, 4, 10, (11.0, 4.0), 9.5, 9.0, 361.0, 100.0, 8.0, 12, true, 18.0).late(18, 0.7),
+        Fair => mv(5, 4, 22, (17.0, 6.0), 8.0, 9.0, 38.0, 68.0, 12.0, 15, true, 22.0),
+        Bair => mv(4, 4, 16, (-17.0, 4.0), 8.0, 11.0, 361.0, 74.0, 15.0, 16, true, 22.0).late(10, 0.6),
+        Uair => mv(4, 4, 20, (2.0, 17.0), 9.0, 8.0, 85.0, 64.0, 16.0, 14, true, 20.0),
+        Dair => mv(6, 5, 24, (7.0, -15.0), 8.0, 10.0, 270.0, 40.0, 32.0, 18, true, 20.0),
 
         SpecialN => mv(8, 1, 18, (15.0, 6.0), 2.0, 0.0, 0.0, 0.0, 0.0, 0, false, 18.0),
         SpecialUp => mv(5, 7, 22, (4.0, 13.0), 11.0, 5.0, 80.0, 58.0, 26.0, 0, false, 20.0),
         SpecialSide => mv(8, 6, 20, (17.0, 4.0), 9.0, 7.0, 30.0, 50.0, 38.0, 0, false, 22.0),
-        SpecialDown => mv(6, 3, 22, (0.0, 0.0), 20.0, 4.0, 70.0, 42.0, 30.0, 0, false, 22.0),
+        SpecialDown => mv(0, 3, 24, (0.0, 0.0), 20.0, 5.0, 70.0, 42.0, 30.0, 0, false, 22.0).electric(),
 
         ThrowF => mv(7, 1, 18, (15.0, 8.0), 6.0, 6.0, 42.0, 55.0, 40.0, 0, false, 0.0),
         ThrowB => mv(9, 1, 20, (-15.0, 8.0), 6.0, 7.0, 45.0, 58.0, 44.0, 0, false, 0.0),
@@ -265,7 +320,7 @@ pub struct Projectile {
     pub active: bool,
 }
 
-pub const PROJECTILE_SPEED: f32 = 3.4;
+pub const PROJECTILE_SPEED: f32 = 7.0;
 pub const PROJECTILE_LIFE: u32 = 60;
 pub const PROJECTILE_RADIUS: f32 = 4.0;
 pub const PROJECTILE_DAMAGE: f32 = 5.0;

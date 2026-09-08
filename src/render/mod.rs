@@ -3,6 +3,7 @@
 //! All in-match drawing goes through [`crate::viz`]; the menus draw with the
 //! same bitmap font so nothing needs a font file.
 
+mod audio;
 mod input;
 mod scene3d;
 mod widgets;
@@ -217,6 +218,9 @@ struct App {
     settings: Settings,
     hub: InputHub,
     scene: Scene3D,
+    audio: Option<audio::AudioBank>,
+    /// Last fx `born` frame voiced for rumble.
+    rumble_seen: Vec<(u64, u8)>,
     screen: Screen,
     frame_no: u64,
 
@@ -315,6 +319,12 @@ fn viewer_clips() -> Vec<Clip> {
             crate::sim::constants::SPOTDODGE_DURATION,
         ),
         a("AIRDODGE", S::Airdodge, 0.0),
+        a("HELPLESS", S::Helpless, -2.0),
+        g(
+            "SHIELD DROP",
+            S::ShieldDrop,
+            crate::sim::constants::SHIELD_DROP,
+        ),
         atk("JAB", M::Jab, false),
         atk("FORWARD TILT", M::Ftilt, false),
         atk("UP TILT", M::Utilt, false),
@@ -349,6 +359,8 @@ impl App {
             settings,
             hub: InputHub::new(),
             scene: Scene3D::new(),
+            audio: None,
+            rumble_seen: Vec::new(),
             screen: Screen::Menu,
             frame_no: 0,
             menu_idx: 0,
@@ -1093,15 +1105,24 @@ impl App {
                 self.settings.render_3d = !self.settings.render_3d;
                 let _ = self.settings.save();
             }
-            i if (3..3 + 2 * pad_rows).contains(&i) && nav.confirm => {
-                self.rebind = Some(((i - 3) / pad_rows, PadAction::ALL[(i - 3) % pad_rows]));
+            3 if nav.h != 0 => {
+                self.settings.sfx_volume =
+                    (self.settings.sfx_volume as i32 + nav.h).clamp(0, 10) as u8;
+                let _ = self.settings.save();
+            }
+            4 if nav.h != 0 || nav.confirm => {
+                self.settings.rumble = !self.settings.rumble;
+                let _ = self.settings.save();
+            }
+            i if (5..5 + 2 * pad_rows).contains(&i) && nav.confirm => {
+                self.rebind = Some(((i - 5) / pad_rows, PadAction::ALL[(i - 5) % pad_rows]));
                 self.rebind_started = self.frame_no;
             }
-            i if i == 3 + 2 * pad_rows && nav.confirm => {
+            i if i == 5 + 2 * pad_rows && nav.confirm => {
                 self.settings.pad = Default::default();
                 let _ = self.settings.save();
             }
-            i if i == 4 + 2 * pad_rows && nav.confirm => {
+            i if i == 6 + 2 * pad_rows && nav.confirm => {
                 let _ = self.settings.save();
                 self.screen = Screen::Menu;
             }
@@ -1138,6 +1159,7 @@ impl App {
                     hitboxes: false,
                 };
                 self.draw_match(&mut p, opts);
+                self.feedback(true);
                 hint(&mut p, "DEMO   ENTER / ESC BACK");
             }
             Screen::AnimViewer => self.draw_viewer(),
@@ -1152,17 +1174,20 @@ impl App {
             Screen::Versus => {
                 let opts = self.scene_opts(false, None);
                 self.draw_match(&mut p, opts);
+                self.feedback(true);
                 self.draw_clock(&mut p);
             }
             Screen::Training => {
                 let opts = self.scene_opts(self.show_boxes, None);
                 self.draw_match(&mut p, opts);
+                self.feedback(true);
                 hint(&mut p, "TAB BOXES   BACKSPACE RESET   ESC BACK");
             }
             Screen::OnlineMatch => {
                 let local = self.net.as_ref().map(|n| n.local_handle());
                 let opts = self.scene_opts(false, local);
                 self.draw_match(&mut p, opts);
+                self.feedback(true);
                 self.draw_clock(&mut p);
                 self.draw_online_overlay(&mut p);
             }
@@ -1176,6 +1201,48 @@ impl App {
             self.scene.draw(&self.gs, opts);
         } else {
             viz::draw_scene(p, &self.gs, opts);
+        }
+    }
+
+    /// One-shot feedback for effects born since the last drawn frame: sound
+    /// and controller rumble. Pure function of the displayed state.
+    fn feedback(&mut self, with_audio: bool) {
+        if with_audio {
+            if let Some(a) = self.audio.as_mut() {
+                a.volume = self.settings.sfx_volume as f32 / 10.0;
+                a.update(&self.gs);
+            }
+        }
+        self.hub.rumble_enabled = self.settings.rumble;
+        let frame = self.gs.frame;
+        self.rumble_seen
+            .retain(|(b, _)| *b + 40 >= frame && *b <= frame);
+        for fx in &self.gs.fx {
+            let tag = fx.kind as u8;
+            if fx.born + 6 < frame
+                || self
+                    .rumble_seen
+                    .iter()
+                    .any(|(b, k)| *b == fx.born && *k == tag)
+            {
+                continue;
+            }
+            self.rumble_seen.push((fx.born, tag));
+            let (victim, strength) = match fx.kind {
+                crate::sim::FxKind::Hit => (fx.who, (0.35 + fx.magnitude / 40.0).min(1.0)),
+                crate::sim::FxKind::Shield => (fx.who, 0.3),
+                crate::sim::FxKind::Blast => (fx.who, 1.0),
+                _ => continue,
+            };
+            // The victim's pad gets the full hit; the other player's a tap.
+            for slot in 0..2usize {
+                let s = if victim as usize == slot {
+                    strength
+                } else {
+                    strength * 0.35
+                };
+                self.hub.rumble(slot, s);
+            }
         }
     }
 
@@ -1743,6 +1810,7 @@ impl App {
 
 async fn amain(opts: LaunchOpts) {
     let mut app = App::new(opts);
+    app.audio = audio::load().await;
     loop {
         app.update();
         app.draw();

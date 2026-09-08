@@ -31,6 +31,10 @@ pub struct Settings {
     pub input_delay: u8,
     /// Draw matches with the 3D renderer (false = classic 2D placeholder view).
     pub render_3d: bool,
+    /// Sound effects volume, 0..=10.
+    pub sfx_volume: u8,
+    /// Controller vibration on hits.
+    pub rumble: bool,
     /// Display name shown to the peer (ASCII, short).
     pub name: String,
     /// Gamepad bindings for player slots 1 and 2.
@@ -46,6 +50,8 @@ impl Default for Settings {
             host_port: 7777,
             input_delay: 2,
             render_3d: true,
+            sfx_volume: 8,
+            rumble: true,
             name: "PLAYER".to_owned(),
             pad: [PadBindings::default(), PadBindings::default()],
             last_character: 0,
@@ -140,6 +146,15 @@ impl Settings {
         }
         if let Some(v) = kv.get("render_3d") {
             s.render_3d = v.trim() != "0" && v.trim() != "false";
+        }
+        if let Some(v) = kv
+            .get("sfx_volume")
+            .and_then(|v| v.trim().parse::<u8>().ok())
+        {
+            s.sfx_volume = v.min(10);
+        }
+        if let Some(v) = kv.get("rumble") {
+            s.rumble = v.trim() != "0" && v.trim() != "false";
         }
         if let Some(v) = kv.get("name") {
             s.name = sanitize_name(v);

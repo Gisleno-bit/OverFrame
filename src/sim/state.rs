@@ -63,14 +63,29 @@ pub struct Fx {
     pub max_life: u32,
     pub kind: FxKind,
     pub magnitude: f32,
+    /// Direction the effect points (launch direction for hits, unit vector).
+    pub dir: Vec2,
+    /// Frame the effect was created on (lets the renderer trigger one-shot
+    /// feedback such as sound exactly once per event, even across rollbacks).
+    pub born: u64,
+    /// The fighter the effect belongs to (victim for hits/blocks, actor for
+    /// the rest); `u8::MAX` if none. Used for controller rumble.
+    pub who: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FxKind {
     Hit,
     Shield,
+    Powershield,
     Blast,
     Dust,
+    /// Landing thump (no visual beyond dust).
+    Land,
+    Jump,
+    /// Attack start (whiff swing sound).
+    Swing,
+    Tech,
 }
 
 /// The entire simulation state for one match.
@@ -167,6 +182,42 @@ impl GameState {
             let out = self.fighters[i].tick(&input, &self.stage);
             if out.spawn_projectile {
                 spawn_reqs.push(i);
+            }
+            if out.events != 0 {
+                use super::fighter::ev;
+                let (feet, speed, facing, centre, swing_dmg) = {
+                    let f = &self.fighters[i];
+                    let heavy = match f.state {
+                        State::Attack { id, .. } => attacks::data(f.character.id, id).hitbox.damage,
+                        _ => 5.0,
+                    };
+                    (f.pos, f.vel.length(), f.facing, f.body_center(), heavy)
+                };
+                let me = i as u8;
+                if out.events & ev::LAND != 0 {
+                    self.push_fx_who(feet, FxKind::Dust, 6.0 + speed, Vec2::new(0.0, 1.0), me);
+                    self.push_fx_who(feet, FxKind::Land, 4.0 + speed, Vec2::new(0.0, 1.0), me);
+                }
+                if out.events & ev::WAVEDASH != 0 {
+                    self.push_fx_dir(feet, FxKind::Dust, 10.0, Vec2::new(-facing, 0.3));
+                    self.push_fx(feet, FxKind::Land, 6.0);
+                }
+                if out.events & ev::JUMP != 0 {
+                    self.push_fx_dir(feet, FxKind::Dust, 5.0, Vec2::new(0.0, 1.0));
+                    self.push_fx(feet, FxKind::Jump, 5.0);
+                }
+                if out.events & ev::DOUBLE_JUMP != 0 {
+                    self.push_fx(feet, FxKind::Jump, 3.0);
+                }
+                if out.events & ev::DASH != 0 {
+                    self.push_fx_dir(feet, FxKind::Dust, 7.0, Vec2::new(-facing, 0.2));
+                }
+                if out.events & ev::SWING != 0 {
+                    self.push_fx_dir(centre, FxKind::Swing, swing_dmg, Vec2::new(facing, 0.0));
+                }
+                if out.events & ev::TECH != 0 {
+                    self.push_fx(feet, FxKind::Tech, 8.0);
+                }
             }
         }
 
@@ -309,7 +360,7 @@ impl GameState {
                     let already = self.fighters[i].already_hit;
                     if !already {
                         if let Some(j) = grabbing_i {
-                            self.apply_hit(i, j, &md.hitbox, inputs, true);
+                            self.apply_hit(i, j, &md.hitbox, inputs, true, false);
                             self.fighters[i].already_hit = true;
                             self.fighters[i].grabbing = None;
                             self.fighters[j].grabbed_by = None;
@@ -325,6 +376,13 @@ impl GameState {
                 None => continue,
             };
             let (hitbox, hb_world) = hb;
+            let hb_prev = self.fighters[i].active_hitbox_prev().unwrap_or(hb_world);
+            let electric = match state_i {
+                State::Attack { id, .. } => {
+                    attacks::data(self.fighters[i].character.id, id).electric
+                }
+                _ => false,
+            };
             for j in 0..n {
                 if j == i {
                     continue;
@@ -333,8 +391,9 @@ impl GameState {
                 if !victim.can_be_hit() {
                     continue;
                 }
-                let vc = victim.body_center();
-                let dist = (vc - hb_world).length();
+                // Swept sphere (this tick's travel) against the hurt capsule.
+                let (h0, h1) = victim.hurt_segment();
+                let dist = super::math::segment_distance(hb_prev, hb_world, h0, h1);
                 if dist > hitbox.radius + victim.hurt_radius() {
                     continue;
                 }
@@ -342,21 +401,41 @@ impl GameState {
                 // Shielding blocks if the attack comes from the front.
                 let from_front = (hb_world.x - victim.pos.x) * victim.facing >= -2.0;
                 if victim.is_shielding() && from_front {
-                    let push = 0.6 + hitbox.damage * 0.05;
-                    self.fighters[j].shield_hit(hitbox.damage, push);
+                    let ps = self.fighters[j].shield_hit(hitbox.damage);
                     let vp = self.fighters[j].body_center();
-                    self.push_fx(vp, FxKind::Shield, hitbox.damage);
+                    if ps {
+                        self.push_fx_who(
+                            vp,
+                            FxKind::Powershield,
+                            hitbox.damage,
+                            Vec2::new(facing_i, 0.0),
+                            j as u8,
+                        );
+                        self.fighters[i].hitlag = knockback::hitlag(hitbox.damage, electric, false);
+                    } else {
+                        self.push_fx_who(
+                            vp,
+                            FxKind::Shield,
+                            hitbox.damage,
+                            Vec2::new(facing_i, 0.0),
+                            j as u8,
+                        );
+                        let hl = knockback::hitlag(hitbox.damage, electric, false);
+                        self.fighters[i].hitlag = hl;
+                        // The attacker is nudged back a little too.
+                        let push = knockback::shield_push(hitbox.damage) * 0.35;
+                        if self.fighters[i].grounded {
+                            self.fighters[i].vel.x -= facing_i * push;
+                        }
+                    }
                     self.fighters[i].already_hit = true;
-                    let hl = knockback::hitlag(hitbox.damage);
-                    self.fighters[i].hitlag = hl;
                     break;
                 }
 
-                self.apply_hit(i, j, &hitbox, inputs, false);
+                self.apply_hit(i, j, &hitbox, inputs, false, electric);
                 self.fighters[i].already_hit = true;
                 break;
             }
-            let _ = facing_i;
         }
     }
 
@@ -368,6 +447,7 @@ impl GameState {
         hitbox: &attacks::Hitbox,
         inputs: &[PlayerInput],
         is_throw: bool,
+        electric: bool,
     ) {
         let attacker_facing = self.fighters[i].facing;
 
@@ -376,17 +456,29 @@ impl GameState {
         self.fighters[j].percent = (self.fighters[j].percent + hitbox.damage).min(999.0);
         let percent_after = self.fighters[j].percent;
 
-        // Knockback magnitude.
-        let kb = knockback::knockback(
+        // Knockback magnitude; crouch-cancelling (crouching on the ground)
+        // takes a third off, and the victim's hitlag with it.
+        let (victim_grounded, crouch_cancel) = {
+            let v = &self.fighters[j];
+            (
+                v.grounded,
+                v.grounded && matches!(v.state, State::Crouch) && !is_throw,
+            )
+        };
+        let mut kb = knockback::knockback(
             percent_after,
             hitbox.damage,
             victim_weight,
             hitbox.kbg,
             hitbox.bkb,
         );
+        if crouch_cancel {
+            kb *= k::CROUCH_CANCEL;
+        }
 
-        // World launch angle (mirror by attacker facing).
-        let mut angle = hitbox.angle_deg.to_radians();
+        // World launch angle (Sakurai angle resolved here; mirror by facing).
+        let angle_deg = knockback::resolve_angle(hitbox.angle_deg, kb, victim_grounded);
+        let mut angle = angle_deg.to_radians();
         if attacker_facing < 0.0 {
             angle = std::f32::consts::PI - angle;
         }
@@ -394,7 +486,8 @@ impl GameState {
         let di_stick = inputs.get(j).copied().unwrap_or_default().stick;
         let angle = knockback::apply_di(angle, di_stick);
 
-        let hitlag = knockback::hitlag(hitbox.damage);
+        let hitlag_attacker = knockback::hitlag(hitbox.damage, electric, false);
+        let hitlag_victim = knockback::hitlag(hitbox.damage, electric, crouch_cancel);
 
         // Super armour (e.g. Boulder's *Bulwark*): during smash startup, weak
         // knockback is absorbed — damage is taken, but no launch, no hitstun.
@@ -411,8 +504,8 @@ impl GameState {
         };
         if armored {
             self.fighters[j].anim_flash = 6;
-            self.fighters[j].hitlag = hitlag / 2;
-            self.fighters[i].hitlag = hitlag;
+            self.fighters[j].hitlag = hitlag_victim / 2;
+            self.fighters[i].hitlag = hitlag_attacker;
             let vp = self.fighters[j].body_center();
             self.push_fx(vp, FxKind::Shield, hitbox.damage);
             return;
@@ -422,13 +515,16 @@ impl GameState {
         let hitstun = knockback::hitstun(kb).max(if is_throw { 8 } else { 4 });
         let tumble = knockback::causes_tumble(kb);
 
-        self.fighters[j].apply_launch(launch, hitstun, tumble, hitlag);
-        self.fighters[i].hitlag = hitlag;
+        self.fighters[j].apply_launch(launch, hitstun, tumble, hitlag_victim);
+        self.fighters[i].hitlag = hitlag_attacker;
 
         let vp = self.fighters[j].body_center();
-        self.push_fx(vp, FxKind::Hit, hitbox.damage);
-        self.camera_shake = (self.camera_shake + hitbox.damage * 0.35 + kb * 0.02).min(14.0);
-        self.hitstop_flash = 1.0;
+        let dir = Vec2::new(angle.cos(), angle.sin());
+        self.push_fx_who(vp, FxKind::Hit, hitbox.damage + kb * 0.15, dir, j as u8);
+        // Camera: a small kick on every hit, a real shake only on big ones.
+        let strong = (kb - 70.0).max(0.0) * 0.06;
+        self.camera_shake = (self.camera_shake + hitbox.damage * 0.18 + strong).min(12.0);
+        self.hitstop_flash = if kb > 90.0 { 1.0 } else { 0.55 };
     }
 
     fn update_grabs(&mut self) {
@@ -487,7 +583,10 @@ impl GameState {
                 if !v.can_be_hit() {
                     continue;
                 }
-                if (v.body_center() - p.pos).length() < attacks::PROJECTILE_RADIUS + v.hurt_radius()
+                let (h0, h1) = v.hurt_segment();
+                let prev = p.pos - p.vel;
+                if super::math::segment_distance(prev, p.pos, h0, h1)
+                    < attacks::PROJECTILE_RADIUS + v.hurt_radius()
                 {
                     hits.push((pi, j));
                     break;
@@ -508,7 +607,7 @@ impl GameState {
             let owner = self.projectiles[pi].owner;
             let saved_facing = self.fighters[owner].facing;
             self.fighters[owner].facing = owner_facing;
-            self.apply_hit(owner, j, &hb, inputs, false);
+            self.apply_hit(owner, j, &hb, inputs, false, false);
             self.fighters[owner].facing = saved_facing;
             self.fighters[owner].hitlag = 0; // projectile owner doesn't freeze
             self.projectiles[pi].active = false;
@@ -525,7 +624,7 @@ impl GameState {
             };
             if ko {
                 let bp = self.fighters[i].pos;
-                self.push_fx(bp, FxKind::Blast, 12.0);
+                self.push_fx_who(bp, FxKind::Blast, 12.0, Vec2::new(0.0, 1.0), i as u8);
                 self.camera_shake = (self.camera_shake + 10.0).min(16.0);
                 let f = &mut self.fighters[i];
                 f.stocks -= 1;
@@ -540,11 +639,21 @@ impl GameState {
     }
 
     fn push_fx(&mut self, pos: Vec2, kind: FxKind, magnitude: f32) {
+        self.push_fx_dir(pos, kind, magnitude, Vec2::new(1.0, 0.0));
+    }
+
+    fn push_fx_dir(&mut self, pos: Vec2, kind: FxKind, magnitude: f32, dir: Vec2) {
+        self.push_fx_who(pos, kind, magnitude, dir, u8::MAX);
+    }
+
+    fn push_fx_who(&mut self, pos: Vec2, kind: FxKind, magnitude: f32, dir: Vec2, who: u8) {
         let life = match kind {
-            FxKind::Hit => 10,
+            FxKind::Hit => 12,
             FxKind::Shield => 8,
+            FxKind::Powershield => 10,
             FxKind::Blast => 22,
-            FxKind::Dust => 12,
+            FxKind::Dust => 14,
+            FxKind::Land | FxKind::Jump | FxKind::Swing | FxKind::Tech => 2,
         };
         if self.fx.len() < 64 {
             self.fx.push(Fx {
@@ -552,7 +661,10 @@ impl GameState {
                 life,
                 max_life: life,
                 kind,
-                magnitude: clampf(magnitude, 1.0, 30.0),
+                magnitude: clampf(magnitude, 1.0, 40.0),
+                dir,
+                born: self.frame,
+                who,
             });
         }
     }
