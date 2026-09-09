@@ -532,11 +532,11 @@ pub fn draw_hud<P: Painter>(p: &mut P, w: f32, h: f32, gs: &GameState, local: Op
         } else {
             0.0
         };
-        let sc = 3.0 + 1.3 * pop;
+        let sc = 3.0 + 0.8 * pop;
         let kick = if pop > 0.0 && age % 2 == 0 { 2.0 } else { 0.0 };
         let tw = font::text_width(&txt, sc);
         let px = x + panel_w * 0.5 - tw * 0.5 + kick;
-        let py = base_y + 26.0 - 4.0 * pop;
+        let py = base_y + 26.0 - 1.5 * pop;
         if pop > 0.0 {
             // Brief white flash behind the new number.
             let fl = Color::rgba(255, 255, 255, (150.0 * pop) as u8);
