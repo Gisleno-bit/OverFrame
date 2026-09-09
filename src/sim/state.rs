@@ -192,7 +192,10 @@ impl GameState {
             })
             .collect();
         for i in 0..n {
-            self.fighters[i].ledge_blocked = (0..n).filter(|&j| j != i).find_map(|j| held[j]);
+            self.fighters[i].ledge_blocked = (0..n)
+                .filter(|&j| j != i)
+                .filter_map(|j| held[j])
+                .fold(0u8, |m, l| m | (1 << (l & 7)));
             let input = inputs.get(i).copied().unwrap_or_default();
             let out = self.fighters[i].tick(&input, &self.stage);
             if out.spawn_projectile {

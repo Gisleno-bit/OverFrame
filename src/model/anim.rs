@@ -378,6 +378,7 @@ pub fn strike_spec(id: MoveId) -> Strike {
     };
     match id {
         MoveId::Jab => s(ArmR, 25.0, 6.0, 0.0, 20.0),
+        MoveId::Jab2 => s(ArmL, 30.0, 8.0, 0.0, -20.0),
         MoveId::Ftilt => s(LegR, 40.0, 4.0, 1.0, 10.0),
         MoveId::Utilt => s(LegR, 50.0, -10.0, 1.5, 0.0),
         MoveId::Dtilt => s(LegR, 30.0, 18.0, 6.0, 0.0),

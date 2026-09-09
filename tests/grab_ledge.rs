@@ -428,8 +428,9 @@ fn ledge_roll_and_attack_follow_their_timelines() {
         let mut active = vec![];
         let mut n = 1;
         while matches!(gs.fighters[0].state, State::LedgeAction { .. }) {
-            if gs.fighters[0].active_hitbox().is_some() {
+            if let Some((hb, _)) = gs.fighters[0].active_hitbox() {
                 active.push(gs.fighters[0].state_frame);
+                assert_eq!(hb.damage, k::LEDGE_ATTACK_DAMAGE[tired], "fixed power");
             }
             gs.step(&[neutral()]);
             n += 1;

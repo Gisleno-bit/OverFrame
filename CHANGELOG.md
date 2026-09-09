@@ -64,7 +64,12 @@ pseudocode and measurements — is `docs/GAME_FEEL.md`.
   tilt (up / down tilts at 0.5), neutral is a jab; **smash charging** (hold
   attack, up to 60 frames, ×1.367 damage with knockback to match, trembling
   wind-up pose); C-stick smashes stay instant and uncharged.
-- **Edgehogging**: a ledge someone hangs from cannot be grabbed.
+- **Jab 2** (`MoveId::Jab2`) for every fighter: a second attack press after
+  the first jab connects chains into it; whiffed jabs don't.
+- Rolls, tech rolls and getup rolls **stop at the platform edge** instead
+  of carrying you off; ledge attacks have fixed power (8 % / 10 % tired).
+- **Edgehogging**: a ledge someone hangs from cannot be grabbed (any number
+  of held ledges).
 - **Edge-cancel**: landing lag and wavelands end at once when you slide off
   a platform.
 - **Percent pop** on the HUD after every hit (from the sim's
@@ -89,7 +94,7 @@ pseudocode and measurements — is `docs/GAME_FEEL.md`.
   tech / wavedash) so audio, rumble and VFX are pure functions of the sim
   state and rollback-safe (de-duplicated by `(born, kind)`).
 - `tests/feel.rs` (15), `tests/grab_ledge.rs` (11) and `tests/neutral.rs`
-  (11) pinning every rule above; 90 tests total.
+  (13) pinning every rule above; 92 tests total.
 - Animation-viewer clips for HELPLESS and SHIELD DROP; poses in `anim.rs`.
 
 ### Changed

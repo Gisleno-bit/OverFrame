@@ -254,6 +254,9 @@ away** = let go (keeping the intangibility).
 | Smash charge | hold A, ≤ 60 f, ×1.367 | none | **implemented** at `⌈startup/2⌉`, damage rounded, knockback follows, tremble pose; C-stick never charges | `charge`, `charge_multiplier` |
 | Edgehog | occupied ledge can't be grabbed | both could hang | **implemented** (`ledge_blocked`) | `GameState::step` |
 | Edge-cancel | slide off → lag ends | lag ran its course in the air | **implemented** for landing lag and wavelands | `Fighter::tick` |
+| Jab combo | jab 1 → jab 2 on a second press after the first connects | single jab | **`Jab2`** for every fighter (Kestrel 2–3 / 22, 4 %, 60°), chain window = active frames + 10; whiffs don't chain | `JAB_CHAIN_WINDOW` |
+| Rolls at edges | stop at the platform edge | could roll off | **rolls, tech rolls and getup rolls clamp to the platform** | `slide_on_platform` |
+| Ledge attack power | fixed 6–10 % | the character's f-tilt damage | **8 % fresh / 10 % tired** with the f-tilt shape | `LEDGE_ATTACK_DAMAGE` |
 | Percent counter | pops on hit | static | **scales up, kicks and flashes for 10 frames** from the sim's `last_hit_frame` (rollback-safe) | `viz::draw_hud` | The durations of the getup
 options are original, class-shaped values (the public pages give the
 mechanics — 7-frame catch, 37 intangible, 100 % threshold, committed jump —
@@ -307,10 +310,11 @@ Each step is one commit-sized change; all of them are in `100fc76` and
     grab and up-smash, platform drop by a down tap, clank / priority with
     rebound, stale-move negation, meteor cancel, percent pop on the HUD.
 14. **Inputs and edges**: flick-based smash detection with tilts at any held
-    tilt, smash charging, edgehogging, edge-cancelled landing lag.
+    tilt, smash charging, edgehogging, edge-cancelled landing lag, jab 1 →
+    jab 2, rolls that stop at the edge, fixed ledge-attack power.
 15. **Tests** (`tests/feel.rs` 15, `tests/grab_ledge.rs` 11,
-    `tests/neutral.rs` 11) pin every rule above; the old suites still pass
-    (90 tests total).
+    `tests/neutral.rs` 13) pin every rule above; the old suites still pass
+    (92 tests total).
 
 ---
 
@@ -496,7 +500,7 @@ each drawn frame with displayed state S:
 | `hang_time_is_11s_fresh_and_8s_tired` | 660 / 480 frames then drop |
 | `helpless_fighters_can_still_catch_the_ledge` | recovery can grab |
 
-`tests/neutral.rs` (11 tests) — all green:
+`tests/neutral.rs` (13 tests) — all green:
 
 | Test | Asserts |
 |---|---|
@@ -511,11 +515,13 @@ each drawn frame with displayed state S:
 | `a_flick_is_a_smash_a_held_stick_is_a_tilt_and_holding_charges` | flick + A = f-smash; held walk-tilt + A = f-tilt; full charge lands after 60+ frames for ×1.367; partial charge in between; C-stick smash uncharged |
 | `an_occupied_ledge_cannot_be_grabbed` | second fighter falls past a held ledge; free again once released |
 | `landing_lag_is_edge_cancelled_by_sliding_off` | a waveland that slides off a platform is airborne well before its 10 frames |
+| `jab_chains_into_jab_2_only_after_it_connects` | jab → jab 2 lands (3 % + 4 %); a whiffed jab never chains |
+| `rolls_stop_at_the_platform_edge` | a roll and a tech roll toward the edge stop exactly at it, still grounded |
 
 Plus the unchanged suites: `mechanics` (9), `determinism` (1, GGRS
 SyncTest), `content` (7), `netcode_flow` (8), `gamepad_map` (7) and the
-`src/` unit tests (21, of which 18 are the `model` layer) = **90 tests**
-with `cargo test` (86 without the GUI feature). Determinism across rollbacks is what makes it safe to
+`src/` unit tests (21, of which 18 are the `model` layer) = **92 tests**
+with `cargo test` (88 without the GUI feature). Determinism across rollbacks is what makes it safe to
 drive sound and rumble from the sim.
 
 ### 6.2 Measured numbers (this build)

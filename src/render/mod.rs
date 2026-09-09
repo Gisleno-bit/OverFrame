@@ -346,6 +346,7 @@ fn viewer_clips() -> Vec<Clip> {
             crate::sim::constants::SHIELD_DROP,
         ),
         atk("JAB", M::Jab, false),
+        atk("JAB 2", M::Jab2, false),
         atk("FORWARD TILT", M::Ftilt, false),
         atk("UP TILT", M::Utilt, false),
         atk("DOWN TILT", M::Dtilt, false),

@@ -13,6 +13,8 @@ use super::roster::CharacterId;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MoveId {
     Jab,
+    /// Second jab: attack again after the first jab's hit (jab 1 → jab 2).
+    Jab2,
     Ftilt,
     Utilt,
     Dtilt,
@@ -180,8 +182,9 @@ pub fn is_smash(id: MoveId) -> bool {
 }
 
 /// Every move id, for validation tests and tooling.
-pub const ALL_MOVES: [MoveId; 21] = [
+pub const ALL_MOVES: [MoveId; 22] = [
     MoveId::Jab,
+    MoveId::Jab2,
     MoveId::Ftilt,
     MoveId::Utilt,
     MoveId::Dtilt,
@@ -212,6 +215,7 @@ fn kestrel(id: MoveId) -> MoveData {
     match id {
         //         su ac el  offset        rad  dmg  ang   kbg   bkb  land aer reach
         Jab => mv(1, 2, 14, (13.0, 6.0), 7.5, 3.0, 361.0, 20.0, 12.0, 0, false, 16.0),
+        Jab2 => mv(2, 2, 18, (14.0, 7.0), 7.5, 4.0, 60.0, 30.0, 22.0, 0, false, 16.0),
         Ftilt => mv(4, 3, 18, (18.0, 4.0), 8.5, 8.0, 361.0, 70.0, 15.0, 0, false, 22.0),
         Utilt => mv(4, 4, 15, (4.0, 18.0), 9.5, 7.0, 95.0, 90.0, 18.0, 0, false, 22.0),
         Dtilt => mv(6, 3, 18, (16.0, -4.0), 8.0, 7.0, 25.0, 45.0, 20.0, 0, false, 20.0),
@@ -248,6 +252,7 @@ fn boulder(id: MoveId) -> MoveData {
     match id {
         //         su  ac el  offset        rad   dmg  ang   kbg   bkb  land aer  reach
         Jab => mv(4, 2, 16, (15.0, 7.0), 9.5, 5.0, 361.0, 25.0, 18.0, 0, false, 18.0),
+        Jab2 => mv(4, 3, 22, (17.0, 8.0), 10.0, 7.0, 55.0, 40.0, 30.0, 0, false, 20.0),
         Ftilt => mv(8, 4, 24, (21.0, 5.0), 11.5, 12.0, 361.0, 75.0, 22.0, 0, false, 26.0),
         Utilt => mv(8, 5, 22, (4.0, 22.0), 12.5, 11.0, 92.0, 95.0, 24.0, 0, false, 26.0),
         Dtilt => mv(8, 4, 22, (19.0, -5.0), 10.0, 10.0, 24.0, 45.0, 26.0, 0, false, 24.0),
@@ -283,6 +288,7 @@ fn viper(id: MoveId) -> MoveData {
     match id {
         //         su ac el  offset        rad  dmg  ang   kbg   bkb  land aer reach
         Jab => mv(1, 2, 11, (12.0, 5.0), 7.0, 2.0, 361.0, 15.0, 10.0, 0, false, 14.0),
+        Jab2 => mv(2, 2, 15, (13.0, 6.0), 7.0, 3.0, 65.0, 25.0, 20.0, 0, false, 14.0),
         Ftilt => mv(4, 3, 14, (16.0, 4.0), 8.0, 6.0, 361.0, 60.0, 12.0, 0, false, 20.0),
         Utilt => mv(3, 4, 13, (3.0, 16.0), 9.0, 5.0, 96.0, 80.0, 15.0, 0, false, 20.0),
         Dtilt => mv(4, 3, 14, (15.0, -4.0), 7.0, 6.0, 20.0, 40.0, 18.0, 0, false, 18.0),

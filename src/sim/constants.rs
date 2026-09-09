@@ -192,6 +192,13 @@ pub const LEDGE_ROLL: [(u32, u32); 2] = [(49, 30), (79, 50)];
 /// [`LEDGE_ATTACK_ACTIVE`] frames and uses the character's forward tilt.
 pub const LEDGE_ATTACK: [(u32, u32, u32); 2] = [(55, 20, 24), (69, 34, 42)];
 pub const LEDGE_ATTACK_ACTIVE: u32 = 3;
+/// Ledge attack damage, fresh / tired (the f-tilt hitbox shape, fixed power).
+pub const LEDGE_ATTACK_DAMAGE: [f32; 2] = [8.0, 10.0];
+
+/// Jab 2: pressing attack again once the first jab has hit (from its first
+/// active frame until this many frames into its recovery) chains into the
+/// second jab.
+pub const JAB_CHAIN_WINDOW: u32 = 10;
 /// Ledge jump: frames on the ledge before leaving, then frames airborne with
 /// no actions (drift only) — a committed option, as in the reference.
 pub const LEDGE_JUMP: (u32, u32) = (10, 20);

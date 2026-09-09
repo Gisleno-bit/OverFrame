@@ -166,8 +166,9 @@ pub struct Fighter {
     pub charge: u32,
     /// The current smash was started with the attack button (may charge).
     pub charge_armed: bool,
-    /// A ledge another fighter is holding this tick (edgehog): cannot grab.
-    pub ledge_blocked: Option<usize>,
+    /// Bit mask of ledges other fighters hold this tick (edgehog): cannot
+    /// grab those.
+    pub ledge_blocked: u8,
 
     pub already_hit: bool,
     pub respawn_timer: u32,
@@ -198,6 +199,12 @@ pub struct TickOut {
     /// Feedback events raised this tick (see [`ev`]), consumed by the match
     /// state to spawn effects / sounds or to act on the other fighter.
     pub events: u16,
+}
+
+/// Mark a swing on `out` and hand it back (early-return helper).
+fn out_events_swing(out: &mut TickOut) -> TickOut {
+    out.events |= ev::SWING;
+    *out
 }
 
 /// Bit flags for [`TickOut::events`].
@@ -264,7 +271,7 @@ impl Fighter {
             stick_flick: 0,
             charge: 0,
             charge_armed: false,
-            ledge_blocked: None,
+            ledge_blocked: 0,
             already_hit: false,
             respawn_timer: 0,
             kb_vel: Vec2::ZERO,
@@ -384,7 +391,9 @@ impl Fighter {
                 if !(hit..hit + k::LEDGE_ATTACK_ACTIVE).contains(&self.state_frame) {
                     return None;
                 }
-                attacks::data(self.character.id, MoveId::Ftilt).hitbox
+                let mut hb = attacks::data(self.character.id, MoveId::Ftilt).hitbox;
+                hb.damage = k::LEDGE_ATTACK_DAMAGE[self.ledge_tired()];
+                hb
             }
             _ => return None,
         };
@@ -507,8 +516,8 @@ impl Fighter {
             }
             State::Knockdown => self.tick_knockdown(input),
             State::RunTurn => self.tick_run_turn(input),
-            State::Tech { dir } => self.tick_tech(dir),
-            State::Getup { kind } => self.tick_getup(kind),
+            State::Tech { dir } => self.tick_tech(dir, stage),
+            State::Getup { kind } => self.tick_getup(kind, stage),
             State::Rebound { total } if self.state_frame >= total => {
                 self.set_state(State::Stand);
             }
@@ -534,7 +543,7 @@ impl Fighter {
             State::ShieldStun { total } if self.state_frame >= total => {
                 self.set_state(State::Shield);
             }
-            State::Roll { dir } => self.tick_roll(dir),
+            State::Roll { dir } => self.tick_roll(dir, stage),
             State::Spotdodge => self.tick_spotdodge(),
             State::Airdodge => self.tick_airdodge(),
             State::Helpless => {}
@@ -559,6 +568,21 @@ impl Fighter {
             State::JumpSquat => self.tick_jumpsquat(input),
             State::Attack { id, aerial } => {
                 let md = attacks::data(self.character.id, id);
+                // Jab 1 → jab 2: a fresh attack press once the first jab has
+                // come out (and it connected or was blocked) chains.
+                if id == MoveId::Jab
+                    && !aerial
+                    && self.already_hit
+                    && self.pressed(input.buttons, buttons::ATTACK)
+                    && self.state_frame >= md.startup
+                    && self.state_frame < md.startup + md.active + k::JAB_CHAIN_WINDOW
+                {
+                    self.set_state(State::Attack {
+                        id: MoveId::Jab2,
+                        aerial: false,
+                    });
+                    return out_events_swing(&mut out);
+                }
                 // Smash charge: hold the wind-up at its charge frame while
                 // attack stays held (button-started smashes only).
                 if !aerial && attacks::is_smash(id) && self.charge_armed {
@@ -1081,15 +1105,25 @@ impl Fighter {
         }
     }
 
-    fn tick_roll(&mut self, dir: f32) {
+    fn tick_roll(&mut self, dir: f32, stage: &Stage) {
         if self.state_frame == k::ROLL_INTANGIBLE.0 {
             self.intangible = k::ROLL_INTANGIBLE.1 - k::ROLL_INTANGIBLE.0 + 1;
         }
         let step = k::ROLL_DISTANCE / k::ROLL_DURATION as f32;
-        self.pos.x += dir * step;
+        self.slide_on_platform(dir * step, stage);
         self.vel = Vec2::ZERO;
         if self.state_frame >= k::ROLL_DURATION {
             self.set_state(State::Stand);
+        }
+    }
+
+    /// Move along the platform you stand on, stopping at its edges (rolls,
+    /// tech rolls and getup rolls never carry you off a ledge).
+    fn slide_on_platform(&mut self, dx: f32, stage: &Stage) {
+        self.pos.x += dx;
+        if let Some(p) = self.support.and_then(|i| stage.platforms.get(i)) {
+            let hw = self.character.half_width;
+            self.pos.x = self.pos.x.clamp(p.left + hw, p.right - hw);
         }
     }
 
@@ -1153,7 +1187,7 @@ impl Fighter {
             )
         {
             for (i, l) in stage.ledges.iter().enumerate() {
-                if self.ledge_blocked == Some(i) {
+                if self.ledge_blocked & (1 << (i & 7)) != 0 {
                     continue; // edgehogged
                 }
                 let dx = self.pos.x - l.pos.x;
@@ -1550,14 +1584,14 @@ impl Fighter {
         }
     }
 
-    fn tick_tech(&mut self, dir: f32) {
+    fn tick_tech(&mut self, dir: f32, stage: &Stage) {
         let (total, _) = if dir == 0.0 {
             k::TECH_IN_PLACE
         } else {
             k::TECH_ROLL
         };
         if dir != 0.0 && (4..24).contains(&self.state_frame) {
-            self.pos.x += dir * k::TECH_ROLL_DISTANCE / 20.0;
+            self.slide_on_platform(dir * k::TECH_ROLL_DISTANCE / 20.0, stage);
             self.facing = dir;
         }
         self.vel = Vec2::ZERO;
@@ -1566,13 +1600,13 @@ impl Fighter {
         }
     }
 
-    fn tick_getup(&mut self, kind: GetupKind) {
+    fn tick_getup(&mut self, kind: GetupKind, stage: &Stage) {
         self.vel = Vec2::ZERO;
         let total = match kind {
             GetupKind::Stand => k::GETUP_STAND.0,
             GetupKind::Roll { dir } => {
                 if (4..26).contains(&self.state_frame) {
-                    self.pos.x += dir * k::GETUP_ROLL_DISTANCE / 22.0;
+                    self.slide_on_platform(dir * k::GETUP_ROLL_DISTANCE / 22.0, stage);
                     self.facing = dir;
                 }
                 k::GETUP_ROLL.0

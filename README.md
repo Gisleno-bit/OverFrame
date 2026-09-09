@@ -121,6 +121,7 @@ Gamepads are read with [`gilrs`](https://gitlab.com/gilrs-project/gilrs): XInput
 
 **Tech reference**
 
+- **Jab** — Attack neutral; press again after it lands for **jab 2**.
 - **Tilt / smash** — Attack with the stick *held* (any tilt) is a tilt; Attack right as you *flick* the stick, or a **C-stick** flick, is a smash. Keep Attack held to **charge** a smash (up to a second, ×1.37).
 - **Short hop** — tap jump; **full hop** — hold it.
 - **Fast fall** — flick down while descending.

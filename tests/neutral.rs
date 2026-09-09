@@ -640,3 +640,100 @@ fn landing_lag_is_edge_cancelled_by_sliding_off() {
     );
     assert!(gs.fighters[0].pos.x > 125.0, "past the platform edge");
 }
+
+#[test]
+fn jab_chains_into_jab_2_only_after_it_connects() {
+    // Jab that hits → a second attack press during its recovery chains.
+    let mut gs = duel(16.0);
+    let mut chained = false;
+    for i in 0..30u32 {
+        let inp = if i == 0 || i == 6 {
+            press(buttons::ATTACK)
+        } else {
+            neutral()
+        };
+        gs.step(&[inp, neutral()]);
+        if matches!(
+            gs.fighters[0].state,
+            State::Attack {
+                id: MoveId::Jab2,
+                ..
+            }
+        ) {
+            chained = true;
+            break;
+        }
+    }
+    assert!(chained, "jab 1 → jab 2");
+    // The second jab lands too (jab 1 3 % + jab 2 4 %).
+    for _ in 0..30 {
+        gs.step(&[neutral(), neutral()]);
+    }
+    assert_eq!(gs.fighters[1].percent, 3.0 + 4.0);
+
+    // A whiffed jab does not chain: the press is simply eaten.
+    let mut gs = duel(200.0);
+    let mut chained = false;
+    for i in 0..30u32 {
+        let inp = if i == 0 || i == 6 {
+            press(buttons::ATTACK)
+        } else {
+            neutral()
+        };
+        gs.step(&[inp, neutral()]);
+        if matches!(
+            gs.fighters[0].state,
+            State::Attack {
+                id: MoveId::Jab2,
+                ..
+            }
+        ) {
+            chained = true;
+        }
+    }
+    assert!(!chained, "a whiffed jab has no follow-up");
+}
+
+#[test]
+fn rolls_stop_at_the_platform_edge() {
+    // Roll right from near the main platform's right edge: never off it.
+    let mut gs = solo();
+    let m = gs.stage.main();
+    gs.fighters[0].pos = Vec2::new(m.right - 20.0, 0.0);
+    gs.step(&[neutral()]);
+    gs.step(&[stick_press(1.0, 0.0, buttons::SHIELD)]);
+    assert!(matches!(gs.fighters[0].state, State::Roll { .. }));
+    for _ in 0..40 {
+        gs.step(&[neutral()]);
+        assert!(gs.fighters[0].grounded, "stayed on the stage");
+    }
+    let hw = gs.fighters[0].character.half_width;
+    assert!(
+        (gs.fighters[0].pos.x - (m.right - hw)).abs() < 0.01,
+        "stopped at the edge"
+    );
+
+    // Same for a tech roll.
+    let mut gs = solo();
+    gs.fighters[0].pos = Vec2::new(m.right - 30.0, 40.0);
+    gs.fighters[0].grounded = false;
+    gs.fighters[0].state = State::Air;
+    gs.fighters[0].apply_launch(Vec2::new(0.0, 2.0), 90, true, 0);
+    for i in 0..80u32 {
+        let inp = if i == 8 {
+            stick_press(1.0, 0.0, buttons::SHIELD)
+        } else {
+            stick(1.0, 0.0)
+        };
+        gs.step(&[inp]);
+        if matches!(gs.fighters[0].state, State::Tech { .. }) {
+            break;
+        }
+    }
+    assert!(matches!(gs.fighters[0].state, State::Tech { dir } if dir == 1.0));
+    for _ in 0..50 {
+        gs.step(&[neutral()]);
+        assert!(gs.fighters[0].grounded);
+    }
+    assert!(gs.fighters[0].pos.x <= m.right - hw + 0.01);
+}
