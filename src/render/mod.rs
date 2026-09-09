@@ -281,7 +281,7 @@ struct Clip {
 
 fn viewer_clips() -> Vec<Clip> {
     use crate::sim::attacks::MoveId as M;
-    use crate::sim::fighter::State as S;
+    use crate::sim::fighter::{LedgeKind, State as S};
     let g = |label, state, len| Clip {
         label,
         state,
@@ -295,6 +295,21 @@ fn viewer_clips() -> Vec<Clip> {
         grounded: false,
         vel_y,
         len: 60,
+    };
+    let ledge = |label, kind| {
+        let (total, _, _) = crate::sim::fighter::Fighter::new(
+            &crate::sim::roster::KESTREL,
+            0,
+            crate::sim::Vec2::ZERO,
+        )
+        .ledge_option(kind);
+        Clip {
+            label,
+            state: S::LedgeAction { kind },
+            grounded: false,
+            vel_y: 0.0,
+            len: total,
+        }
     };
     let atk = |label, id, aerial| Clip {
         label,
@@ -352,6 +367,10 @@ fn viewer_clips() -> Vec<Clip> {
         a("TUMBLE", S::Hitstun { tumble: true }, 1.0),
         g("KNOCKDOWN", S::Knockdown, 60),
         a("LEDGE HANG", S::LedgeGrab, 0.0),
+        ledge("LEDGE GETUP", LedgeKind::Getup),
+        ledge("LEDGE ATTACK", LedgeKind::Attack),
+        ledge("LEDGE ROLL", LedgeKind::Roll),
+        ledge("LEDGE JUMP", LedgeKind::Jump),
     ]
 }
 

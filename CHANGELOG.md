@@ -29,6 +29,20 @@ pseudocode and measurements — is `docs/GAME_FEEL.md`.
   stick tilt** (a half tilt is a half wavedash), and **doubled traction on
   release** so walk / run stops are precise while wavedash slides keep their
   length.
+- **Grabs**: standing grab hits on frames 7–8 of 30, **dash grab** on
+  12–13 of 40 and slides; the hold lasts `⌊76 + 1.6 × percent⌋` frames,
+  **mashing** (any fresh button or stick direction) takes 6 off; **pummel**
+  (attack / grab while holding, 2 %, 20-frame cooldown); throws by **stick
+  or C-stick direction**; **grab release** with lag on both and the victim
+  shoved off (previously the victim could stay stuck).
+- **Ledges**: 7-frame catch, **37** frames of intangibility that is **kept
+  when you let go** (ledgedash), hang limit 11 s / 8 s, **fresh / tired
+  (100 %+) getup options** with their own durations and intangibility
+  (getup 33 / 59, roll 49 / 79, attack hits on 24 / 42 of 55 / 69 with the
+  f-tilt hitbox, **committed ledge jump** 10 + 20 frames), shield = ledge
+  roll, down / away = let go; fighters hang **outside** the edge facing the
+  stage; **helpless** fighters can grab the ledge (recoveries work).
+  Animation viewer clips for every ledge option.
 - **Late hits** (`MoveData::late(frames, scale)`) and per-frame hitbox lookup;
   dash attack carries 85 % of run speed; per-character **dash-dance window**
   (`Character::dash_frames`).
@@ -46,7 +60,8 @@ pseudocode and measurements — is `docs/GAME_FEEL.md`.
 - Simulation events (`Fx { born, who, dir }`; land / jump / swing / dash /
   tech / wavedash) so audio, rumble and VFX are pure functions of the sim
   state and rollback-safe (de-duplicated by `(born, kind)`).
-- `tests/feel.rs` (15 tests) pinning every rule above; 68 tests total.
+- `tests/feel.rs` (15) and `tests/grab_ledge.rs` (11) pinning every rule
+  above; 79 tests total.
 - Animation-viewer clips for HELPLESS and SHIELD DROP; poses in `anim.rs`.
 
 ### Changed

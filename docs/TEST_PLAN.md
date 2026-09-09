@@ -15,6 +15,7 @@ cargo test --no-default-features --features netcode
 | Suite | What it proves |
 |---|---|
 | `tests/feel.rs` (15) | The **game-feel contract** (`docs/GAME_FEEL.md`): hitlag = `⌊d/3+3⌋` on both fighters and nobody moves while frozen; a weak grounded hit slides along the floor; strong hits launch at `0.03×kb` (scaled) with uniform decay and capped gravity; crouch cancel takes a third off; SDI pulses move the victim during hitlag; shieldstun and pushback follow the block formulas; powershield in the first 2 frames; 15-frame shield drop with jump/grab/up-smash cancels; air-dodge ends helpless but still wavedashes; landing lag 4 / full / `⌊lag/2⌋` / autocancel; late hits are weaker and moves end at IASA; dash attack carries momentum, jab plants; run crosses 240 u in ≤ 60 frames; dash-dance window is per character; swept hitboxes don't tunnel. |
+| `tests/grab_ledge.rs` (11) | Standing grab hits on frame 7 of 30, dash grab on 12 of 40 and slides; hold = `⌊76 + 1.6p⌋`, mashing takes 6 per input, release lags both and shoves the victim; pummel on a cooldown, stick throws; ledge catch 7 frames / 37 intangible kept on drop; getup 33 / 59, roll 49 / 79, attack hitbox exactly on 24–26 / 42–44; committed ledge jump; hang limit 660 / 480; helpless fighters grab ledges. |
 | `tests/mechanics.rs` (9) | Movement *feel*: full hop > short hop, fast-fall lands sooner, dash > walk, angled air-dodge wavedashes, L-cancel cuts landing lag, knockback grows with percent, sim is deterministic. |
 | `tests/determinism.rs` (1) | GGRS `SyncTest`: save→load→re-simulate reproduces identical checksums over 400 frames of busy input — the engine is rollback-safe. |
 | `tests/content.rs` (7) | Every character has a complete, sane moveset; archetypes are actually distinct (weight/air/armour/jumps ordering; Boulder fsmash > Kestrel, Viper jab faster than Boulder); stages well-formed; timed match ends on the clock. |
@@ -64,6 +65,13 @@ builds the GUI on Windows/macOS/Linux.
       landing thump, jump and swing whooshes; Options → SFX VOLUME 0 silences
       everything and RUMBLE OFF stops the pads. No audio device → the game
       still runs (silent).
+- [ ] **Grab game**: grab → pummel twice → up-throw reads as three
+      distinct beats; a 0 % victim mashing out breaks free in about a
+      second, at 100 % it can't; a dash grab visibly slides.
+- [ ] **Ledge**: hang outside the edge facing in; nothing responds for the
+      first frames; drop → immediate air-dodge onto the stage while still
+      flashing (ledgedash); at 100 %+ every option is visibly slower; the
+      ledge attack's hitbox appears where the kick is.
 - [ ] Each of the 3 fighters: land every normal, tilt, smash, aerial, special,
       grab and all four throws; confirm none softlock and all deal damage.
 - [ ] Boulder super armour: get hit by a jab mid-smash-startup → armour absorbs

@@ -647,20 +647,59 @@ pub fn fighter_pose(rig: &Rig, f: &Fighter, st: &AnimStyle, frame: u64) -> Pose 
             p.add(rig, "shin_l", v3(0.0, 0.0, -b * 4.0));
             p
         }
-        State::LedgeAction { kind } => match kind {
-            LedgeKind::Getup => {
-                let k = ease(sf as f32 / 12.0);
-                ledge_hang(rig).blend(&crouch(rig, st), k)
+        State::LedgeAction { kind } => {
+            // Each option runs on the sim's own (fresh / tired) timeline:
+            // hang → pull up over the first two fifths, then the option.
+            let (total, _, hit) = f.ledge_option(kind);
+            let climb = (total * 2 / 5).max(1) as f32;
+            match kind {
+                LedgeKind::Getup => {
+                    if (sf as f32) < climb {
+                        ledge_hang(rig).blend(&crouch(rig, st), ease(sf as f32 / climb))
+                    } else {
+                        let rest = (total as f32 - climb).max(1.0);
+                        let k = ease(((sf as f32 - climb) / rest).min(1.0));
+                        crouch(rig, st).blend(&base_ground, k)
+                    }
+                }
+                LedgeKind::Jump => {
+                    let up = crate::sim::constants::LEDGE_JUMP.0.max(1) as f32;
+                    ledge_hang(rig).blend(&air(rig, true, false), ease((sf as f32 / up).min(1.0)))
+                }
+                LedgeKind::Roll => {
+                    if (sf as f32) < climb {
+                        ledge_hang(rig).blend(&crouch(rig, st), ease(sf as f32 / climb))
+                    } else {
+                        let rest = (total as f32 - climb).max(1.0);
+                        let k = ((sf as f32 - climb) / rest).min(1.0);
+                        let mut p = crouch(rig, st);
+                        spin_body(&mut p, rig, -f.facing * 360.0 * ease(k), centre);
+                        p
+                    }
+                }
+                LedgeKind::Attack => {
+                    // Strike on the ledge attack's hit frame: shift the tilt's
+                    // timeline so its startup ends exactly there.
+                    let md = attacks::data(f.character.id, MoveId::Ftilt);
+                    let shift = hit.saturating_sub(md.startup);
+                    if sf < shift.saturating_sub(6) {
+                        ledge_hang(rig)
+                    } else {
+                        let pre = shift.saturating_sub(6);
+                        let k = ease(((sf - pre) as f32 / 6.0).min(1.0));
+                        let base = ledge_hang(rig).blend(&base_ground, k);
+                        attack(
+                            rig,
+                            f,
+                            MoveId::Ftilt,
+                            sf.saturating_sub(shift),
+                            &base,
+                            st.heavy,
+                        )
+                    }
+                }
             }
-            LedgeKind::Jump => ledge_hang(rig).blend(&air(rig, true, false), ease(sf as f32 / 6.0)),
-            LedgeKind::Roll => {
-                let k = (sf as f32 / 20.0).min(1.0);
-                let mut p = crouch(rig, st);
-                spin_body(&mut p, rig, -f.facing * 360.0 * ease(k), centre);
-                p
-            }
-            LedgeKind::Attack => attack(rig, f, MoveId::Ftilt, sf, &ledge_hang(rig), st.heavy),
-        },
+        }
         State::Hitstun { tumble } => {
             if tumble {
                 let mut p = tumble_limbs(rig);

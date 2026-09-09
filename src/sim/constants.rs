@@ -120,9 +120,50 @@ pub const TECH_WINDOW: u32 = 20;
 pub const TECH_LOCKOUT: u32 = 40;
 pub const TECH_INTANGIBLE: u32 = 20;
 
-/// Ledge: intangibility granted on grabbing a ledge, and regrab cooldown.
-pub const LEDGE_INTANGIBLE: u32 = 30;
+/// Ledge. Catching one takes [`LEDGE_CATCH`] uncontrollable frames; the
+/// catch grants [`LEDGE_INTANGIBLE`] frames of intangibility in total (kept
+/// if you let go — that is the ledgedash), and you may hang for
+/// [`LEDGE_HANG`] frames (fresh / tired) before dropping. At
+/// [`LEDGE_TIRED_PERCENT`] or more every getup option is the slow variant.
+pub const LEDGE_CATCH: u32 = 7;
+pub const LEDGE_INTANGIBLE: u32 = 37;
+pub const LEDGE_HANG: [u32; 2] = [660, 480];
+pub const LEDGE_TIRED_PERCENT: f32 = 100.0;
 pub const LEDGE_HOG_BOX: f32 = 12.0;
+pub const LEDGE_REGRAB_CD: u32 = 22;
+/// Getup options as `(total frames, intangible frames)`, `[fresh, tired]`.
+/// Original class-shaped values: fast and safe below 100 %, long and
+/// punishable above it.
+pub const LEDGE_GETUP: [(u32, u32); 2] = [(33, 29), (59, 50)];
+pub const LEDGE_ROLL: [(u32, u32); 2] = [(49, 30), (79, 50)];
+/// Ledge attack: `(total, intangible, first hit frame)`; the hit lasts
+/// [`LEDGE_ATTACK_ACTIVE`] frames and uses the character's forward tilt.
+pub const LEDGE_ATTACK: [(u32, u32, u32); 2] = [(55, 20, 24), (69, 34, 42)];
+pub const LEDGE_ATTACK_ACTIVE: u32 = 3;
+/// Ledge jump: frames on the ledge before leaving, then frames airborne with
+/// no actions (drift only) — a committed option, as in the reference.
+pub const LEDGE_JUMP: (u32, u32) = (10, 20);
+/// How far onto the stage a getup / roll puts you (beyond half-width).
+pub const LEDGE_GETUP_STEP: f32 = 4.0;
+pub const LEDGE_ROLL_STEP: f32 = 44.0;
+
+/// Grabs. Standing grab: hit frames 7–8 of 30; dash grab (from a dash or
+/// run): 12–13 of 40 with a slide. A hold lasts `⌊76 + 1.6 × percent⌋`
+/// frames, and every fresh input from the victim (button press or stick
+/// direction) takes [`GRAB_MASH_FRAMES`] off it. Pummels deal
+/// [`PUMMEL_DAMAGE`] every [`PUMMEL_COOLDOWN`] frames. When the hold runs
+/// out both fighters get [`GRAB_RELEASE_LAG`] frames.
+pub const GRAB_STAND: (u32, u32, u32) = (7, 8, 30);
+pub const GRAB_DASH: (u32, u32, u32) = (12, 13, 40);
+pub const GRAB_REACH: f32 = 16.0;
+pub const GRAB_HOLD_BASE: f32 = 76.0;
+pub const GRAB_HOLD_PER_PERCENT: f32 = 1.6;
+pub const GRAB_MASH_FRAMES: u32 = 6;
+pub const PUMMEL_DAMAGE: f32 = 2.0;
+pub const PUMMEL_COOLDOWN: u32 = 20;
+pub const PUMMEL_HITLAG: u32 = 3;
+pub const GRAB_RELEASE_LAG: u32 = 30;
+pub const GRAB_RELEASE_PUSH: f32 = 1.4 * REF_UNIT;
 
 /// Shield: 60 HP, decays while held, regenerates while down; attacks deal
 /// 0.7× to it. Shieldstun and pushback are formulas in `knockback.rs`.

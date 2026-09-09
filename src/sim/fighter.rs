@@ -121,6 +121,10 @@ pub struct Fighter {
     pub grabbing: Option<usize>,
     pub grabbed_by: Option<usize>,
     pub grab_timer: u32,
+    /// The current grab was started from a dash / run (slower, longer).
+    pub grab_dash: bool,
+    /// Frames until the next pummel is allowed.
+    pub pummel_cd: u32,
 
     pub already_hit: bool,
     pub respawn_timer: u32,
@@ -149,19 +153,23 @@ pub struct Fighter {
 pub struct TickOut {
     pub spawn_projectile: bool,
     /// Feedback events raised this tick (see [`ev`]), consumed by the match
-    /// state to spawn effects / sounds.
-    pub events: u8,
+    /// state to spawn effects / sounds or to act on the other fighter.
+    pub events: u16,
 }
 
 /// Bit flags for [`TickOut::events`].
 pub mod ev {
-    pub const LAND: u8 = 1;
-    pub const JUMP: u8 = 2;
-    pub const SWING: u8 = 4;
-    pub const DASH: u8 = 8;
-    pub const TECH: u8 = 16;
-    pub const WAVEDASH: u8 = 32;
-    pub const DOUBLE_JUMP: u8 = 64;
+    pub const LAND: u16 = 1;
+    pub const JUMP: u16 = 2;
+    pub const SWING: u16 = 4;
+    pub const DASH: u16 = 8;
+    pub const TECH: u16 = 16;
+    pub const WAVEDASH: u16 = 32;
+    pub const DOUBLE_JUMP: u16 = 64;
+    /// A grabbed victim made a fresh input (shortens the holder's grab).
+    pub const MASH: u16 = 128;
+    /// The holder pummelled (damage the victim).
+    pub const PUMMEL: u16 = 256;
 }
 
 const DEADZONE: f32 = 0.30;
@@ -200,6 +208,8 @@ impl Fighter {
             grabbing: None,
             grabbed_by: None,
             grab_timer: 0,
+            grab_dash: false,
+            pummel_cd: 0,
             already_hit: false,
             respawn_timer: 0,
             kb_vel: Vec2::ZERO,
@@ -263,15 +273,27 @@ impl Fighter {
 
     /// Current active hitbox in world space, if any.
     pub fn active_hitbox(&self) -> Option<(attacks::Hitbox, Vec2)> {
-        let id = match self.state {
-            State::Attack { id, .. } => id,
-            _ => return None,
-        };
         if self.already_hit {
             return None;
         }
-        let md = attacks::data(self.character.id, id);
-        let hb = md.hitbox_at(self.state_frame)?;
+        let hb = match self.state {
+            State::Attack { id, .. } => {
+                let md = attacks::data(self.character.id, id);
+                md.hitbox_at(self.state_frame)?
+            }
+            State::LedgeAction {
+                kind: LedgeKind::Attack,
+            } => {
+                // The ledge attack strikes with the forward tilt's hitbox on
+                // its own (ledge) timeline.
+                let (_, _, hit) = self.ledge_option(LedgeKind::Attack);
+                if !(hit..hit + k::LEDGE_ATTACK_ACTIVE).contains(&self.state_frame) {
+                    return None;
+                }
+                attacks::data(self.character.id, MoveId::Ftilt).hitbox
+            }
+            _ => return None,
+        };
         let world = Vec2::new(
             self.pos.x + self.facing * hb.offset.x,
             self.pos.y + hb.offset.y + self.character.height * 0.5,
@@ -304,6 +326,7 @@ impl Fighter {
         self.tech_lockout = self.tech_lockout.saturating_sub(1);
         self.ledge_regrab_cd = self.ledge_regrab_cd.saturating_sub(1);
         self.coyote = self.coyote.saturating_sub(1);
+        self.pummel_cd = self.pummel_cd.saturating_sub(1);
         if self.anim_flash > 0 {
             self.anim_flash -= 1;
         }
@@ -374,8 +397,22 @@ impl Fighter {
             }
             State::Knockdown => self.tick_knockdown(input),
             State::Grab => self.tick_grab(),
-            State::Hold => self.tick_hold(input),
-            State::Grabbed => {}
+            State::Hold => out.events |= self.tick_hold(input),
+            State::Grabbed => {
+                // Mashing: every fresh button or hard stick direction
+                // shortens the holder's grab (handled by the match state).
+                let fresh_button = input.buttons & !self.prev_buttons != 0;
+                let st = input.stick;
+                let hard = st.length() > HARD;
+                let was_hard = self.prev_stick.length() > HARD;
+                let turned = hard
+                    && was_hard
+                    && (st.normalized_or_zero() - self.prev_stick.normalized_or_zero()).length()
+                        > 0.55;
+                if fresh_button || (hard && (!was_hard || turned)) {
+                    out.events |= ev::MASH;
+                }
+            }
             State::Throw { id } => self.tick_throw(id),
             State::Shield => self.tick_shield(input),
             State::ShieldStun { total } if self.state_frame >= total => {
@@ -442,10 +479,12 @@ impl Fighter {
         }
 
         // ---- single integration ----
+        let hanging = matches!(self.state, State::LedgeAction { .. }) && self.ledge.is_some();
         if !matches!(
             self.state,
             State::Roll { .. } | State::LedgeGrab | State::Grabbed
-        ) {
+        ) && !hanging
+        {
             self.pos += self.vel;
         }
 
@@ -581,8 +620,10 @@ impl Fighter {
             }
         }
 
-        // Grab (grounded).
+        // Grab (grounded). From a dash or run it is the slower, sliding
+        // dash grab.
         if self.pressed(cur, buttons::GRAB) && self.grounded {
+            self.grab_dash = matches!(self.state, State::Dash | State::Run);
             self.set_state(State::Grab);
             return false;
         }
@@ -891,6 +932,7 @@ impl Fighter {
             return;
         }
         if self.pressed(cur, buttons::GRAB) || self.pressed(cur, buttons::ATTACK) {
+            self.grab_dash = false;
             self.set_state(State::Grab);
             return;
         }
@@ -925,7 +967,7 @@ impl Fighter {
             && self.ledge_regrab_cd == 0
             && matches!(
                 self.state,
-                State::Air | State::Attack { aerial: true, .. } | State::Airdodge
+                State::Air | State::Attack { aerial: true, .. } | State::Airdodge | State::Helpless
             )
         {
             for (i, l) in stage.ledges.iter().enumerate() {
@@ -1031,12 +1073,13 @@ impl Fighter {
 
     fn grab_ledge(&mut self, idx: usize, l: super::stage::Ledge) {
         self.ledge = Some(idx);
+        // Hang just outside the edge, hands on it, facing the stage.
         self.pos = Vec2::new(
-            l.pos.x - l.side * self.character.half_width,
+            l.pos.x + l.side * self.character.half_width,
             l.pos.y - self.character.height,
         );
         self.vel = Vec2::ZERO;
-        self.facing = l.side;
+        self.facing = -l.side;
         self.grounded = false;
         self.jumps_left = self.character.air_jumps;
         self.fastfalling = false;
@@ -1044,74 +1087,127 @@ impl Fighter {
         self.set_state(State::LedgeGrab);
     }
 
+    /// Tired (slow, punishable getup options) at 100 % and above.
+    #[inline]
+    pub fn ledge_tired(&self) -> usize {
+        usize::from(self.percent >= k::LEDGE_TIRED_PERCENT)
+    }
+
+    /// `(total frames, intangible frames, hit frame)` of a ledge option for
+    /// this fighter's current percent (hit frame is 0 unless it attacks).
+    pub fn ledge_option(&self, kind: LedgeKind) -> (u32, u32, u32) {
+        let t = self.ledge_tired();
+        match kind {
+            LedgeKind::Getup => {
+                let (a, b) = k::LEDGE_GETUP[t];
+                (a, b, 0)
+            }
+            LedgeKind::Roll => {
+                let (a, b) = k::LEDGE_ROLL[t];
+                (a, b, 0)
+            }
+            LedgeKind::Attack => k::LEDGE_ATTACK[t],
+            LedgeKind::Jump => (k::LEDGE_JUMP.0 + k::LEDGE_JUMP.1, 0, 0),
+        }
+    }
+
+    fn start_ledge_option(&mut self, kind: LedgeKind) {
+        let (_, inv, _) = self.ledge_option(kind);
+        // Option intangibility never shortens what the catch already gave.
+        self.intangible = self.intangible.max(inv);
+        self.set_state(State::LedgeAction { kind });
+    }
+
     fn tick_ledge(&mut self, input: &PlayerInput) {
         let cur = input.buttons;
         let sx = input.stick.x;
         let sy = input.stick.y;
         let out_dir = -self.facing;
-        if self.state_frame >= 2 {
+        // Hang limit: fresh fighters hold on longer than tired ones.
+        if self.state_frame >= k::LEDGE_HANG[self.ledge_tired()] {
+            self.ledge = None;
+            self.ledge_regrab_cd = k::LEDGE_REGRAB_CD;
+            self.intangible = 0;
+            self.vel = Vec2::ZERO;
+            self.set_state(State::Air);
+            return;
+        }
+        if self.state_frame >= k::LEDGE_CATCH {
+            // Jump / up: ledge jump. Attack: ledge attack. Shield: roll.
+            // Toward the stage: getup. Down or away: let go.
             if self.pressed(cur, buttons::JUMP) || sy > HARD {
-                self.set_state(State::LedgeAction {
-                    kind: LedgeKind::Jump,
-                });
-            } else if self.pressed(cur, buttons::ATTACK) {
-                self.set_state(State::LedgeAction {
-                    kind: LedgeKind::Attack,
-                });
-            } else if sx.signum() == out_dir && sx.abs() > HARD {
-                self.set_state(State::LedgeAction {
-                    kind: LedgeKind::Roll,
-                });
+                self.start_ledge_option(LedgeKind::Jump);
+            } else if self.pressed(cur, buttons::ATTACK) || self.pressed(cur, buttons::SPECIAL) {
+                self.start_ledge_option(LedgeKind::Attack);
+            } else if self.pressed(cur, buttons::SHIELD) {
+                self.start_ledge_option(LedgeKind::Roll);
             } else if sx.signum() == self.facing && sx.abs() > HARD {
-                self.set_state(State::LedgeAction {
-                    kind: LedgeKind::Getup,
-                });
-            } else if sy < -HARD {
+                self.start_ledge_option(LedgeKind::Getup);
+            } else if sy < -HARD || (sx.signum() == out_dir && sx.abs() > HARD) {
+                // Ledge drop keeps the catch intangibility (ledgedash).
                 self.ledge = None;
-                self.ledge_regrab_cd = 22;
-                self.intangible = 0;
+                self.ledge_regrab_cd = k::LEDGE_REGRAB_CD;
+                self.vel = Vec2::ZERO;
                 self.set_state(State::Air);
             }
         }
     }
 
+    /// Step onto the stage from the ledge, `step` units past the body edge.
+    fn ledge_climb(&mut self, step: f32) {
+        let ch = self.character;
+        self.ledge = None;
+        self.pos.y += ch.height + 1.0;
+        self.pos.x += self.facing * (ch.half_width + step);
+        self.vel = Vec2::ZERO;
+        self.grounded = true;
+    }
+
     fn tick_ledge_action(&mut self, kind: LedgeKind) {
         let ch = self.character;
+        let sf = self.state_frame;
+        let (total, _, hit) = self.ledge_option(kind);
         match kind {
             LedgeKind::Jump => {
-                self.ledge = None;
-                self.grounded = false;
-                self.vel.y = ch.fullhop_v;
-                self.vel.x = self.facing * 0.8;
-                self.intangible = 10;
-                self.set_state(State::Air);
+                if sf == k::LEDGE_JUMP.0 {
+                    // Leave the ledge: a committed jump up and in.
+                    self.ledge = None;
+                    self.grounded = false;
+                    self.pos.x += self.facing * 2.0;
+                    self.vel = Vec2::new(self.facing * ch.air_max * 0.9, ch.fullhop_v);
+                    self.ledge_regrab_cd = k::LEDGE_REGRAB_CD;
+                }
+                if sf >= total || (self.grounded && sf > k::LEDGE_JUMP.0) {
+                    self.set_state(if self.grounded {
+                        State::Stand
+                    } else {
+                        State::Air
+                    });
+                }
             }
             LedgeKind::Getup => {
-                self.ledge = None;
-                self.pos.y += ch.height + 1.0;
-                self.pos.x += self.facing * (ch.half_width + 4.0);
-                self.vel = Vec2::ZERO;
-                self.grounded = true;
-                self.intangible = 6;
-                self.set_state(State::LandLag { total: 6 });
+                if sf == total * 2 / 5 {
+                    self.ledge_climb(k::LEDGE_GETUP_STEP);
+                }
+                if sf >= total {
+                    self.set_state(State::Stand);
+                }
             }
             LedgeKind::Roll => {
-                self.ledge = None;
-                self.pos.y += ch.height + 1.0;
-                self.pos.x += self.facing * (ch.half_width + 20.0);
-                self.grounded = true;
-                self.intangible = k::ROLL_INTANGIBLE.1;
-                self.set_state(State::LandLag { total: 10 });
+                if sf == total * 2 / 5 {
+                    self.ledge_climb(k::LEDGE_ROLL_STEP);
+                }
+                if sf >= total {
+                    self.set_state(State::Stand);
+                }
             }
             LedgeKind::Attack => {
-                self.ledge = None;
-                self.pos.y += ch.height + 1.0;
-                self.pos.x += self.facing * (ch.half_width + 4.0);
-                self.grounded = true;
-                self.set_state(State::Attack {
-                    id: MoveId::Ftilt,
-                    aerial: false,
-                });
+                if sf + 6 == hit {
+                    self.ledge_climb(k::LEDGE_GETUP_STEP);
+                }
+                if sf >= total {
+                    self.set_state(State::Stand);
+                }
             }
         }
     }
@@ -1206,34 +1302,68 @@ impl Fighter {
         }
     }
 
+    /// The grab's `(first hit frame, last hit frame, total)`, 1-based.
+    pub fn grab_frames(&self) -> (u32, u32, u32) {
+        if self.grab_dash {
+            k::GRAB_DASH
+        } else {
+            k::GRAB_STAND
+        }
+    }
+
+    /// Is the grab box out? (Read after the tick, when `state_frame` equals
+    /// the 1-based frame of the move — the same convention as hitboxes.)
+    pub fn grab_active(&self) -> bool {
+        let (a, b, _) = self.grab_frames();
+        matches!(self.state, State::Grab) && (a..=b).contains(&self.state_frame)
+    }
+
     fn tick_grab(&mut self) {
-        if self.state_frame >= 30 {
+        let (_, _, total) = self.grab_frames();
+        if self.state_frame >= total {
             self.set_state(State::Stand);
         }
     }
 
-    fn tick_hold(&mut self, input: &PlayerInput) {
+    /// Holding an opponent: the stick (or C-stick) throws, attack / grab
+    /// pummels, and the hold runs out on its own. Returns feedback events.
+    fn tick_hold(&mut self, input: &PlayerInput) -> u16 {
         self.grab_timer = self.grab_timer.saturating_sub(1);
         let sx = input.stick.x;
         let sy = input.stick.y;
         let cur = input.buttons;
-        let want_throw = self.pressed(cur, buttons::ATTACK) || input.cstick.length() > 0.5;
+        let (tx, ty) = if input.cstick.length() > HARD {
+            (input.cstick.x, input.cstick.y)
+        } else {
+            (sx, sy)
+        };
+        let want_throw = tx.abs() > HARD || ty.abs() > HARD;
         if want_throw {
-            let id = if sy > HARD {
+            let id = if ty > HARD {
                 MoveId::ThrowU
-            } else if sy < -HARD {
+            } else if ty < -HARD {
                 MoveId::ThrowD
-            } else if sx.signum() == self.facing && sx.abs() > DEADZONE {
+            } else if tx.signum() == self.facing {
                 MoveId::ThrowF
-            } else if sx.abs() > DEADZONE {
-                MoveId::ThrowB
             } else {
-                MoveId::ThrowF
+                MoveId::ThrowB
             };
             self.set_state(State::Throw { id });
+            0
         } else if self.grab_timer == 0 {
+            // Grab release: both get lag, the victim is shoved off.
             self.grabbing = None;
-            self.set_state(State::Stand);
+            self.set_state(State::LandLag {
+                total: k::GRAB_RELEASE_LAG,
+            });
+            0
+        } else if (self.pressed(cur, buttons::ATTACK) || self.pressed(cur, buttons::GRAB))
+            && self.pummel_cd == 0
+        {
+            self.pummel_cd = k::PUMMEL_COOLDOWN;
+            ev::PUMMEL
+        } else {
+            0
         }
     }
 
@@ -1270,11 +1400,24 @@ impl Fighter {
         self.set_state(State::Hitstun { tumble });
     }
 
-    /// Begin holding an opponent (successful grab).
-    pub fn catch(&mut self, victim: usize) {
+    /// Begin holding an opponent (successful grab). The hold lasts
+    /// `⌊76 + 1.6 × victim percent⌋` frames minus whatever they mash off.
+    pub fn catch(&mut self, victim: usize, victim_percent: f32) {
         self.grabbing = Some(victim);
-        self.grab_timer = 90;
+        self.grab_timer =
+            (k::GRAB_HOLD_BASE + k::GRAB_HOLD_PER_PERCENT * victim_percent).floor() as u32;
+        self.pummel_cd = 0;
+        self.vel = Vec2::ZERO;
         self.set_state(State::Hold);
+    }
+
+    /// Released from a hold that ran out: shoved away with release lag.
+    pub fn grab_release(&mut self, away: f32) {
+        self.grabbed_by = None;
+        self.vel = Vec2::new(away * k::GRAB_RELEASE_PUSH, 0.0);
+        self.set_state(State::LandLag {
+            total: k::GRAB_RELEASE_LAG,
+        });
     }
 
     /// Become grabbed by a holder.

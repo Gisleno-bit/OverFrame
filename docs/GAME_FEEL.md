@@ -49,6 +49,8 @@ it is in the art.
 | **Powershield** | Blocking within the first **2** frames of raising the shield: no damage, no stun, no push. |
 | **Air-dodge** | **49** frames total, intangible **4–29**, then **helpless** until landing — which is what makes wavedashing a *technique* (you commit) rather than a free escape. |
 | **Roll** | 31 frames, intangible 4–19. **Spot-dodge** 22, intangible 2–15. |
+| **Grab** | Standing grab hits on frame 7 (FAF 31); dash grab on frame 12 (FAF 41), sliding. A hold lasts `⌊76 + 1.6 × percent⌋` frames; every input from the victim (button or stick direction) takes **6** frames off; the holder can pummel or throw with the stick. When it runs out both get release lag. |
+| **Ledge** | Catching takes **7** uncontrollable frames and grants **37** frames of intangibility in total — kept if you let go (the ledgedash). Hang up to 11 s (8 s at 100 %+). At **100 %** or more every getup option is the slow, punishable variant. Ledge jump is committed (no actions until the animation ends). |
 
 ### 1.3 Movement (the part people call "the feel")
 
@@ -200,6 +202,34 @@ Boulder and Viper tables were reshaped the same way (`src/sim/attacks.rs`).
 | Impact VFX | one sprite | impact burst + fan of impact lines along the launch direction, powershield ring, dust on dash / land / wavedash |
 | Training view | hitboxes | hitboxes **and the hurt capsule** |
 
+### 3.5 Grabs and ledges
+
+| Mechanic | Reference | 0.4.0 | **0.5.0** | Where |
+|---|---|---|---|---|
+| Standing grab | hit 7, total 30 | hit 6–11, total 30 | **hit 7–8, total 30** | `GRAB_STAND`, `Fighter::grab_active` |
+| Dash grab | hit 12, total 40, slides | same as standing | **hit 12–13, total 40**, slides with the dash | `GRAB_DASH`, `grab_dash` |
+| Hold length | `⌊76 + 1.6p⌋` | 90 flat | **formula** | `Fighter::catch` |
+| Mash-out | −6 frames per input | none | **−6 per fresh button / stick direction** | `ev::MASH` |
+| Pummel | attack / grab while holding | attack threw | **2 %, 20-frame cooldown, 3 hitlag** | `ev::PUMMEL` |
+| Throw input | stick direction | attack + stick | **stick or C-stick direction** (held stick throws at once) | `tick_hold` |
+| Grab release | both lagged, victim shoved | victim stuck | **30 frames each, victim shoved 3 u/f** | `grab_release` |
+| Ledge catch | 7 frames, then act | act on frame 2 | **7** (`LEDGE_CATCH`) | `tick_ledge` |
+| Ledge intangibility | 37 total, kept on drop | 30, lost on drop | **37, kept on drop** | `LEDGE_INTANGIBLE` |
+| Hang time | 11 s / 8 s | unlimited | **660 / 480 frames** | `LEDGE_HANG` |
+| Getup (fresh / tired) | fast & safe / slow | 6 frames | **33 (29 inv.) / 59 (50 inv.)** | `LEDGE_GETUP` |
+| Ledge roll | ~49 / slow | 10 frames | **49 (30 inv.) / 79 (50 inv.)**, 44 u in | `LEDGE_ROLL` |
+| Ledge attack | hits ~24 / ~42 | instant f-tilt | **hit 24–26 of 55 (20 inv.) / 42–44 of 69 (34 inv.)** with the f-tilt hitbox | `LEDGE_ATTACK` |
+| Ledge jump | committed, intangibility carries | free jump | **10 frames on the ledge, then 20 airborne with no actions**; intangibility carries | `LEDGE_JUMP` |
+| Ledge grab while helpless | yes | no | **yes** (recoveries can grab) | `collide_stage` |
+| Hang position / facing | outside the edge, facing in | inside the slab, facing out | **outside, facing the stage** | `grab_ledge` |
+
+Ledge inputs: **jump / up** = ledge jump, **attack / special** = ledge
+attack, **shield** = ledge roll, **toward the stage** = getup, **down or
+away** = let go (keeping the intangibility). The durations of the getup
+options are original, class-shaped values (the public pages give the
+mechanics — 7-frame catch, 37 intangible, 100 % threshold, committed jump —
+but not per-option frame tables); tune them in `constants.rs`.
+
 ---
 
 ## 4. Implementation plan (what was done, in order)
@@ -240,8 +270,11 @@ Each step is one commit-sized change; all of them are in `100fc76` and
     dir }`) is created by `step`; the renderer voices sounds, rumble, flash and
     shake from the fx list, de-duplicated by `(born, kind)` so rollbacks never
     double-fire. No render state feeds back into the sim.
-12. **Tests** (`tests/feel.rs`, 15) pin every rule above; the old suites
-    (68 tests total) still pass.
+12. **Grabs and ledges**: standing / dash grab windows, hold formula with
+    mash-out, pummel, stick throws, release; ledge catch / intangibility /
+    hang limit / fresh–tired options / committed jump; helpless ledge grab.
+13. **Tests** (`tests/feel.rs` 15, `tests/grab_ledge.rs` 11) pin every rule
+    above; the old suites still pass (79 tests total).
 
 ---
 
@@ -322,7 +355,33 @@ shield_hit(V, d):
 release_shield(V): state = ShieldDrop(15)   # jump / grab / up-smash cancel it
 ```
 
-### 5.6 Feedback (renderer)
+### 5.6 Grab and hold
+
+```text
+grab_press(F):   F.grab_dash = F.state in {Dash, Run};  state = Grab
+grab window:     dash ? frames 12–13 of 40 : frames 7–8 of 30   (1-based)
+catch(H, V):     H.grab_timer = ⌊76 + 1.6 × V.percent⌋;  V.state = Grabbed
+each frame (V grabbed): fresh button or new hard stick direction → H.grab_timer −= 6
+each frame (H holding):
+    stick or C-stick past the threshold → Throw{dir}
+    attack / grab and pummel_cd == 0 → V.percent += 2, hitlag 3 both, pummel_cd = 20
+    grab_timer == 0 → H: LandLag(30);  V: shoved away at 3 u/f, LandLag(30)
+```
+
+### 5.7 Ledge
+
+```text
+catch:   pos = edge + side × half_width (outside), facing = toward stage
+         intangible = 37;  no input for 7 frames;  hang ≤ (percent < 100 ? 660 : 480)
+option(kind):  (total, inv, hit) = table[kind][percent ≥ 100]
+         intangible = max(intangible, inv);  state = LedgeAction(kind)
+tick:    Getup / Roll: at 40 % of total step onto the stage (4 u / 44 u in); Stand at total
+         Attack: onto the stage 6 frames before `hit`; f-tilt hitbox on frames hit..hit+2; Stand at total
+         Jump: 10 frames hanging, then vel = (0.9 × air_max in, full-hop up); Air after 20 more frames
+         let go (down / away): Air, intangibility kept, regrab cooldown 22
+```
+
+### 5.8 Feedback (renderer)
 
 ```text
 each drawn frame with displayed state S:
@@ -359,10 +418,26 @@ each drawn frame with displayed state S:
 | `dash_dance_window_is_per_character` | 11 / 13 / 7 |
 | `swept_hitboxes_do_not_tunnel` | a hitbox that jumps past a capsule in one frame still hits |
 
+`tests/grab_ledge.rs` (11 tests) — all green:
+
+| Test | Asserts |
+|---|---|
+| `standing_grab_catches_on_frame_7_and_lasts_30` | catch frame 7; whiff = 30 frames |
+| `dash_grab_is_slower_longer_and_slides` | catch on its frame 12, 40 frames, slides > 20 u |
+| `hold_lasts_76_plus_1_6_per_percent_and_mashing_shortens_it` | 156 frames at 50 %; mashing every frame ≈ 22; release lag on both, victim shoved |
+| `pummel_damages_on_a_cooldown_and_the_stick_throws` | attack pummels (2 %, 20-frame cooldown), stick up = up-throw |
+| `ledge_catch_is_7_uncontrollable_frames_with_37_intangible` | 37 intangible; first action on frame 8; faces the stage |
+| `ledge_drop_keeps_the_intangibility` | letting go keeps the counter (ledgedash) |
+| `getup_is_fast_and_safe_below_100_and_slow_above` | 33 / 59 frames; ends standing on the stage |
+| `ledge_roll_and_attack_follow_their_timelines` | roll 49 frames, 44 u in; attack hitbox exactly on 24–26 / 42–44 |
+| `ledge_jump_is_committed` | 10 frames hanging, 20 airborne ignoring attacks, rises > 20 u |
+| `hang_time_is_11s_fresh_and_8s_tired` | 660 / 480 frames then drop |
+| `helpless_fighters_can_still_catch_the_ledge` | recovery can grab |
+
 Plus the unchanged suites: `mechanics` (9), `determinism` (1, GGRS
 SyncTest), `content` (7), `netcode_flow` (8), `gamepad_map` (7) and the
-`src/` unit tests (21, of which 18 are the `model` layer) = **68 tests**
-with `cargo test` (64 without the GUI feature). Determinism across rollbacks is what makes it safe to
+`src/` unit tests (21, of which 18 are the `model` layer) = **79 tests**
+with `cargo test` (75 without the GUI feature). Determinism across rollbacks is what makes it safe to
 drive sound and rumble from the sim.
 
 ### 6.2 Measured numbers (this build)
@@ -442,6 +517,8 @@ Every value above is a constant; the ones designers will actually touch:
 | "Stops feel slippery / sticky" | the release multiplier on `ground_friction` (×2) | raise → snappier |
 | "Shield too safe" | `shieldstun`, `SHIELD_DROP` | more stun / longer drop → riskier |
 | "Ground game too slow" | `dash_max`, `run_max`, `ground_accel` | keep the *ratio* to jump/fall speeds |
+| "Grabs too strong / weak" | `GRAB_HOLD_BASE`, `GRAB_MASH_FRAMES`, `PUMMEL_DAMAGE` | lower base / more mash → weaker |
+| "Ledge too safe" | `LEDGE_INTANGIBLE`, the `LEDGE_*` option tables | shorter intangibility → riskier |
 | "Feedback too loud" | `sfx_volume`, `rumble` (Options) | per player |
 
 Change one thing at a time and re-run `tests/feel.rs` — the tests are
@@ -453,9 +530,11 @@ the spec.
 
 - SSBWiki: *Hitlag*, *Knockback*, *Hitstun*, *Shieldstun*, *Shield*, *Smash
   directional influence*, *Directional influence*, *Sakurai angle*, *Air
-  dodge*, *Roll*, *Dash-dancing*, *L-cancel*, *Auto-cancel*, and the
-  per-character attribute tables for the fast-faller, heavy and lightweight
-  archetypes (frame counts and speeds only).
+  dodge*, *Roll*, *Dash-dancing*, *L-cancel*, *Auto-cancel*, *Grab* (hold
+  formula, mash-out), *Edge* (catch, intangibility, 100 % threshold, hang
+  time), *Ledgedash* (37 frames, release on frame 9), *Edge recovery*, and
+  the per-character attribute tables for the fast-faller, heavy and
+  lightweight archetypes (frame counts and speeds only).
 - FightCore (fightcore.gg) publishes the same community frame data; use it
   to cross-check the shapes in §3.3.
 - libmelee's stage constants for the platform / blast-zone *proportions*.

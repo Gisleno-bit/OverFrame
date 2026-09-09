@@ -218,6 +218,43 @@ impl GameState {
                 if out.events & ev::TECH != 0 {
                     self.push_fx(feet, FxKind::Tech, 8.0);
                 }
+                if out.events & ev::MASH != 0 {
+                    if let Some(h) = self.fighters[i].grabbed_by {
+                        let t = &mut self.fighters[h].grab_timer;
+                        *t = t.saturating_sub(k::GRAB_MASH_FRAMES);
+                    }
+                }
+                if out.events & ev::PUMMEL != 0 {
+                    if let Some(v) = self.fighters[i].grabbing {
+                        let vc = self.fighters[v].body_center();
+                        self.fighters[v].percent += k::PUMMEL_DAMAGE;
+                        self.fighters[v].hitlag = k::PUMMEL_HITLAG;
+                        self.fighters[v].anim_flash = 3;
+                        self.fighters[i].hitlag = k::PUMMEL_HITLAG;
+                        self.push_fx_who(
+                            vc,
+                            FxKind::Hit,
+                            k::PUMMEL_DAMAGE,
+                            Vec2::new(facing, 0.0),
+                            v as u8,
+                        );
+                    }
+                }
+            }
+        }
+
+        // 1b) Grab releases: a holder whose hold ran out let go this tick —
+        //     shove the victim off with release lag.
+        for i in 0..n {
+            if let Some(v) = self.fighters[i].grabbed_by {
+                let holder_let_go =
+                    !matches!(self.fighters[v].state, State::Hold | State::Throw { .. })
+                        || self.fighters[v].grabbing != Some(i);
+                if holder_let_go && matches!(self.fighters[i].state, State::Grabbed) {
+                    // The victim is held in front of the holder: shove it on.
+                    let away = self.fighters[v].facing;
+                    self.fighters[i].grab_release(away);
+                }
             }
         }
 
@@ -322,10 +359,10 @@ impl GameState {
             };
 
             // --- grab catch ---
-            if matches!(state_i, State::Grab) && (6..=11).contains(&frame_i) {
+            if self.fighters[i].grab_active() {
                 let a = &self.fighters[i];
                 let hand = Vec2::new(
-                    a.pos.x + a.facing * 16.0,
+                    a.pos.x + a.facing * k::GRAB_REACH,
                     a.pos.y + a.character.height * 0.5,
                 );
                 for j in 0..n {
@@ -343,8 +380,9 @@ impl GameState {
                         continue;
                     }
                     let vc = self.fighters[j].body_center();
-                    if (vc - hand).length() < 16.0 {
-                        self.fighters[i].catch(j);
+                    if (vc - hand).length() < k::GRAB_REACH {
+                        let pct = self.fighters[j].percent;
+                        self.fighters[i].catch(j, pct);
                         self.fighters[j].set_grabbed(i);
                         break;
                     }
