@@ -43,6 +43,26 @@ pseudocode and measurements — is `docs/GAME_FEEL.md`.
   roll, down / away = let go; fighters hang **outside** the edge facing the
   stage; **helpless** fighters can grab the ledge (recoveries work).
   Animation viewer clips for every ledge option.
+- **Run turnaround** (`State::RunTurn`, 20 frames, jump-cancellable): a
+  reversal past the dash-dance window brakes instead of dashing back.
+- **Techs**: a 20-frame tech window opened by the shield press with a
+  40-frame lockout (mashing never techs); **tech in place** (26 f, 20
+  intangible) and **tech roll** (40 f, 70 u); missed techs bounce for 18
+  frames, then **stand / roll / getup attack** (`State::Getup`; the attack
+  sweeps front then back for 6 %).
+- **Jump-cancelled grab and up-smash** out of the jump-squat.
+- **Platform drop** by a quick down tap (or down + jump) while standing on
+  a soft platform; you can no longer pass through platforms from the air.
+- **Clank / priority** (`State::Rebound`): grounded attacks within 9 %
+  cancel each other with a spark and a *tink*; otherwise the stronger move
+  wins.
+- **Stale-move negation**: 9-slot queue, 0.09…0.01 off the damage per
+  earlier use, knockback from the fresh damage, cleared on a KO.
+- **Meteor cancel**: spikes can be jumped or up-B'd out of after 8 frames.
+- **Percent pop** on the HUD after every hit (from the sim's
+  `last_hit_frame`, rollback-safe).
+- Animation-viewer clips: TECH IN PLACE / TECH ROLL / GETUP STAND / ROLL /
+  ATTACK / RUN TURN / CLANK.
 - **Late hits** (`MoveData::late(frames, scale)`) and per-frame hitbox lookup;
   dash attack carries 85 % of run speed; per-character **dash-dance window**
   (`Character::dash_frames`).
@@ -60,8 +80,8 @@ pseudocode and measurements — is `docs/GAME_FEEL.md`.
 - Simulation events (`Fx { born, who, dir }`; land / jump / swing / dash /
   tech / wavedash) so audio, rumble and VFX are pure functions of the sim
   state and rollback-safe (de-duplicated by `(born, kind)`).
-- `tests/feel.rs` (15) and `tests/grab_ledge.rs` (11) pinning every rule
-  above; 79 tests total.
+- `tests/feel.rs` (15), `tests/grab_ledge.rs` (11) and `tests/neutral.rs`
+  (8) pinning every rule above; 87 tests total.
 - Animation-viewer clips for HELPLESS and SHIELD DROP; poses in `anim.rs`.
 
 ### Changed

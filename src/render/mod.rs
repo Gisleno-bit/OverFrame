@@ -281,7 +281,8 @@ struct Clip {
 
 fn viewer_clips() -> Vec<Clip> {
     use crate::sim::attacks::MoveId as M;
-    use crate::sim::fighter::{LedgeKind, State as S};
+    use crate::sim::constants as K;
+    use crate::sim::fighter::{GetupKind, LedgeKind, State as S};
     let g = |label, state, len| Clip {
         label,
         state,
@@ -366,6 +367,31 @@ fn viewer_clips() -> Vec<Clip> {
         g("FLINCH", S::Hitstun { tumble: false }, 40),
         a("TUMBLE", S::Hitstun { tumble: true }, 1.0),
         g("KNOCKDOWN", S::Knockdown, 60),
+        g("TECH IN PLACE", S::Tech { dir: 0.0 }, K::TECH_IN_PLACE.0),
+        g("TECH ROLL", S::Tech { dir: 1.0 }, K::TECH_ROLL.0),
+        g(
+            "GETUP STAND",
+            S::Getup {
+                kind: GetupKind::Stand,
+            },
+            K::GETUP_STAND.0,
+        ),
+        g(
+            "GETUP ROLL",
+            S::Getup {
+                kind: GetupKind::Roll { dir: 1.0 },
+            },
+            K::GETUP_ROLL.0,
+        ),
+        g(
+            "GETUP ATTACK",
+            S::Getup {
+                kind: GetupKind::Attack,
+            },
+            K::GETUP_ATTACK.0,
+        ),
+        g("RUN TURN", S::RunTurn, K::RUN_TURN),
+        g("CLANK", S::Rebound { total: 12 }, 12),
         a("LEDGE HANG", S::LedgeGrab, 0.0),
         ledge("LEDGE GETUP", LedgeKind::Getup),
         ledge("LEDGE ATTACK", LedgeKind::Attack),

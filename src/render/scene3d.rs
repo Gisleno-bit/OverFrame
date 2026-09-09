@@ -775,6 +775,29 @@ impl Scene3D {
                         &self.tex_spark,
                     );
                 }
+                FxKind::Clank => {
+                    // Clash spark: a bright cross of four short streaks and
+                    // a small flash, between the two blades.
+                    let a = 1.0 - t;
+                    let r = (8.0 + fx.magnitude * 0.4) * (0.6 + t);
+                    self.billboard(
+                        p,
+                        r * 1.6,
+                        Color::new(1.0, 0.98, 0.85, 0.9 * a),
+                        &self.tex_spark,
+                    );
+                    for k in 0..4 {
+                        let ang =
+                            std::f32::consts::FRAC_PI_4 + k as f32 * std::f32::consts::FRAC_PI_2;
+                        let d = v3(ang.cos(), ang.sin(), 0.0);
+                        self.streak(
+                            p + d * (r * 0.3),
+                            p + d * (r * (1.2 + t)),
+                            (1.4 * a).max(0.3),
+                            Color::new(1.0, 0.95, 0.75, 0.85 * a),
+                        );
+                    }
+                }
                 FxKind::Blast => {
                     let r = (14.0 + fx.magnitude.min(40.0) * 0.5) * (0.3 + t * 1.4);
                     let a = 1.0 - t;

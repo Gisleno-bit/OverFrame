@@ -24,6 +24,7 @@ pub struct AudioBank {
     swing: [Sound; 2],
     tech: Sound,
     dash: Sound,
+    clank: Sound,
     /// (born frame, kind tag) of effects already voiced, newest last.
     played: Vec<(u64, u8)>,
     pub volume: f32,
@@ -169,6 +170,13 @@ pub async fn load() -> Option<AudioBank> {
         let e = env(t, 0.015, 0.025);
         lp7.feed(n.next(), 0.4) * 0.35 * e
     });
+    // Clank: a bright metallic "tink" — two inharmonic partials + a click.
+    let clank = synth(0.14, |t, n| {
+        let e = env(t, 0.001, 0.045);
+        let ring = sine(t, 2350.0) * 0.5 + sine(t, 3720.0) * 0.3 + sine(t, 5100.0) * 0.15;
+        let click = n.next() * env(t, 0.0005, 0.006) * 0.7;
+        (ring + click) * e
+    });
 
     Some(AudioBank {
         hit: [s(hit0).await?, s(hit1).await?, s(hit2).await?],
@@ -180,6 +188,7 @@ pub async fn load() -> Option<AudioBank> {
         swing: [s(swing0).await?, s(swing1).await?],
         tech: s(tech).await?,
         dash: s(dash).await?,
+        clank: s(clank).await?,
         played: Vec::new(),
         volume: 0.8,
     })
@@ -239,6 +248,7 @@ impl AudioBank {
                     self.play(&self.swing[i], 0.5);
                 }
                 FxKind::Tech => self.play(&self.tech, 0.7),
+                FxKind::Clank => self.play(&self.clank, 0.8),
                 FxKind::Dust => {
                     // Dust alone (dash start) gets a soft scuff; landings
                     // already carry their own thump.

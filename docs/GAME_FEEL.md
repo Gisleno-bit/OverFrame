@@ -50,6 +50,10 @@ it is in the art.
 | **Air-dodge** | **49** frames total, intangible **4–29**, then **helpless** until landing — which is what makes wavedashing a *technique* (you commit) rather than a free escape. |
 | **Roll** | 31 frames, intangible 4–19. **Spot-dodge** 22, intangible 2–15. |
 | **Grab** | Standing grab hits on frame 7 (FAF 31); dash grab on frame 12 (FAF 41), sliding. A hold lasts `⌊76 + 1.6 × percent⌋` frames; every input from the victim (button or stick direction) takes **6** frames off; the holder can pummel or throw with the stick. When it runs out both get release lag. |
+| **Tech** | A shield press while tumbling opens a **20-frame** window; touching the ground inside it techs (in place or a roll, ~20 frames intangible). Any press also locks new presses out for 40 frames, so mashing shield never techs. A missed tech is a knockdown with three getups: stand, roll, or a weak two-sided getup attack. |
+| **Clank / priority** | Two grounded attacks whose hitboxes touch cancel each other when their damages are within **9 %** (both rebound); otherwise the stronger one lands and the weaker is cancelled. Aerials never clank. |
+| **Stale-move negation** | The last **9** hits that connected: each earlier use of the same move takes its slot's share off the damage (0.09, 0.08 … 0.01 — up to 45 %). Knockback mostly ignores staleness. A KO clears the queue. |
+| **Meteor cancel** | A spike (≈270°) can be jumped or up-B'd out of once **8** frames of hitstun have passed. |
 | **Ledge** | Catching takes **7** uncontrollable frames and grants **37** frames of intangibility in total — kept if you let go (the ledgedash). Hang up to 11 s (8 s at 100 %+). At **100 %** or more every getup option is the slow, punishable variant. Ledge jump is committed (no actions until the animation ends). |
 
 ### 1.3 Movement (the part people call "the feel")
@@ -57,7 +61,9 @@ it is in the art.
 | Rule | Reference behaviour |
 |---|---|
 | **Landing lag** | 4 frames for an empty landing. Every aerial has its own landing lag; **L-cancel** (shield within 7 frames before landing) halves it (`⌊lag/2⌋`); landing *outside* the aerial's active window (**autocancel**) costs the normal 4. |
-| **Dash-dance** | You can reverse direction for the whole *initial dash* (per character: 7–15 frames); after that you are running and a reversal is a slow turn. |
+| **Dash-dance** | You can reverse direction for the whole *initial dash* (per character: 7–15 frames); after that you are running and a reversal is a slow braking turn (~20 frames) that only a jump interrupts. |
+| **Jump-cancels** | A grab or an up-smash input during the jump-squat replaces the jump — the way a dash becomes a standing grab or an up-smash without losing the run. |
+| **Platform drop** | A quick down tap while standing on a soft platform drops through it (a slow tilt crouches); you cannot fall through one from the air. |
 | **IASA** | Moves can be interrupted before their animation ends; effectively every move is `startup + active (+ late) + endlag` and the endlag is the whole recovery. |
 | **Jump-squat** | 3–6 frames of squat before leaving the ground; short hop if the button is released before take-off. |
 | **Fast-fall** | Tapping down past the apex jumps straight to a much higher fall speed (≈1.2–1.4× max fall). |
@@ -225,7 +231,23 @@ Boulder and Viper tables were reshaped the same way (`src/sim/attacks.rs`).
 
 Ledge inputs: **jump / up** = ledge jump, **attack / special** = ledge
 attack, **shield** = ledge roll, **toward the stage** = getup, **down or
-away** = let go (keeping the intangibility). The durations of the getup
+away** = let go (keeping the intangibility).
+
+### 3.6 Neutral and punish game
+
+| Mechanic | Reference | 0.4.0 | **0.5.0** | Where |
+|---|---|---|---|---|
+| Run reversal | braking turn, jump interrupts | instant new dash | **`RunTurn` 20 frames**, faces the new way half-way, jump cancels it; dash-dance inside the window unchanged | `RUN_TURN`, `tick_run_turn` |
+| Tech input | 20-frame window, 40 lockout | shield on the exact impact frame | **window + lockout** (`tech_armed`) | `TECH_WINDOW`, `TECH_LOCKOUT` |
+| Tech in place / roll | ~26 / ~40, intangible ~20 | 8 frames of lag | **26 (20 inv.) / 40 (20 inv.), roll 70 u** | `State::Tech` |
+| Missed tech | knockdown, then stand / roll / attack | 18 frames then teleport | **18-frame bounce, then stand 30 (22 inv.) / roll 35 (25 inv., 66 u) / getup attack 49 (14 inv.) hitting front 15–17 and behind 21–23 for 6 %** | `State::Getup`, `GETUP_*` |
+| Jump-cancel grab / up-smash | yes | no | **yes** (during jump-squat; JC grab is the standing grab and keeps the momentum) | `tick_jumpsquat` |
+| Platform drop | down tap while standing | down + jump, also from the air | **down flick or down + jump, only while standing on it** | `collide_stage` |
+| Clank | grounded vs grounded, < 9 % → both rebound | none (both hit) | **implemented**: rebound `⌊max dmg / 3⌋ + 8` frames, spark + *tink*; the stronger move wins otherwise | `resolve_clanks`, `State::Rebound` |
+| Stale moves | 9-slot queue, 0.09…0.01 | none | **implemented** (damage to a tenth; knockback from fresh damage; KO clears) | `stale_multiplier`, `apply_hit_staled` |
+| Meteor cancel | 8 frames, jump / up-B | none | **implemented** (uses the double jump) | `METEOR_CANCEL_FRAMES` |
+| Helpless ledge grab | yes | no | **yes** | `collide_stage` |
+| Percent counter | pops on hit | static | **scales up, kicks and flashes for 10 frames** from the sim's `last_hit_frame` (rollback-safe) | `viz::draw_hud` | The durations of the getup
 options are original, class-shaped values (the public pages give the
 mechanics — 7-frame catch, 37 intangible, 100 % threshold, committed jump —
 but not per-option frame tables); tune them in `constants.rs`.
@@ -273,8 +295,13 @@ Each step is one commit-sized change; all of them are in `100fc76` and
 12. **Grabs and ledges**: standing / dash grab windows, hold formula with
     mash-out, pummel, stick throws, release; ledge catch / intangibility /
     hang limit / fresh–tired options / committed jump; helpless ledge grab.
-13. **Tests** (`tests/feel.rs` 15, `tests/grab_ledge.rs` 11) pin every rule
-    above; the old suites still pass (79 tests total).
+13. **Neutral / punish**: run turnaround, tech window + lockout with tech in
+    place / roll, knockdown getups (stand / roll / attack), jump-cancelled
+    grab and up-smash, platform drop by a down tap, clank / priority with
+    rebound, stale-move negation, meteor cancel, percent pop on the HUD.
+14. **Tests** (`tests/feel.rs` 15, `tests/grab_ledge.rs` 11,
+    `tests/neutral.rs` 8) pin every rule above; the old suites still pass
+    (87 tests total).
 
 ---
 
@@ -381,7 +408,26 @@ tick:    Getup / Roll: at 40 % of total step onto the stage (4 u / 44 u in); Sta
          let go (down / away): Air, intangibility kept, regrab cooldown 22
 ```
 
-### 5.8 Feedback (renderer)
+### 5.8 Tech, knockdown, clank, staling
+
+```text
+tumbling && shield pressed && lockout == 0:  tech_armed = 20; lockout = 60
+touch ground while tumbling:
+    tech_armed > 0 → Tech{dir = stick past threshold ? sign : 0}, intangible 20, 26 / 40 frames (roll 70 u)
+    else            → Knockdown: 18 frames, then attack → Getup::Attack (49, inv 14, hits front 15–17 / back 21–23, 6 %)
+                                       stick → Getup::Roll (35, inv 25, 66 u)
+                                       up / any button → Getup::Stand (30, inv 22)
+
+clank (before hits resolve), for each pair of grounded Attack hitboxes that touch:
+    |dA − dB| < 9 → both: already_hit, Rebound{⌊max(dA,dB)/3⌋ + 8}, spark at the midpoint
+    else          → weaker.already_hit = true (the stronger hit resolves normally)
+
+on hit with move m:  dealt = round₀.₁(d × (1 − Σ STALE[i] for queue[i] == m));  kb from fresh d;  queue.push_front(m)
+meteor: angle ∈ [250°, 290°] and airborne → after 8 hitstun frames, jump (uses a double jump) or up-B ends the stun
+run reversal: Run + opposite stick → RunTurn (20 frames, friction ×1.5, facing flips at 10; jump cancels; Run again if still held)
+```
+
+### 5.9 Feedback (renderer)
 
 ```text
 each drawn frame with displayed state S:
@@ -434,10 +480,23 @@ each drawn frame with displayed state S:
 | `hang_time_is_11s_fresh_and_8s_tired` | 660 / 480 frames then drop |
 | `helpless_fighters_can_still_catch_the_ledge` | recovery can grab |
 
+`tests/neutral.rs` (8 tests) — all green:
+
+| Test | Asserts |
+|---|---|
+| `dash_dance_is_free_but_a_run_reversal_is_a_slow_turn` | reversal inside the dash window = new dash; from a run = 20-frame `RunTurn`, then Run the other way; jump cancels it |
+| `jump_cancelled_grab_and_up_smash_come_out_of_a_dash` | grab / C-stick up during the squat → standing grab (momentum kept) / up-smash |
+| `platform_drop_needs_a_down_flick_not_a_slow_crouch` | flick drops through a side platform; easing down crouches |
+| `tech_window_is_20_frames_with_a_lockout` | shield 10 frames early → tech in place (26 f, 20 inv.); mashing from far above is locked out → knockdown |
+| `tech_roll_and_the_three_getups` | tech roll 40 f / 70 u; bounce 18 f; stand 30 / roll 35 (66 u) / attack 49 with hits exactly on 15–17 front and 21–23 behind |
+| `close_attacks_clank_and_the_stronger_one_wins_otherwise` | tilt vs tilt → both rebound, no damage; jab vs smash → jab cancelled, smash lands |
+| `stale_moves_lose_damage_but_not_knockback` | 8 → 7.3 → 6.6; multiplier 0.76 after three; KO clears the queue |
+| `spikes_can_be_meteor_cancelled_after_8_frames` | too early does nothing; after 8 frames the jump ends the stun and spends the double jump |
+
 Plus the unchanged suites: `mechanics` (9), `determinism` (1, GGRS
 SyncTest), `content` (7), `netcode_flow` (8), `gamepad_map` (7) and the
-`src/` unit tests (21, of which 18 are the `model` layer) = **79 tests**
-with `cargo test` (75 without the GUI feature). Determinism across rollbacks is what makes it safe to
+`src/` unit tests (21, of which 18 are the `model` layer) = **87 tests**
+with `cargo test` (83 without the GUI feature). Determinism across rollbacks is what makes it safe to
 drive sound and rumble from the sim.
 
 ### 6.2 Measured numbers (this build)
@@ -519,6 +578,10 @@ Every value above is a constant; the ones designers will actually touch:
 | "Ground game too slow" | `dash_max`, `run_max`, `ground_accel` | keep the *ratio* to jump/fall speeds |
 | "Grabs too strong / weak" | `GRAB_HOLD_BASE`, `GRAB_MASH_FRAMES`, `PUMMEL_DAMAGE` | lower base / more mash → weaker |
 | "Ledge too safe" | `LEDGE_INTANGIBLE`, the `LEDGE_*` option tables | shorter intangibility → riskier |
+| "Techs too easy / hard" | `TECH_WINDOW`, `TECH_LOCKOUT`, `TECH_*` / `GETUP_*` tables | shorter window → harder |
+| "Attacks trade too much" | `CLANK_DIFF`, `REBOUND_BASE` | smaller diff → fewer clanks |
+| "Spam is too good" | `STALE_STEPS` | larger shares → stronger staling |
+| "Runs feel slippery" | `RUN_TURN` | shorter → snappier reversals |
 | "Feedback too loud" | `sfx_volume`, `rumble` (Options) | per player |
 
 Change one thing at a time and re-run `tests/feel.rs` — the tests are
@@ -532,7 +595,9 @@ the spec.
   directional influence*, *Directional influence*, *Sakurai angle*, *Air
   dodge*, *Roll*, *Dash-dancing*, *L-cancel*, *Auto-cancel*, *Grab* (hold
   formula, mash-out), *Edge* (catch, intangibility, 100 % threshold, hang
-  time), *Ledgedash* (37 frames, release on frame 9), *Edge recovery*, and
+  time), *Ledgedash* (37 frames, release on frame 9), *Edge recovery*,
+  *Stale-move negation* (9 slots, 0.09…0.01), *Tech*, *Meteor smash* (the
+  8-frame cancel), *Priority* (the 9 % clank rule), and
   the per-character attribute tables for the fast-faller, heavy and
   lightweight archetypes (frame counts and speeds only).
 - FightCore (fightcore.gg) publishes the same community frame data; use it

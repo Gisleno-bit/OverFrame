@@ -114,11 +114,54 @@ pub const SHIELD_DROP: u32 = 15;
 /// damage, no shieldstun, no pushback.
 pub const POWERSHIELD_WINDOW: u32 = 2;
 
-/// Tech: pressing shield within this window as you collide while tumbling
-/// techs (no getup lag); the lockout prevents mashing.
+/// Tech: a shield press while tumbling opens a [`TECH_WINDOW`]-frame window;
+/// touching the ground inside it techs. Any press also starts a lockout
+/// ([`TECH_WINDOW`] + [`TECH_LOCKOUT`] frames) during which new presses do
+/// nothing, so mashing shield does not tech. Tech in place / tech roll as
+/// `(total, intangible)`; the roll covers [`TECH_ROLL_DISTANCE`].
 pub const TECH_WINDOW: u32 = 20;
 pub const TECH_LOCKOUT: u32 = 40;
 pub const TECH_INTANGIBLE: u32 = 20;
+pub const TECH_IN_PLACE: (u32, u32) = (26, 20);
+pub const TECH_ROLL: (u32, u32) = (40, 20);
+pub const TECH_ROLL_DISTANCE: f32 = 70.0;
+
+/// Missed tech: [`KNOCKDOWN_BOUNCE`] frames on the floor before you may act,
+/// then stand / roll / getup attack as `(total, intangible)`; the getup
+/// attack strikes in front on [`GETUP_ATTACK_HITS`].0 and behind on `.1`
+/// (each for [`GETUP_ATTACK_ACTIVE`] frames) with a fixed weak hitbox.
+pub const KNOCKDOWN_BOUNCE: u32 = 18;
+pub const GETUP_STAND: (u32, u32) = (30, 22);
+pub const GETUP_ROLL: (u32, u32) = (35, 25);
+pub const GETUP_ROLL_DISTANCE: f32 = 66.0;
+pub const GETUP_ATTACK: (u32, u32) = (49, 14);
+pub const GETUP_ATTACK_HITS: (u32, u32) = (15, 21);
+pub const GETUP_ATTACK_ACTIVE: u32 = 3;
+pub const GETUP_ATTACK_DAMAGE: f32 = 6.0;
+
+/// Reversing a *run* (past the dash-dance window) is a slow turn: this many
+/// frames of braking during which only a jump comes out.
+pub const RUN_TURN: u32 = 20;
+
+/// Clank: two grounded attacks whose hitboxes touch cancel each other when
+/// their damages differ by less than [`CLANK_DIFF`], sending both fighters
+/// into a rebound of `⌊max damage / 3⌋ + REBOUND_BASE` frames; otherwise the
+/// weaker hit is simply cancelled and the stronger one lands.
+pub const CLANK_DIFF: f32 = 9.0;
+pub const REBOUND_BASE: u32 = 8;
+
+/// Stale-move negation: the last [`STALE_QUEUE`] hits that connected;
+/// each earlier use of the same move takes its slot's share off the damage
+/// (0.09 for the most recent … 0.01 for the oldest). Knockback is computed
+/// from the fresh damage (it mostly ignores staleness). Reset on a KO.
+pub const STALE_QUEUE: usize = 9;
+pub const STALE_STEPS: [f32; STALE_QUEUE] = [0.09, 0.08, 0.07, 0.06, 0.05, 0.04, 0.03, 0.02, 0.01];
+
+/// Meteor cancel: a spike (launch angle within [`METEOR_ANGLES`], degrees
+/// below the horizon) can be cancelled with a jump or an up-special once
+/// this many frames of hitstun have passed.
+pub const METEOR_CANCEL_FRAMES: u32 = 8;
+pub const METEOR_ANGLES: (f32, f32) = (250.0, 290.0);
 
 /// Ledge. Catching one takes [`LEDGE_CATCH`] uncontrollable frames; the
 /// catch grants [`LEDGE_INTANGIBLE`] frames of intangibility in total (kept

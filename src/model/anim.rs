@@ -14,7 +14,7 @@
 use super::math3::{ease, ease_in, ease_out, v3, V3};
 use super::rig::{Pose, Rig};
 use crate::sim::attacks::{self, MoveId};
-use crate::sim::fighter::{Fighter, LedgeKind, State};
+use crate::sim::fighter::{Fighter, GetupKind, LedgeKind, State};
 use std::f32::consts::TAU;
 
 /// Body proportions for [`humanoid_skeleton`] (sim units; fighters are
@@ -718,6 +718,83 @@ pub fn fighter_pose(rig: &Rig, f: &Fighter, st: &AnimStyle, frame: u64) -> Pose 
             } else {
                 l
             }
+        }
+        State::RunTurn => {
+            // Brake: plant the feet, lean back against the momentum, then
+            // settle into the stance facing the new way.
+            let dur = crate::sim::constants::RUN_TURN.max(1) as f32;
+            let k = (sf as f32 / dur).min(1.0);
+            let ph = (t / st.run_cycle).fract();
+            let mut p = gait(rig, st, ph, true).blend(&base_ground, ease(k));
+            let brake = (k * std::f32::consts::PI).sin();
+            lean(&mut p, rig, -18.0 * brake);
+            p.offset(rig, "root", v3(0.0, -st.crouch_depth * 0.25 * brake, 0.0));
+            p
+        }
+        State::Tech { dir } => {
+            let c = crouch(rig, st);
+            if dir == 0.0 {
+                // Tech in place: a quick crouch that springs back up.
+                let dur = crate::sim::constants::TECH_IN_PLACE.0.max(1) as f32;
+                let k = (sf as f32 / dur).min(1.0);
+                c.blend(&base_ground, ease(k))
+            } else {
+                let dur = crate::sim::constants::TECH_ROLL.0.max(1) as f32;
+                let k = (sf as f32 / dur).min(1.0);
+                let mut p = base_ground.blend(&c, 0.9);
+                spin_body(&mut p, rig, -dir * f.facing * 360.0 * ease(k), centre);
+                p
+            }
+        }
+        State::Getup { kind } => {
+            let l = lying(rig, f.character.half_width * 0.9);
+            match kind {
+                GetupKind::Stand => {
+                    let dur = crate::sim::constants::GETUP_STAND.0.max(1) as f32;
+                    let k = (sf as f32 / dur).min(1.0);
+                    l.blend(&crouch(rig, st), ease(k.min(0.6) / 0.6))
+                        .blend(&base_ground, ease(((k - 0.6) / 0.4).clamp(0.0, 1.0)))
+                }
+                GetupKind::Roll { dir } => {
+                    let dur = crate::sim::constants::GETUP_ROLL.0.max(1) as f32;
+                    let k = (sf as f32 / dur).min(1.0);
+                    let mut p = base_ground.blend(&crouch(rig, st), 0.9);
+                    spin_body(&mut p, rig, -dir * f.facing * 360.0 * ease(k), centre);
+                    l.blend(&p, ease((k * 4.0).min(1.0)))
+                }
+                GetupKind::Attack => {
+                    // Sweep: kick forward, then behind, from a low crouch.
+                    let (front, back) = crate::sim::constants::GETUP_ATTACK_HITS;
+                    let base = crouch(rig, st);
+                    let mut p = l.blend(&base, ease((sf as f32 / 8.0).min(1.0)));
+                    let swing = |p: &mut Pose, side: f32, k: f32| {
+                        let leg = if side > 0.0 { "thigh_r" } else { "thigh_l" };
+                        p.add(rig, leg, v3(0.0, 0.0, -side * 95.0 * k));
+                        lean(p, rig, -side * 18.0 * k);
+                    };
+                    if sf < back - 2 {
+                        let k = ((sf as f32 - (front as f32 - 5.0)) / 5.0).clamp(0.0, 1.0);
+                        swing(&mut p, 1.0, ease(k));
+                    } else {
+                        let k = ((sf as f32 - (back as f32 - 3.0)) / 4.0).clamp(0.0, 1.0);
+                        swing(&mut p, -1.0, ease(k));
+                    }
+                    let dur = crate::sim::constants::GETUP_ATTACK.0 as f32;
+                    let settle = ((sf as f32 - (back as f32 + 6.0)) / (dur - back as f32 - 6.0))
+                        .clamp(0.0, 1.0);
+                    p.blend(&base_ground, ease(settle))
+                }
+            }
+        }
+        State::Rebound { total } => {
+            // Recoil: snap back from the clash, then recover.
+            let k = (sf as f32 / total.max(1) as f32).min(1.0);
+            let mut p = base_ground.clone();
+            let kick = (1.0 - k) * (1.0 - k);
+            lean(&mut p, rig, -22.0 * kick);
+            p.offset(rig, "root", v3(-f.facing * 2.0 * kick, 0.0, 0.0));
+            both_arms(&mut p, rig, 40.0 * kick, 60.0 * kick, 20.0 * kick);
+            p
         }
         State::Dead => rig.rest_pose(),
     }

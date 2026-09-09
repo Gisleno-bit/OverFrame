@@ -468,6 +468,15 @@ fn draw_fx<P: Painter>(p: &mut P, v: &View, gs: &GameState) {
                     Color::rgba(255, 255, 255, (200.0 * (1.0 - t)) as u8),
                 );
             }
+            FxKind::Clank => {
+                // A spark cross between the two blades.
+                let sp = v.s(6.0 + fx.magnitude * 0.4) * (0.6 + t);
+                let a = (230.0 * (1.0 - t)) as u8;
+                let col = Color::rgba(255, 250, 200, a);
+                p.line(x - sp, y - sp, x + sp, y + sp, 2.0, col);
+                p.line(x - sp, y + sp, x + sp, y - sp, 2.0, col);
+                p.fill_circle(x, y, sp * 0.35, Color::rgba(255, 255, 255, a));
+            }
             FxKind::Land | FxKind::Jump | FxKind::Swing | FxKind::Tech => {}
         }
     }
@@ -511,12 +520,29 @@ pub fn draw_hud<P: Painter>(p: &mut P, w: f32, h: f32, gs: &GameState, local: Op
             );
         }
 
-        // Percent, coloured by damage.
+        // Percent, coloured by damage; it *pops* (scales up and kicks) for a
+        // few frames after every hit — a pure function of the sim's
+        // `last_hit_frame`, so it replays identically after a rollback.
         let pc = percent_color(f.percent);
         let txt = format!("{}%", f.percent as i32);
-        let sc = 3.0;
+        let age = gs.frame.saturating_sub(f.last_hit_frame);
+        let pop = if f.last_hit_frame > 0 && age < 10 {
+            let u = 1.0 - age as f32 / 10.0;
+            u * u
+        } else {
+            0.0
+        };
+        let sc = 3.0 + 1.3 * pop;
+        let kick = if pop > 0.0 && age % 2 == 0 { 2.0 } else { 0.0 };
         let tw = font::text_width(&txt, sc);
-        font::draw_text(p, &txt, x + panel_w * 0.5 - tw * 0.5, base_y + 26.0, sc, pc);
+        let px = x + panel_w * 0.5 - tw * 0.5 + kick;
+        let py = base_y + 26.0 - 4.0 * pop;
+        if pop > 0.0 {
+            // Brief white flash behind the new number.
+            let fl = Color::rgba(255, 255, 255, (150.0 * pop) as u8);
+            font::draw_text(p, &txt, px + 1.0, py + 1.0, sc, fl);
+        }
+        font::draw_text(p, &txt, px, py, sc, pc);
     }
 }
 
@@ -573,6 +599,11 @@ pub fn state_name(s: &State) -> &'static str {
         State::LedgeAction { .. } => "LEDGEACT",
         State::Hitstun { .. } => "HITSTUN",
         State::Knockdown => "DOWN",
+        State::RunTurn => "RUNTURN",
+        State::Tech { dir } if *dir == 0.0 => "TECH",
+        State::Tech { .. } => "TECHROLL",
+        State::Getup { .. } => "GETUP",
+        State::Rebound { .. } => "CLANK",
         State::Dead => "DEAD",
     }
 }

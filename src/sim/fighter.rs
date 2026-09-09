@@ -27,6 +27,14 @@ pub enum LedgeKind {
     Attack,
 }
 
+/// How a knocked-down fighter gets back up.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum GetupKind {
+    Stand,
+    Roll { dir: f32 },
+    Attack,
+}
+
 /// The fighter's current action.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum State {
@@ -64,6 +72,20 @@ pub enum State {
     Grabbed,
     Throw {
         id: MoveId,
+    },
+    /// Braking turn out of a full run (only a jump interrupts it).
+    RunTurn,
+    /// Teched a tumble landing: in place (`dir == 0`) or a roll.
+    Tech {
+        dir: f32,
+    },
+    /// Rising from a knockdown.
+    Getup {
+        kind: GetupKind,
+    },
+    /// Two grounded attacks clanked: recoil lag.
+    Rebound {
+        total: u32,
     },
     LedgeGrab,
     LedgeAction {
@@ -104,6 +126,9 @@ pub struct Fighter {
 
     pub prev_buttons: u16,
     pub prev_cstick_len: f32,
+    /// The stick as it was on the previous tick (for flick detection after
+    /// `prev_stick` has already been refreshed this tick).
+    pub stick_last: Vec2,
 
     pub shield_health: f32,
     pub intangible: u32,
@@ -125,6 +150,15 @@ pub struct Fighter {
     pub grab_dash: bool,
     /// Frames until the next pummel is allowed.
     pub pummel_cd: u32,
+    /// Frames left in the tech window opened by a shield press while
+    /// tumbling (landing inside it techs).
+    pub tech_armed: u32,
+    /// The last hits that connected, newest first (stale-move negation).
+    pub stale: [Option<MoveId>; super::constants::STALE_QUEUE],
+    /// Match frame of the last hit taken (HUD percent pop).
+    pub last_hit_frame: u64,
+    /// The current hitstun came from a spike (meteor-cancellable).
+    pub meteor: bool,
 
     pub already_hit: bool,
     pub respawn_timer: u32,
@@ -195,6 +229,7 @@ impl Fighter {
             stocks: 4,
             prev_buttons: 0,
             prev_cstick_len: 0.0,
+            stick_last: Vec2::ZERO,
             shield_health: k::SHIELD_MAX,
             intangible: 0,
             hitlag: 0,
@@ -210,6 +245,10 @@ impl Fighter {
             grab_timer: 0,
             grab_dash: false,
             pummel_cd: 0,
+            tech_armed: 0,
+            stale: [None; super::constants::STALE_QUEUE],
+            last_hit_frame: 0,
+            meteor: false,
             already_hit: false,
             respawn_timer: 0,
             kb_vel: Vec2::ZERO,
@@ -227,6 +266,15 @@ impl Fighter {
         self.state = s;
         self.state_frame = 0;
         self.already_hit = false;
+    }
+
+    /// Force a state from the match (clank rebounds).
+    pub fn set_state_pub(&mut self, s: State) {
+        self.set_state(s);
+        // A clank keeps the hitbox spent for the rest of the swing.
+        if matches!(s, State::Rebound { .. }) {
+            self.already_hit = true;
+        }
     }
 
     #[inline]
@@ -248,7 +296,11 @@ impl Fighter {
             State::Crouch | State::Spotdodge | State::ShieldStun { .. } => {
                 self.character.height * 0.62
             }
-            State::Knockdown => self.character.height * 0.4,
+            State::Knockdown
+            | State::Getup {
+                kind: GetupKind::Stand,
+            } => self.character.height * 0.4,
+            State::Tech { .. } | State::Getup { .. } => self.character.height * 0.62,
             State::Shield | State::ShieldDrop => self.character.height * 0.85,
             _ => self.character.height,
         };
@@ -280,6 +332,28 @@ impl Fighter {
             State::Attack { id, .. } => {
                 let md = attacks::data(self.character.id, id);
                 md.hitbox_at(self.state_frame)?
+            }
+            State::Getup {
+                kind: GetupKind::Attack,
+            } => {
+                // Weak two-sided sweep: in front first, then behind.
+                let f = self.state_frame;
+                let (front, back) = k::GETUP_ATTACK_HITS;
+                let a = k::GETUP_ATTACK_ACTIVE;
+                let side = if (front..front + a).contains(&f) {
+                    1.0
+                } else if (back..back + a).contains(&f) {
+                    -1.0
+                } else {
+                    return None;
+                };
+                let mut hb = attacks::data(self.character.id, MoveId::Ftilt).hitbox;
+                hb.offset = Vec2::new(hb.offset.x * side, -self.character.height * 0.25);
+                hb.damage = k::GETUP_ATTACK_DAMAGE;
+                hb.angle_deg = 361.0;
+                hb.bkb = 30.0;
+                hb.kbg = 50.0;
+                hb
             }
             State::LedgeAction {
                 kind: LedgeKind::Attack,
@@ -327,6 +401,16 @@ impl Fighter {
         self.ledge_regrab_cd = self.ledge_regrab_cd.saturating_sub(1);
         self.coyote = self.coyote.saturating_sub(1);
         self.pummel_cd = self.pummel_cd.saturating_sub(1);
+        self.tech_armed = self.tech_armed.saturating_sub(1);
+        // A shield press while tumbling opens the tech window (and starts
+        // the lockout so mashing does not work). Read even during hitlag.
+        if matches!(self.state, State::Hitstun { tumble: true })
+            && self.pressed(input.buttons, buttons::SHIELD)
+            && self.tech_lockout == 0
+        {
+            self.tech_armed = k::TECH_WINDOW;
+            self.tech_lockout = k::TECH_WINDOW + k::TECH_LOCKOUT;
+        }
         if self.anim_flash > 0 {
             self.anim_flash -= 1;
         }
@@ -396,6 +480,12 @@ impl Fighter {
                 return out; // hitstun integrates itself
             }
             State::Knockdown => self.tick_knockdown(input),
+            State::RunTurn => self.tick_run_turn(input),
+            State::Tech { dir } => self.tick_tech(dir),
+            State::Getup { kind } => self.tick_getup(kind),
+            State::Rebound { total } if self.state_frame >= total => {
+                self.set_state(State::Stand);
+            }
             State::Grab => self.tick_grab(),
             State::Hold => out.events |= self.tick_hold(input),
             State::Grabbed => {
@@ -533,6 +623,7 @@ impl Fighter {
     fn remember_inputs(&mut self, input: &PlayerInput) {
         self.prev_buttons = input.buttons;
         self.prev_cstick_len = input.cstick.length();
+        self.stick_last = input.stick;
     }
 
     fn respawn(&mut self, stage: &Stage) {
@@ -548,6 +639,9 @@ impl Fighter {
         self.kb_fall = 0.0;
         self.ground_stun = false;
         self.pending_launch = None;
+        self.stale = [None; k::STALE_QUEUE];
+        self.meteor = false;
+        self.tech_armed = 0;
         self.facing = if s.x <= 0.0 { 1.0 } else { -1.0 };
         self.set_state(State::Air);
     }
@@ -763,6 +857,8 @@ impl Fighter {
                     ..
                 } => ch.ground_friction * 0.9,
                 State::LandLag { .. } | State::Attack { .. } => ch.ground_friction * 1.2,
+                State::RunTurn => ch.ground_friction * 1.5,
+                State::Rebound { .. } => ch.ground_friction * 1.5,
                 State::ShieldStun { .. } => ch.traction * 0.8,
                 _ => ch.ground_friction * 0.6,
             };
@@ -811,8 +907,10 @@ impl Fighter {
                 }
                 State::Run => {
                     if want != self.facing {
-                        self.facing = want;
-                        self.set_state(State::Dash);
+                        // Past the dash-dance window a reversal is a braking
+                        // turn, not a fresh dash.
+                        self.set_state(State::RunTurn);
+                        return;
                     }
                     self.vel.x = approach(self.vel.x, self.facing * ch.run_max, ch.ground_accel);
                 }
@@ -862,6 +960,23 @@ impl Fighter {
 
     fn tick_jumpsquat(&mut self, input: &PlayerInput) {
         let ch = self.character;
+        // Jump-cancels: a grab or an up-smash started during the squat
+        // replaces the jump (this is what lets a dash turn into a standing
+        // grab or an up-smash without the run's momentum being lost).
+        let cur = input.buttons;
+        if self.pressed(cur, buttons::GRAB) {
+            self.grab_dash = false;
+            self.set_state(State::Grab);
+            return;
+        }
+        let c_up = input.cstick.y > HARD && self.cstick_flick(input.cstick.length());
+        if c_up || (self.pressed(cur, buttons::ATTACK) && input.stick.y > HARD) {
+            self.set_state(State::Attack {
+                id: MoveId::Usmash,
+                aerial: false,
+            });
+            return;
+        }
         if self.state_frame + 1 >= ch.jumpsquat as u32 {
             let short = input.buttons & buttons::JUMP == 0;
             let jv = if short { ch.shorthop_v } else { ch.fullhop_v };
@@ -982,6 +1097,7 @@ impl Fighter {
         }
 
         // Landing on platforms.
+        let prev_support = self.support;
         self.grounded = false;
         self.support = None;
         let prev_feet = self.pos.y - self.vel.y;
@@ -995,12 +1111,29 @@ impl Fighter {
             let crossed = feet <= p.y && prev_feet >= p.y - 0.01;
             let falling = self.vel.y <= 0.0;
 
+            // Drop through a soft platform with a quick down flick (neutral
+            // to hard down in one frame) or down + jump.
+            let flick = input.stick.y < -HARD && self.stick_last.y > -DEADZONE;
+            let jump =
+                (self.prev_buttons & buttons::JUMP == 0) && (input.buttons & buttons::JUMP != 0);
+            // Only from *standing on* the platform: you cannot fall through
+            // one from the air by holding down.
             let drop_through = !p.solid
+                && was_grounded
+                && prev_support == Some(i)
                 && input.stick.y < -HARD
-                && (self.prev_buttons & buttons::JUMP == 0)
-                && (input.buttons & buttons::JUMP != 0);
+                && (flick || jump);
+            if drop_through {
+                // Let go of the platform: airborne at once, and already a
+                // hair below it so the next tick does not re-land.
+                self.support = None;
+                self.set_state(State::Air);
+                self.pos.y -= 1.0;
+                self.vel.y = -0.5;
+                continue;
+            }
 
-            if falling && crossed && !drop_through {
+            if falling && crossed {
                 self.pos.y = p.y;
                 self.vel.y = 0.0;
                 self.grounded = true;
@@ -1256,19 +1389,23 @@ impl Fighter {
         let over = self.pos.x >= main.left && self.pos.x <= main.right;
         if self.vel.y < 0.0 && self.pos.y <= main.y && over {
             self.pos.y = main.y;
-            let teching = tumble
-                && self.tech_lockout == 0
-                && (input.buttons & buttons::SHIELD != 0)
-                && (self.prev_buttons & buttons::SHIELD == 0);
+            let teching = tumble && self.tech_armed > 0;
             self.grounded = true;
             self.vel = Vec2::ZERO;
             self.kb_vel = Vec2::ZERO;
             self.kb_fall = 0.0;
+            self.meteor = false;
             if teching {
-                self.intangible = k::TECH_INTANGIBLE;
-                self.set_state(State::LandLag { total: 8 });
+                let sx = input.stick.x;
+                let dir = if sx.abs() > HARD { sx.signum() } else { 0.0 };
+                self.tech_armed = 0;
+                self.intangible = if dir == 0.0 {
+                    k::TECH_IN_PLACE.1
+                } else {
+                    k::TECH_ROLL.1
+                };
+                self.set_state(State::Tech { dir });
             } else if tumble {
-                self.tech_lockout = k::TECH_LOCKOUT;
                 self.set_state(State::Knockdown);
             } else {
                 self.set_state(State::LandLag {
@@ -1278,28 +1415,152 @@ impl Fighter {
             return;
         }
 
+        // Meteor cancel: a spike can be jumped out of after a few frames.
+        if self.meteor && self.state_frame >= k::METEOR_CANCEL_FRAMES {
+            let cur = input.buttons;
+            if self.pressed(cur, buttons::JUMP) && self.jumps_left > 0 {
+                self.jumps_left -= 1;
+                self.meteor = false;
+                self.hitstun_timer = 0;
+                self.kb_vel = Vec2::ZERO;
+                self.kb_fall = 0.0;
+                self.vel = Vec2::new(0.0, ch.doublejump_v);
+                self.set_state(State::Air);
+                return;
+            }
+            if self.pressed(cur, buttons::SPECIAL) && input.stick.y > HARD {
+                self.meteor = false;
+                self.hitstun_timer = 0;
+                self.kb_vel = Vec2::ZERO;
+                self.kb_fall = 0.0;
+                self.vel = Vec2::ZERO;
+                self.set_state(State::Attack {
+                    id: MoveId::SpecialUp,
+                    aerial: true,
+                });
+                return;
+            }
+        }
+
         if self.hitstun_timer > 0 {
             self.hitstun_timer -= 1;
             if self.hitstun_timer == 0 {
+                self.meteor = false;
                 self.set_state(State::Air);
                 self.vel = self.kb_vel + Vec2::new(0.0, self.kb_fall);
             }
         } else {
+            self.meteor = false;
             self.set_state(State::Air);
             self.vel = self.kb_vel + Vec2::new(0.0, self.kb_fall);
         }
     }
 
+    // ---------------------- turns, techs, getups ----------------------
+
+    fn tick_run_turn(&mut self, input: &PlayerInput) {
+        let ch = self.character;
+        if self.pressed(input.buttons, buttons::JUMP) {
+            self.set_state(State::JumpSquat);
+            self.jump_held_at_squat_start = true;
+            return;
+        }
+        // Face the new way once the brake is half done.
+        if self.state_frame == k::RUN_TURN / 2 {
+            self.facing = -self.facing;
+        }
+        if self.state_frame >= k::RUN_TURN {
+            let sx = input.stick.x;
+            if sx.abs() > HARD && sx.signum() == self.facing {
+                self.vel.x = self.facing * ch.dash_max * 0.5;
+                self.set_state(State::Run);
+            } else {
+                self.set_state(State::Stand);
+            }
+        }
+    }
+
+    fn tick_tech(&mut self, dir: f32) {
+        let (total, _) = if dir == 0.0 {
+            k::TECH_IN_PLACE
+        } else {
+            k::TECH_ROLL
+        };
+        if dir != 0.0 && (4..24).contains(&self.state_frame) {
+            self.pos.x += dir * k::TECH_ROLL_DISTANCE / 20.0;
+            self.facing = dir;
+        }
+        self.vel = Vec2::ZERO;
+        if self.state_frame >= total {
+            self.set_state(State::Stand);
+        }
+    }
+
+    fn tick_getup(&mut self, kind: GetupKind) {
+        self.vel = Vec2::ZERO;
+        let total = match kind {
+            GetupKind::Stand => k::GETUP_STAND.0,
+            GetupKind::Roll { dir } => {
+                if (4..26).contains(&self.state_frame) {
+                    self.pos.x += dir * k::GETUP_ROLL_DISTANCE / 22.0;
+                    self.facing = dir;
+                }
+                k::GETUP_ROLL.0
+            }
+            GetupKind::Attack => k::GETUP_ATTACK.0,
+        };
+        if self.state_frame >= total {
+            self.set_state(State::Stand);
+        }
+    }
+
     fn tick_knockdown(&mut self, input: &PlayerInput) {
         self.vel = Vec2::ZERO;
-        if self.state_frame >= 18 {
-            let sx = input.stick.x;
-            if sx.abs() > HARD {
-                self.pos.x += sx.signum() * k::ROLL_DISTANCE * 0.6;
-            }
-            self.intangible = 8;
-            self.set_state(State::LandLag { total: 4 });
+        if self.state_frame < k::KNOCKDOWN_BOUNCE {
+            return;
         }
+        let cur = input.buttons;
+        let sx = input.stick.x;
+        let sy = input.stick.y;
+        let kind = if self.pressed(cur, buttons::ATTACK) || self.pressed(cur, buttons::SPECIAL) {
+            Some(GetupKind::Attack)
+        } else if sx.abs() > HARD {
+            Some(GetupKind::Roll { dir: sx.signum() })
+        } else if sy > HARD
+            || self.pressed(cur, buttons::JUMP)
+            || self.pressed(cur, buttons::SHIELD)
+            || self.pressed(cur, buttons::GRAB)
+        {
+            Some(GetupKind::Stand)
+        } else {
+            None
+        };
+        if let Some(kind) = kind {
+            let inv = match kind {
+                GetupKind::Stand => k::GETUP_STAND.1,
+                GetupKind::Roll { .. } => k::GETUP_ROLL.1,
+                GetupKind::Attack => k::GETUP_ATTACK.1,
+            };
+            self.intangible = inv;
+            self.set_state(State::Getup { kind });
+        }
+    }
+
+    /// Damage multiplier for `id` from the stale-move queue.
+    pub fn stale_multiplier(&self, id: MoveId) -> f32 {
+        let mut m = 1.0;
+        for (slot, used) in self.stale.iter().enumerate() {
+            if *used == Some(id) {
+                m -= k::STALE_STEPS[slot];
+            }
+        }
+        m
+    }
+
+    /// Record a connected hit of `id` (newest first).
+    pub fn stale_push(&mut self, id: MoveId) {
+        self.stale.rotate_right(1);
+        self.stale[0] = Some(id);
     }
 
     /// The grab's `(first hit frame, last hit frame, total)`, 1-based.

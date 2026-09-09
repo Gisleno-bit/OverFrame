@@ -5,7 +5,7 @@
 //! deterministic and fully save/load-able — which is precisely what the GGRS
 //! rollback layer (see `netcode.rs`) requires.
 
-use super::attacks::{self, Projectile};
+use super::attacks::{self, MoveId, Projectile};
 use super::constants as k;
 use super::fighter::{Fighter, State};
 use super::input::PlayerInput;
@@ -86,6 +86,8 @@ pub enum FxKind {
     /// Attack start (whiff swing sound).
     Swing,
     Tech,
+    /// Two attacks clashed (rebound).
+    Clank,
 }
 
 /// The entire simulation state for one match.
@@ -349,7 +351,55 @@ impl GameState {
         })
     }
 
+    /// Clank / priority between grounded attacks whose hitboxes touch this
+    /// tick: close damages cancel both into a rebound, otherwise the weaker
+    /// hitbox is simply cancelled and the stronger one goes on to land.
+    fn resolve_clanks(&mut self) {
+        let n = self.fighters.len();
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let (a, b) = (&self.fighters[i], &self.fighters[j]);
+                let grounded_attack = |f: &Fighter| {
+                    f.grounded && matches!(f.state, State::Attack { aerial: false, .. })
+                };
+                if !grounded_attack(a) || !grounded_attack(b) {
+                    continue;
+                }
+                let (Some((ha, pa)), Some((hb, pb))) = (a.active_hitbox(), b.active_hitbox())
+                else {
+                    continue;
+                };
+                if (pa - pb).length() > ha.radius + hb.radius {
+                    continue;
+                }
+                let mid = (pa + pb) * 0.5;
+                let diff = (ha.damage - hb.damage).abs();
+                if diff < k::CLANK_DIFF {
+                    let total = (ha.damage.max(hb.damage) / 3.0) as u32 + k::REBOUND_BASE;
+                    for (idx, other) in [(i, j), (j, i)] {
+                        let f = &mut self.fighters[idx];
+                        f.already_hit = true;
+                        f.vel.x = -f.facing * 1.5;
+                        f.set_state_pub(State::Rebound { total });
+                        let _ = other;
+                    }
+                    self.push_fx_dir(
+                        mid,
+                        FxKind::Clank,
+                        ha.damage.max(hb.damage),
+                        Vec2::new(0.0, 1.0),
+                    );
+                    self.camera_shake = (self.camera_shake + 1.5).min(12.0);
+                } else {
+                    let weaker = if ha.damage < hb.damage { i } else { j };
+                    self.fighters[weaker].already_hit = true;
+                }
+            }
+        }
+    }
+
     fn resolve_combat(&mut self, inputs: &[PlayerInput]) {
+        self.resolve_clanks();
         let n = self.fighters.len();
         for i in 0..n {
             // Copy attacker's relevant snapshot to avoid overlapping borrows.
@@ -470,10 +520,35 @@ impl GameState {
                     break;
                 }
 
-                self.apply_hit(i, j, &hitbox, inputs, false, electric);
+                let stale_id = match state_i {
+                    State::Attack { id, .. } => Some(id),
+                    _ => None,
+                };
+                self.apply_hit_staled(i, j, &hitbox, inputs, false, electric, stale_id);
                 self.fighters[i].already_hit = true;
                 break;
             }
+        }
+    }
+
+    /// A normal hit that also goes through the attacker's stale-move queue.
+    #[allow(clippy::too_many_arguments)]
+    fn apply_hit_staled(
+        &mut self,
+        i: usize,
+        j: usize,
+        hitbox: &attacks::Hitbox,
+        inputs: &[PlayerInput],
+        is_throw: bool,
+        electric: bool,
+        stale_id: Option<MoveId>,
+    ) {
+        let mult = stale_id
+            .map(|id| self.fighters[i].stale_multiplier(id))
+            .unwrap_or(1.0);
+        self.apply_hit_with(i, j, hitbox, inputs, is_throw, electric, mult);
+        if let Some(id) = stale_id {
+            self.fighters[i].stale_push(id);
         }
     }
 
@@ -487,11 +562,29 @@ impl GameState {
         is_throw: bool,
         electric: bool,
     ) {
+        self.apply_hit_with(i, j, hitbox, inputs, is_throw, electric, 1.0);
+    }
+
+    /// Apply a hit whose *damage* is scaled by `stale` (knockback still uses
+    /// the fresh damage, as in the reference).
+    #[allow(clippy::too_many_arguments)]
+    fn apply_hit_with(
+        &mut self,
+        i: usize,
+        j: usize,
+        hitbox: &attacks::Hitbox,
+        inputs: &[PlayerInput],
+        is_throw: bool,
+        electric: bool,
+        stale: f32,
+    ) {
         let attacker_facing = self.fighters[i].facing;
 
-        // Damage.
+        // Damage (staled, to a tenth), then knockback from the fresh damage.
         let victim_weight = self.fighters[j].character.weight;
-        self.fighters[j].percent = (self.fighters[j].percent + hitbox.damage).min(999.0);
+        let dealt = (hitbox.damage * stale * 10.0).round() / 10.0;
+        self.fighters[j].percent = (self.fighters[j].percent + dealt).min(999.0);
+        self.fighters[j].last_hit_frame = self.frame;
         let percent_after = self.fighters[j].percent;
 
         // Knockback magnitude; crouch-cancelling (crouching on the ground)
@@ -557,6 +650,10 @@ impl GameState {
         if !self.fighters[j].ground_stun {
             self.fighters[j].pending_launch = Some((kb, angle));
         }
+        // Spikes can be meteor-cancelled (angle measured before mirroring).
+        self.fighters[j].meteor = !is_throw
+            && !self.fighters[j].ground_stun
+            && (k::METEOR_ANGLES.0..=k::METEOR_ANGLES.1).contains(&angle_deg);
         self.fighters[i].hitlag = hitlag_attacker;
 
         let vp = self.fighters[j].body_center();
@@ -692,6 +789,7 @@ impl GameState {
             FxKind::Hit => 12,
             FxKind::Shield => 8,
             FxKind::Powershield => 10,
+            FxKind::Clank => 9,
             FxKind::Blast => 22,
             FxKind::Dust => 14,
             FxKind::Land | FxKind::Jump | FxKind::Swing | FxKind::Tech => 2,
