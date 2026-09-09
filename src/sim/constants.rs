@@ -139,6 +139,15 @@ pub const GETUP_ATTACK_HITS: (u32, u32) = (15, 21);
 pub const GETUP_ATTACK_ACTIVE: u32 = 3;
 pub const GETUP_ATTACK_DAMAGE: f32 = 6.0;
 
+/// Smash attacks: attack pressed within [`SMASH_FLICK_FRAMES`] frames of the
+/// stick crossing the hard threshold is a smash (a held stick is a tilt);
+/// holding attack keeps the smash charging at its charge frame for up to
+/// [`SMASH_CHARGE_MAX`] frames, scaling damage up to ×(1 + SMASH_CHARGE_BONUS)
+/// — knockback follows the charged damage. C-stick smashes do not charge.
+pub const SMASH_FLICK_FRAMES: u32 = 3;
+pub const SMASH_CHARGE_MAX: u32 = 60;
+pub const SMASH_CHARGE_BONUS: f32 = 0.367;
+
 /// Reversing a *run* (past the dash-dance window) is a slow turn: this many
 /// frames of braking during which only a jump comes out.
 pub const RUN_TURN: u32 = 20;

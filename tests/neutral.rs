@@ -342,12 +342,12 @@ fn close_attacks_clank_and_the_stronger_one_wins_otherwise() {
     let mut clanked = false;
     for i in 0..20u32 {
         let inp = if i == 0 {
-            stick_press(1.0, 0.0, buttons::ATTACK)
+            stick_press(0.55, 0.0, buttons::ATTACK)
         } else {
             neutral()
         };
         let inp1 = if i == 0 {
-            stick_press(-1.0, 0.0, buttons::ATTACK)
+            stick_press(-0.55, 0.0, buttons::ATTACK)
         } else {
             neutral()
         };
@@ -409,7 +409,7 @@ fn stale_moves_lose_damage_but_not_knockback() {
         let mut landed = false;
         for i in 0..40u32 {
             let inp = if i == 0 {
-                stick_press(1.0, 0.0, buttons::ATTACK)
+                stick_press(0.55, 0.0, buttons::ATTACK)
             } else {
                 neutral()
             };
@@ -495,4 +495,148 @@ fn spikes_can_be_meteor_cancelled_after_8_frames() {
         "spent the double jump"
     );
     assert!(gs.fighters[1].vel.y > 0.0, "rising");
+}
+
+// ------------------------------------------------------------ smashes, ledges, edges
+
+#[test]
+fn a_flick_is_a_smash_a_held_stick_is_a_tilt_and_holding_charges() {
+    // Flick + attack on the same frame → forward smash.
+    let mut gs = solo();
+    gs.step(&[stick_press(1.0, 0.0, buttons::ATTACK)]);
+    assert!(matches!(
+        gs.fighters[0].state,
+        State::Attack {
+            id: MoveId::Fsmash,
+            aerial: false
+        }
+    ));
+    // Stick held (a walk-strength tilt) for a few frames, then attack →
+    // forward tilt.
+    let mut gs = solo();
+    for _ in 0..k::SMASH_FLICK_FRAMES + 1 {
+        gs.step(&[stick(0.55, 0.0)]);
+    }
+    gs.step(&[stick_press(0.55, 0.0, buttons::ATTACK)]);
+    assert!(matches!(
+        gs.fighters[0].state,
+        State::Attack {
+            id: MoveId::Ftilt,
+            aerial: false
+        }
+    ));
+
+    // Charging: hold attack → the smash waits at its charge frame; a full
+    // charge (60 frames) deals ×1.367 and then releases on its own.
+    let mut gs = duel(30.0);
+    let base =
+        overframe::sim::attacks::data(overframe::sim::roster::CharacterId::Kestrel, MoveId::Fsmash)
+            .hitbox
+            .damage;
+    let mut hit_at = None;
+    for i in 0..140u32 {
+        let inp = stick_press(1.0, 0.0, buttons::ATTACK); // held throughout
+        gs.step(&[inp, neutral()]);
+        if gs.fighters[1].percent > 0.0 && hit_at.is_none() {
+            hit_at = Some(i + 1);
+        }
+    }
+    let hit_at = hit_at.expect("charged smash lands");
+    assert!(
+        hit_at > k::SMASH_CHARGE_MAX + 10,
+        "the hit came after a full charge ({hit_at})"
+    );
+    assert_eq!(gs.fighters[0].charge, k::SMASH_CHARGE_MAX);
+    assert_eq!(
+        gs.fighters[1].percent,
+        (base * (1.0 + k::SMASH_CHARGE_BONUS)).round()
+    );
+
+    // Releasing early gives a partial charge; a C-stick smash never charges.
+    let mut gs = duel(30.0);
+    for i in 0..60u32 {
+        let inp = if i < 20 {
+            stick_press(1.0, 0.0, buttons::ATTACK)
+        } else {
+            neutral()
+        };
+        gs.step(&[inp, neutral()]);
+    }
+    let pct = gs.fighters[1].percent;
+    assert!(pct > base && pct < base * 1.3, "partial charge ({pct})");
+    let mut gs = duel(30.0);
+    for i in 0..60u32 {
+        let inp = if i < 40 { cstick(1.0, 0.0) } else { neutral() };
+        gs.step(&[inp, neutral()]);
+    }
+    assert_eq!(gs.fighters[1].percent, base, "C-stick smash is uncharged");
+}
+
+#[test]
+fn an_occupied_ledge_cannot_be_grabbed() {
+    let mut gs = duel(0.0);
+    let m = gs.stage.main();
+    // P1 hangs on the right ledge.
+    let f = &mut gs.fighters[1];
+    f.grounded = false;
+    f.state = State::Air;
+    f.pos = Vec2::new(m.right + f.character.half_width + 4.0, m.y - 4.0);
+    f.vel = Vec2::new(0.0, -1.0);
+    gs.step(&[neutral(), neutral()]);
+    assert!(matches!(gs.fighters[1].state, State::LedgeGrab));
+    // P0 arrives at the same ledge: edgehogged, keeps falling.
+    let f = &mut gs.fighters[0];
+    f.grounded = false;
+    f.state = State::Air;
+    f.pos = Vec2::new(m.right + f.character.half_width + 4.0, m.y - 4.0);
+    f.vel = Vec2::new(0.0, -1.0);
+    for _ in 0..4 {
+        gs.step(&[neutral(), neutral()]);
+    }
+    assert!(matches!(gs.fighters[0].state, State::Air));
+    assert!(gs.fighters[0].pos.y < m.y - 8.0, "fell past the ledge");
+    // Once P1 lets go, the ledge is free again.
+    for _ in 0..k::LEDGE_CATCH {
+        gs.step(&[neutral(), neutral()]);
+    }
+    gs.step(&[neutral(), stick(0.0, -1.0)]);
+    assert!(!matches!(gs.fighters[1].state, State::LedgeGrab));
+    let f = &mut gs.fighters[0];
+    f.pos = Vec2::new(m.right + f.character.half_width + 4.0, m.y - 4.0);
+    f.vel = Vec2::new(0.0, -1.0);
+    f.ledge_regrab_cd = 0;
+    gs.step(&[neutral(), neutral()]);
+    assert!(matches!(gs.fighters[0].state, State::LedgeGrab));
+}
+
+#[test]
+fn landing_lag_is_edge_cancelled_by_sliding_off() {
+    // Waveland toward the edge of a side platform: the slide carries the
+    // fighter off it and the lag ends at once (Air), no 10-frame wait.
+    let mut gs = solo();
+    let f = &mut gs.fighters[0];
+    f.pos = Vec2::new(115.0, 64.0);
+    f.grounded = false;
+    f.state = State::Air;
+    f.vel = Vec2::ZERO;
+    let mut cancelled_at = None;
+    for i in 0..40u32 {
+        let inp = if i == 0 {
+            stick_press(1.0, -0.4, buttons::SHIELD)
+        } else {
+            neutral()
+        };
+        gs.step(&[inp]);
+        let f = &gs.fighters[0];
+        if matches!(f.state, State::Air) && i > 2 && !f.grounded {
+            cancelled_at = Some(i + 1);
+            break;
+        }
+    }
+    let at = cancelled_at.expect("slid off into the air");
+    assert!(
+        at < 14,
+        "edge-cancelled well before the waveland lag ended ({at})"
+    );
+    assert!(gs.fighters[0].pos.x > 125.0, "past the platform edge");
 }

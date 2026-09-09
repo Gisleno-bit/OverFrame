@@ -59,6 +59,14 @@ pseudocode and measurements — is `docs/GAME_FEEL.md`.
 - **Stale-move negation**: 9-slot queue, 0.09…0.01 off the damage per
   earlier use, knockback from the fresh damage, cleared on a KO.
 - **Meteor cancel**: spikes can be jumped or up-B'd out of after 8 frames.
+- **Smash inputs like the reference**: attack + a stick *flick* (3-frame
+  window) is a smash, a *held* stick at any tilt past the deadzone is a
+  tilt (up / down tilts at 0.5), neutral is a jab; **smash charging** (hold
+  attack, up to 60 frames, ×1.367 damage with knockback to match, trembling
+  wind-up pose); C-stick smashes stay instant and uncharged.
+- **Edgehogging**: a ledge someone hangs from cannot be grabbed.
+- **Edge-cancel**: landing lag and wavelands end at once when you slide off
+  a platform.
 - **Percent pop** on the HUD after every hit (from the sim's
   `last_hit_frame`, rollback-safe).
 - Animation-viewer clips: TECH IN PLACE / TECH ROLL / GETUP STAND / ROLL /
@@ -81,7 +89,7 @@ pseudocode and measurements — is `docs/GAME_FEEL.md`.
   tech / wavedash) so audio, rumble and VFX are pure functions of the sim
   state and rollback-safe (de-duplicated by `(born, kind)`).
 - `tests/feel.rs` (15), `tests/grab_ledge.rs` (11) and `tests/neutral.rs`
-  (8) pinning every rule above; 87 tests total.
+  (11) pinning every rule above; 90 tests total.
 - Animation-viewer clips for HELPLESS and SHIELD DROP; poses in `anim.rs`.
 
 ### Changed

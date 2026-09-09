@@ -83,7 +83,7 @@ fn hitlag_freezes_both_fighters_by_the_damage_formula() {
         20,
         |i| {
             if i == 0 {
-                stick_press(0.9, 0.0, buttons::ATTACK)
+                stick_press(0.55, 0.0, buttons::ATTACK)
             } else {
                 neutral()
             }
@@ -181,7 +181,7 @@ fn crouch_cancel_takes_a_third_off_the_knockback() {
             30,
             |i| {
                 if i == 6 {
-                    stick_press(0.9, 0.0, buttons::ATTACK)
+                    stick_press(0.55, 0.0, buttons::ATTACK)
                 } else {
                     neutral()
                 }
@@ -239,7 +239,7 @@ fn shieldstun_and_pushback_follow_the_block_formulas() {
     let mut stun = None;
     for i in 0..30u64 {
         let p0 = if i == 8 {
-            stick_press(0.9, 0.0, buttons::ATTACK)
+            stick_press(0.55, 0.0, buttons::ATTACK)
         } else {
             neutral()
         };
@@ -268,7 +268,7 @@ fn powershield_in_the_first_frames_takes_no_stun() {
     let mut saw_ps = false;
     for i in 0..40u64 {
         let p0 = if i == 0 {
-            stick_press(0.9, 0.0, buttons::ATTACK)
+            stick_press(0.55, 0.0, buttons::ATTACK)
         } else {
             neutral()
         };

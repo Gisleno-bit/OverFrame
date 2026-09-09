@@ -62,6 +62,9 @@ it is in the art.
 |---|---|
 | **Landing lag** | 4 frames for an empty landing. Every aerial has its own landing lag; **L-cancel** (shield within 7 frames before landing) halves it (`⌊lag/2⌋`); landing *outside* the aerial's active window (**autocancel**) costs the normal 4. |
 | **Dash-dance** | You can reverse direction for the whole *initial dash* (per character: 7–15 frames); after that you are running and a reversal is a slow braking turn (~20 frames) that only a jump interrupts. |
+| **Tilt vs smash** | The attack button with the stick *flicked* to hard within the last ~3 frames is a smash; with the stick merely *held* (any tilt past the deadzone) it is a tilt; neutral is a jab. Holding attack **charges** a smash at its charge frame for up to 60 frames, up to ×1.367 damage (knockback follows). C-stick smashes are instant and uncharged. |
+| **Edgehog** | A ledge someone is hanging from cannot be grabbed by anyone else. |
+| **Edge-cancel** | Sliding off a platform during landing lag or a waveland ends the lag at once. |
 | **Jump-cancels** | A grab or an up-smash input during the jump-squat replaces the jump — the way a dash becomes a standing grab or an up-smash without losing the run. |
 | **Platform drop** | A quick down tap while standing on a soft platform drops through it (a slow tilt crouches); you cannot fall through one from the air. |
 | **IASA** | Moves can be interrupted before their animation ends; effectively every move is `startup + active (+ late) + endlag` and the endlag is the whole recovery. |
@@ -247,6 +250,10 @@ away** = let go (keeping the intangibility).
 | Stale moves | 9-slot queue, 0.09…0.01 | none | **implemented** (damage to a tenth; knockback from fresh damage; KO clears) | `stale_multiplier`, `apply_hit_staled` |
 | Meteor cancel | 8 frames, jump / up-B | none | **implemented** (uses the double jump) | `METEOR_CANCEL_FRAMES` |
 | Helpless ledge grab | yes | no | **yes** | `collide_stage` |
+| Smash input | flick + A (or C-stick) | C-stick only; A + hard stick = tilt | **flick window 3 f** (`stick_flick`); held stick past the deadzone = tilt (up/down at 0.5) | `handle_free_intent`, `pick_ground_attack` |
+| Smash charge | hold A, ≤ 60 f, ×1.367 | none | **implemented** at `⌈startup/2⌉`, damage rounded, knockback follows, tremble pose; C-stick never charges | `charge`, `charge_multiplier` |
+| Edgehog | occupied ledge can't be grabbed | both could hang | **implemented** (`ledge_blocked`) | `GameState::step` |
+| Edge-cancel | slide off → lag ends | lag ran its course in the air | **implemented** for landing lag and wavelands | `Fighter::tick` |
 | Percent counter | pops on hit | static | **scales up, kicks and flashes for 10 frames** from the sim's `last_hit_frame` (rollback-safe) | `viz::draw_hud` | The durations of the getup
 options are original, class-shaped values (the public pages give the
 mechanics — 7-frame catch, 37 intangible, 100 % threshold, committed jump —
@@ -299,9 +306,11 @@ Each step is one commit-sized change; all of them are in `100fc76` and
     place / roll, knockdown getups (stand / roll / attack), jump-cancelled
     grab and up-smash, platform drop by a down tap, clank / priority with
     rebound, stale-move negation, meteor cancel, percent pop on the HUD.
-14. **Tests** (`tests/feel.rs` 15, `tests/grab_ledge.rs` 11,
-    `tests/neutral.rs` 8) pin every rule above; the old suites still pass
-    (87 tests total).
+14. **Inputs and edges**: flick-based smash detection with tilts at any held
+    tilt, smash charging, edgehogging, edge-cancelled landing lag.
+15. **Tests** (`tests/feel.rs` 15, `tests/grab_ledge.rs` 11,
+    `tests/neutral.rs` 11) pin every rule above; the old suites still pass
+    (90 tests total).
 
 ---
 
@@ -425,6 +434,13 @@ clank (before hits resolve), for each pair of grounded Attack hitboxes that touc
 on hit with move m:  dealt = round₀.₁(d × (1 − Σ STALE[i] for queue[i] == m));  kb from fresh d;  queue.push_front(m)
 meteor: angle ∈ [250°, 290°] and airborne → after 8 hitstun frames, jump (uses a double jump) or up-B ends the stun
 run reversal: Run + opposite stick → RunTurn (20 frames, friction ×1.5, facing flips at 10; jump cancels; Run again if still held)
+
+smash input:  stick crosses HARD → stick_flick = 3 (counts down)
+              A pressed: stick_flick > 0 && |stick| > HARD → smash (charge_armed)   |   |stick| > deadzone → tilt   |   neutral → jab
+charge:       Attack(smash) && charge_armed && A held && state_frame + 1 == ⌈startup/2⌉ && charge < 60 → charge += 1, frame does not advance
+              hitbox.damage = round(d × (1 + 0.367 × charge/60))
+edgehog:      before each tick, ledge_blocked = the ledge any other fighter hangs from → collide_stage skips it
+edge-cancel:  LandLag | Waveland && !grounded → Air
 ```
 
 ### 5.9 Feedback (renderer)
@@ -480,7 +496,7 @@ each drawn frame with displayed state S:
 | `hang_time_is_11s_fresh_and_8s_tired` | 660 / 480 frames then drop |
 | `helpless_fighters_can_still_catch_the_ledge` | recovery can grab |
 
-`tests/neutral.rs` (8 tests) — all green:
+`tests/neutral.rs` (11 tests) — all green:
 
 | Test | Asserts |
 |---|---|
@@ -492,11 +508,14 @@ each drawn frame with displayed state S:
 | `close_attacks_clank_and_the_stronger_one_wins_otherwise` | tilt vs tilt → both rebound, no damage; jab vs smash → jab cancelled, smash lands |
 | `stale_moves_lose_damage_but_not_knockback` | 8 → 7.3 → 6.6; multiplier 0.76 after three; KO clears the queue |
 | `spikes_can_be_meteor_cancelled_after_8_frames` | too early does nothing; after 8 frames the jump ends the stun and spends the double jump |
+| `a_flick_is_a_smash_a_held_stick_is_a_tilt_and_holding_charges` | flick + A = f-smash; held walk-tilt + A = f-tilt; full charge lands after 60+ frames for ×1.367; partial charge in between; C-stick smash uncharged |
+| `an_occupied_ledge_cannot_be_grabbed` | second fighter falls past a held ledge; free again once released |
+| `landing_lag_is_edge_cancelled_by_sliding_off` | a waveland that slides off a platform is airborne well before its 10 frames |
 
 Plus the unchanged suites: `mechanics` (9), `determinism` (1, GGRS
 SyncTest), `content` (7), `netcode_flow` (8), `gamepad_map` (7) and the
-`src/` unit tests (21, of which 18 are the `model` layer) = **87 tests**
-with `cargo test` (83 without the GUI feature). Determinism across rollbacks is what makes it safe to
+`src/` unit tests (21, of which 18 are the `model` layer) = **90 tests**
+with `cargo test` (86 without the GUI feature). Determinism across rollbacks is what makes it safe to
 drive sound and rumble from the sim.
 
 ### 6.2 Measured numbers (this build)
@@ -582,6 +601,8 @@ Every value above is a constant; the ones designers will actually touch:
 | "Attacks trade too much" | `CLANK_DIFF`, `REBOUND_BASE` | smaller diff → fewer clanks |
 | "Spam is too good" | `STALE_STEPS` | larger shares → stronger staling |
 | "Runs feel slippery" | `RUN_TURN` | shorter → snappier reversals |
+| "Smashes come out by accident / tilts are hard" | `SMASH_FLICK_FRAMES`, `TILT_Y` | shorter window → fewer accidental smashes |
+| "Charged smashes too strong" | `SMASH_CHARGE_BONUS`, `SMASH_CHARGE_MAX` | lower bonus → weaker |
 | "Feedback too loud" | `sfx_volume`, `rumble` (Options) | per player |
 
 Change one thing at a time and re-run `tests/feel.rs` — the tests are
@@ -597,7 +618,8 @@ the spec.
   formula, mash-out), *Edge* (catch, intangibility, 100 % threshold, hang
   time), *Ledgedash* (37 frames, release on frame 9), *Edge recovery*,
   *Stale-move negation* (9 slots, 0.09…0.01), *Tech*, *Meteor smash* (the
-  8-frame cancel), *Priority* (the 9 % clank rule), and
+  8-frame cancel), *Priority* (the 9 % clank rule), *Charge* (60 frames,
+  ×1.367), *Edge-hogging*, *Edge-cancel*, and
   the per-character attribute tables for the fast-faller, heavy and
   lightweight archetypes (frame counts and speeds only).
 - FightCore (fightcore.gg) publishes the same community frame data; use it

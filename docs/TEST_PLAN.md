@@ -16,7 +16,7 @@ cargo test --no-default-features --features netcode
 |---|---|
 | `tests/feel.rs` (15) | The **game-feel contract** (`docs/GAME_FEEL.md`): hitlag = `⌊d/3+3⌋` on both fighters and nobody moves while frozen; a weak grounded hit slides along the floor; strong hits launch at `0.03×kb` (scaled) with uniform decay and capped gravity; crouch cancel takes a third off; SDI pulses move the victim during hitlag; shieldstun and pushback follow the block formulas; powershield in the first 2 frames; 15-frame shield drop with jump/grab/up-smash cancels; air-dodge ends helpless but still wavedashes; landing lag 4 / full / `⌊lag/2⌋` / autocancel; late hits are weaker and moves end at IASA; dash attack carries momentum, jab plants; run crosses 240 u in ≤ 60 frames; dash-dance window is per character; swept hitboxes don't tunnel. |
 | `tests/grab_ledge.rs` (11) | Standing grab hits on frame 7 of 30, dash grab on 12 of 40 and slides; hold = `⌊76 + 1.6p⌋`, mashing takes 6 per input, release lags both and shoves the victim; pummel on a cooldown, stick throws; ledge catch 7 frames / 37 intangible kept on drop; getup 33 / 59, roll 49 / 79, attack hitbox exactly on 24–26 / 42–44; committed ledge jump; hang limit 660 / 480; helpless fighters grab ledges. |
-| `tests/neutral.rs` (8) | Dash-dance reversal is instant but a run reversal is a 20-frame `RunTurn` (jump cancels it); JC grab / up-smash from the squat; platform drop by a down flick only; 20-frame tech window with lockout, tech in place 26 / roll 40 (70 u); knockdown bounce 18 then stand 30 / roll 35 / getup attack 49 with hits exactly on 15–17 front and 21–23 behind; equal tilts clank into a rebound, jab loses to smash; staling 8 → 7.3 → 6.6 and a KO clears it; meteor cancel after 8 frames. |
+| `tests/neutral.rs` (11) | Dash-dance reversal is instant but a run reversal is a 20-frame `RunTurn` (jump cancels it); JC grab / up-smash from the squat; platform drop by a down flick only; 20-frame tech window with lockout, tech in place 26 / roll 40 (70 u); knockdown bounce 18 then stand 30 / roll 35 / getup attack 49 with hits exactly on 15–17 front and 21–23 behind; equal tilts clank into a rebound, jab loses to smash; staling 8 → 7.3 → 6.6 and a KO clears it; meteor cancel after 8 frames; flick = smash / held = tilt, full charge ×1.367, C-stick uncharged; an occupied ledge can't be grabbed; a waveland that slides off a platform edge-cancels. |
 | `tests/mechanics.rs` (9) | Movement *feel*: full hop > short hop, fast-fall lands sooner, dash > walk, angled air-dodge wavedashes, L-cancel cuts landing lag, knockback grows with percent, sim is deterministic. |
 | `tests/determinism.rs` (1) | GGRS `SyncTest`: save→load→re-simulate reproduces identical checksums over 400 frames of busy input — the engine is rollback-safe. |
 | `tests/content.rs` (7) | Every character has a complete, sane moveset; archetypes are actually distinct (weight/air/armour/jumps ordering; Boulder fsmash > Kestrel, Viper jab faster than Boulder); stages well-formed; timed match ends on the clock. |
@@ -70,6 +70,10 @@ builds the GUI on Windows/macOS/Linux.
       tech-rolls left/right, or misses and lies down; from the floor the
       getup attack visibly kicks front then back; mashing shield does *not*
       tech.
+- [ ] **Inputs**: a slow forward tilt of the stick + A is a forward tilt,
+      a flick + A is a forward smash; holding A makes the smash tremble and
+      hit harder; C-stick smashes never wait. Two fighters at one ledge:
+      the second falls past it.
 - [ ] **Neutral texture**: dash-dancing is free, but a reversal from a full
       run brakes; two forward tilts meeting clank with a spark and a tink;
       the fourth jab in a row reads a lower number; the percent counter pops

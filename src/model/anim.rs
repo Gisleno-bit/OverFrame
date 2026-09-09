@@ -573,7 +573,24 @@ pub fn fighter_pose(rig: &Rig, f: &Fighter, st: &AnimStyle, frame: u64) -> Pose 
         }
         State::Attack { id, .. } => {
             let base = if f.grounded { &base_ground } else { &base_air };
-            attack(rig, f, id, sf, base, st.heavy)
+            let mut p = attack(rig, f, id, sf, base, st.heavy);
+            if f.charge > 0 && f.charge_armed {
+                // Charging a smash: the wind-up trembles harder as it fills
+                // and the body sinks a touch.
+                let c = f.charge as f32;
+                let amp = 0.6 + c / 60.0 * 1.4;
+                let j = (c * 2.7).sin() * amp;
+                p.offset(
+                    rig,
+                    "root",
+                    v3(
+                        j * 0.5,
+                        -st.crouch_depth * 0.15 * (c / 60.0) - j.abs() * 0.3,
+                        0.0,
+                    ),
+                );
+            }
+            p
         }
         State::Shield => {
             let s = shield(rig, st);

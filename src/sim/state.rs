@@ -179,7 +179,20 @@ impl GameState {
         // 1) Advance each fighter's own state machine.
         let n = self.fighters.len();
         let mut spawn_reqs: Vec<usize> = Vec::new();
+        // Edgehogging: a ledge someone else is holding cannot be grabbed.
+        let held: Vec<Option<usize>> = self
+            .fighters
+            .iter()
+            .map(|f| {
+                if matches!(f.state, State::LedgeGrab | State::LedgeAction { .. }) {
+                    f.ledge
+                } else {
+                    None
+                }
+            })
+            .collect();
         for i in 0..n {
+            self.fighters[i].ledge_blocked = (0..n).filter(|&j| j != i).find_map(|j| held[j]);
             let input = inputs.get(i).copied().unwrap_or_default();
             let out = self.fighters[i].tick(&input, &self.stage);
             if out.spawn_projectile {

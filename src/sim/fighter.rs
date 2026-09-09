@@ -159,6 +159,15 @@ pub struct Fighter {
     pub last_hit_frame: u64,
     /// The current hitstun came from a spike (meteor-cancellable).
     pub meteor: bool,
+    /// Frames left in which an attack press still counts as a smash after
+    /// the stick was flicked to hard.
+    pub stick_flick: u32,
+    /// Charge frames of the current smash (0 = uncharged).
+    pub charge: u32,
+    /// The current smash was started with the attack button (may charge).
+    pub charge_armed: bool,
+    /// A ledge another fighter is holding this tick (edgehog): cannot grab.
+    pub ledge_blocked: Option<usize>,
 
     pub already_hit: bool,
     pub respawn_timer: u32,
@@ -208,6 +217,9 @@ pub mod ev {
 
 const DEADZONE: f32 = 0.30;
 const HARD: f32 = 0.65;
+/// Vertical tilt threshold for up / down tilts (between the deadzone and
+/// the hard threshold, so a half-held stick still tilts).
+const TILT_Y: f32 = 0.50;
 
 impl Fighter {
     pub fn new(character: &'static Character, port: usize, spawn: Vec2) -> Self {
@@ -249,6 +261,10 @@ impl Fighter {
             stale: [None; super::constants::STALE_QUEUE],
             last_hit_frame: 0,
             meteor: false,
+            stick_flick: 0,
+            charge: 0,
+            charge_armed: false,
+            ledge_blocked: None,
             already_hit: false,
             respawn_timer: 0,
             kb_vel: Vec2::ZERO,
@@ -329,9 +345,13 @@ impl Fighter {
             return None;
         }
         let hb = match self.state {
-            State::Attack { id, .. } => {
+            State::Attack { id, aerial } => {
                 let md = attacks::data(self.character.id, id);
-                md.hitbox_at(self.state_frame)?
+                let mut hb = md.hitbox_at(self.state_frame)?;
+                if !aerial && attacks::is_smash(id) && self.charge > 0 {
+                    hb.damage = (hb.damage * self.charge_multiplier()).round();
+                }
+                hb
             }
             State::Getup {
                 kind: GetupKind::Attack,
@@ -402,6 +422,12 @@ impl Fighter {
         self.coyote = self.coyote.saturating_sub(1);
         self.pummel_cd = self.pummel_cd.saturating_sub(1);
         self.tech_armed = self.tech_armed.saturating_sub(1);
+        // Smash flick window: the stick just crossed into "hard".
+        if input.stick.length() > HARD && self.stick_last.length() <= HARD {
+            self.stick_flick = k::SMASH_FLICK_FRAMES;
+        } else {
+            self.stick_flick = self.stick_flick.saturating_sub(1);
+        }
         // A shield press while tumbling opens the tech window (and starts
         // the lockout so mashing does not work). Read even during hitlag.
         if matches!(self.state, State::Hitstun { tumble: true })
@@ -515,6 +541,11 @@ impl Fighter {
             State::ShieldDrop if self.state_frame >= k::SHIELD_DROP => {
                 self.set_state(State::Stand);
             }
+            // Edge-cancel: sliding off the platform during landing lag or a
+            // waveland ends it at once.
+            State::LandLag { .. } | State::Waveland if !self.grounded && self.state_frame > 0 => {
+                self.set_state(State::Air);
+            }
             State::LandLag { total } if self.state_frame >= total => {
                 self.set_state(if self.grounded {
                     State::Stand
@@ -528,6 +559,19 @@ impl Fighter {
             State::JumpSquat => self.tick_jumpsquat(input),
             State::Attack { id, aerial } => {
                 let md = attacks::data(self.character.id, id);
+                // Smash charge: hold the wind-up at its charge frame while
+                // attack stays held (button-started smashes only).
+                if !aerial && attacks::is_smash(id) && self.charge_armed {
+                    let held = input.buttons & buttons::ATTACK != 0;
+                    let at_charge_frame = self.state_frame + 1 == (md.startup / 2).max(1);
+                    if held && at_charge_frame && self.charge < k::SMASH_CHARGE_MAX {
+                        self.charge += 1;
+                        // Cancel this tick's frame advance: stay put.
+                        self.state_frame = self.state_frame.wrapping_sub(1);
+                    } else if !held || self.charge >= k::SMASH_CHARGE_MAX {
+                        self.charge_armed = false;
+                    }
+                }
                 if self.state_frame >= md.total() {
                     self.set_state(if self.grounded {
                         State::Stand
@@ -753,12 +797,22 @@ impl Fighter {
             return spawn;
         }
 
-        // Attacks.
+        // Attacks. A C-stick flick is always a smash; the attack button is a
+        // smash when the stick was *flicked* to hard just now, a tilt when
+        // it is merely held.
         let cst_len = input.cstick.length();
         if self.pressed(cur, buttons::ATTACK) || self.cstick_flick(cst_len) {
-            let smash = self.cstick_flick(cst_len);
+            let c_smash = self.cstick_flick(cst_len);
+            let a_smash = !c_smash && self.stick_flick > 0 && input.stick.length() > HARD;
             if self.grounded {
-                let id = self.pick_ground_attack(input, smash);
+                let smash_dir = if c_smash {
+                    Some(input.cstick)
+                } else if a_smash {
+                    Some(input.stick)
+                } else {
+                    None
+                };
+                let id = self.pick_ground_attack(input, smash_dir);
                 // Dash attack carries the run into the hit; everything else
                 // plants the feet.
                 if id == MoveId::DashAttack {
@@ -766,8 +820,11 @@ impl Fighter {
                 } else {
                     self.vel.x = 0.0;
                 }
+                self.charge = 0;
+                self.charge_armed = a_smash && attacks::is_smash(id);
                 self.set_state(State::Attack { id, aerial: false });
             } else {
+                let smash = c_smash;
                 let id = self.pick_aerial(input, smash);
                 self.set_state(State::Attack { id, aerial: true });
             }
@@ -782,15 +839,20 @@ impl Fighter {
         self.grounded = true;
     }
 
-    fn pick_ground_attack(&mut self, input: &PlayerInput, smash: bool) -> MoveId {
+    /// Charged-smash damage multiplier (1.0 when uncharged).
+    pub fn charge_multiplier(&self) -> f32 {
+        1.0 + k::SMASH_CHARGE_BONUS
+            * (self.charge.min(k::SMASH_CHARGE_MAX) as f32 / k::SMASH_CHARGE_MAX as f32)
+    }
+
+    fn pick_ground_attack(&mut self, input: &PlayerInput, smash: Option<Vec2>) -> MoveId {
         let sx = input.stick.x;
         let sy = input.stick.y;
         let dashing = matches!(self.state, State::Dash | State::Run) && sx.abs() > DEADZONE;
         if dashing {
             return MoveId::DashAttack;
         }
-        if smash {
-            let c = input.cstick;
+        if let Some(c) = smash {
             if c.y.abs() > c.x.abs() {
                 return if c.y > 0.0 {
                     MoveId::Usmash
@@ -801,11 +863,13 @@ impl Fighter {
             self.facing = c.x.signum();
             return MoveId::Fsmash;
         }
-        if sy > HARD {
+        // Tilts come from a *held* stick at any tilt past the deadzone (a
+        // flick to hard is a smash, handled above); jab is neutral.
+        if sy > TILT_Y {
             MoveId::Utilt
-        } else if sy < -HARD {
+        } else if sy < -TILT_Y {
             MoveId::Dtilt
-        } else if sx.abs() > HARD {
+        } else if sx.abs() > DEADZONE {
             self.facing = sx.signum();
             MoveId::Ftilt
         } else {
@@ -970,7 +1034,10 @@ impl Fighter {
             return;
         }
         let c_up = input.cstick.y > HARD && self.cstick_flick(input.cstick.length());
-        if c_up || (self.pressed(cur, buttons::ATTACK) && input.stick.y > HARD) {
+        let a_up = self.pressed(cur, buttons::ATTACK) && input.stick.y > HARD;
+        if c_up || a_up {
+            self.charge = 0;
+            self.charge_armed = a_up;
             self.set_state(State::Attack {
                 id: MoveId::Usmash,
                 aerial: false,
@@ -1086,6 +1153,9 @@ impl Fighter {
             )
         {
             for (i, l) in stage.ledges.iter().enumerate() {
+                if self.ledge_blocked == Some(i) {
+                    continue; // edgehogged
+                }
                 let dx = self.pos.x - l.pos.x;
                 let outer = dx * l.side > 0.0 && dx.abs() < k::LEDGE_HOG_BOX + ch.half_width;
                 let dy = (self.pos.y - l.pos.y).abs();

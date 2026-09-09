@@ -96,7 +96,7 @@ pub fn inputs(gs: &GameState, frame: u64) -> [PlayerInput; 2] {
         } else if adx > 26.0 {
             stick(dir * 0.6, 0.0)
         } else if f == 96 {
-            stick_btn(dir * 0.9, 0.0, buttons::ATTACK) // ftilt
+            stick_btn(dir * 0.6, 0.0, buttons::ATTACK) // ftilt (held tilt, not a flick)
         } else {
             PlayerInput::default()
         }
