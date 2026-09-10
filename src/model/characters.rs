@@ -1,10 +1,12 @@
 //! The three original fighters as segmented 3D models.
 //!
-//! Each model is built from primitives on top of the standard humanoid
-//! skeleton, plus a few *extra* bones for the parts that give the silhouette
-//! its identity (Kestrel's crest, scarf and tail feathers; Boulder's orbiting
-//! stones; Viper's hood and tail). Extras are animated procedurally from the
-//! fighter's velocity and the frame counter (`secondary`).
+//! Kestrel is built from the art specification
+//! `docs/art/procedural/kestrel.json` (see `model::procedural` and
+//! `docs/art/procedural/FORMAT.md`): 31 rigid pieces on 21 bones, with the
+//! crest and scarf driven by the closed lag algorithm of that contract.
+//! Boulder and Viper still use the hand-built models below until their round
+//! of the art exchange; their extras are animated from the fighter's velocity
+//! and the frame counter (`secondary`).
 //!
 //! Everything here is original design work: no proportions, colours or
 //! features are taken from any existing game (see `docs/LEGAL.md`).
@@ -13,6 +15,7 @@ use super::anim::{humanoid_skeleton, AnimStyle, Proportions};
 use super::lighting::{slot, Palette};
 use super::math3::{v3, Xf, M3, V3};
 use super::mesh::MeshData;
+use super::procedural::{self, ExtraLag, PieceRange};
 use super::rig::{Pose, Rig};
 use crate::sim::fighter::{Fighter, State};
 use crate::sim::roster::CharacterId;
@@ -24,6 +27,13 @@ pub struct CharacterModel {
     pub palettes: Vec<Palette>,
     /// Procedural animation of the extra bones (called after the base pose).
     pub secondary: fn(&Rig, &mut Pose, &Fighter, u64),
+    /// Lagged extras (spec-built models only; empty otherwise). Applied by
+    /// the renderer after `secondary`, with its own per-port history.
+    pub extras: Vec<ExtraLag>,
+    /// Piece id → vertex range, for spec-built models (diagnostics).
+    pub pieces: Vec<PieceRange>,
+    /// Which art specification built this model, if any.
+    pub spec_id: Option<&'static str>,
 }
 
 impl CharacterModel {
@@ -90,193 +100,11 @@ fn foot(len: f32, w: f32, h: f32, s: u8) -> MeshData {
 // ----------------------------------------------------------------- Kestrel
 
 fn kestrel() -> CharacterModel {
-    let p = Proportions {
-        thigh: 7.2,
-        shin: 6.8,
-        ankle: 1.4,
-        torso: 10.2,
-        neck: 1.4,
-        shoulder_half: 4.3,
-        hip_half: 2.3,
-        upper_arm: 5.4,
-        forearm: 5.0,
-    };
-    let mut r = humanoid_skeleton(&p);
-    // Extra bones.
-    r.add("crest", "head", v3(-0.5, 2.6, 0.0));
-    r.add("scarf1", "neck", v3(-1.6, 0.4, 0.0));
-    r.add("scarf2", "scarf1", v3(-3.2, 0.0, 0.0));
-    r.add("tail", "hips", v3(-1.8, 0.6, 0.0));
-
-    // Torso: tapered chest + waist, chest plate, belt.
-    r.attach(
-        "spine",
-        MeshData::ellipsoid(2.6, 2.6, 3.0, 5, 8, slot::PRIMARY)
-            .flat()
-            .translate(v3(0.0, 0.8, 0.0)),
-    );
-    r.attach(
-        "chest",
-        MeshData::ellipsoid(3.0, 3.6, 4.4, 5, 8, slot::PRIMARY)
-            .flat()
-            .translate(v3(0.0, 1.8, 0.0)),
-    );
-    r.attach(
-        "chest",
-        MeshData::plate(
-            &[
-                (-1.6, -1.2),
-                (1.6, -1.2),
-                (2.2, 2.8),
-                (0.0, 3.6),
-                (-2.2, 2.8),
-            ],
-            5.2,
-            slot::SECONDARY,
-        )
-        .transform(&(at(2.0, 1.6, 0.0) * rot(0.0, 90.0, 0.0))),
-    );
-    r.attach(
-        "hips",
-        MeshData::cylinder(2.7, 2.4, 1.6, 8, slot::DARK)
-            .flat()
-            .translate(v3(0.0, 0.4, 0.0)),
-    );
-    // Head: swept ellipsoid, visor beak, eyes.
-    r.attach(
-        "head",
-        MeshData::ellipsoid(3.4, 2.9, 2.9, 5, 8, slot::PRIMARY)
-            .flat()
-            .translate(v3(0.4, 2.2, 0.0)),
-    );
-    r.attach(
-        "head",
-        MeshData::plate(&[(0.0, -1.2), (4.6, 0.2), (0.0, 1.4)], 2.4, slot::ACCENT)
-            .translate(v3(2.2, 1.4, 0.0)),
-    );
-    for z in [-1.1f32, 1.1] {
-        r.attach(
-            "head",
-            MeshData::sphere(0.55, 3, 6, slot::GLOW).translate(v3(3.0, 2.6, z)),
-        );
-    }
-    // Crest: three swept fins.
-    for (i, z) in [(-1.0f32, -1.0f32), (0.0, 0.0), (1.0, 1.0)] {
-        let len = 5.2 - i.abs() * 1.4;
-        r.attach(
-            "crest",
-            MeshData::plate(
-                &[(0.0, 0.0), (-len, 2.4), (-len * 0.5, 3.4), (1.2, 1.2)],
-                0.5,
-                slot::ACCENT,
-            )
-            .translate(v3(0.0, 0.0, z * 1.1)),
-        );
-    }
-    // Scarf: two trailing plates.
-    r.attach(
-        "scarf1",
-        MeshData::plate(
-            &[(0.0, 0.8), (-3.4, 1.0), (-3.4, -1.4), (0.0, -0.8)],
-            1.6,
-            slot::SECONDARY,
-        ),
-    );
-    r.attach(
-        "scarf2",
-        MeshData::plate(
-            &[(0.0, 0.9), (-4.0, 0.6), (-4.6, -1.6), (0.0, -1.0)],
-            1.2,
-            slot::SECONDARY,
-        ),
-    );
-    // Tail feathers: fan of three.
-    for (k, z) in [(-1.0f32, -1.0f32), (0.0, 0.0), (1.0, 1.0)] {
-        r.attach(
-            "tail",
-            MeshData::plate(
-                &[
-                    (0.0, 0.0),
-                    (-6.0 + k.abs(), -1.8),
-                    (-6.5 + k.abs(), -0.2),
-                    (-0.5, 1.2),
-                ],
-                0.4,
-                slot::ACCENT,
-            )
-            .translate(v3(0.0, 0.0, z * 1.2)),
-        );
-    }
-    // Arms.
-    for s in ["r", "l"] {
-        r.attach(
-            &format!("upper_arm_{s}"),
-            limb(1.45, 1.15, p.upper_arm, slot::PRIMARY, slot::PRIMARY),
-        );
-        r.attach(
-            &format!("forearm_{s}"),
-            limb(1.25, 1.05, p.forearm, slot::DARK, slot::SECONDARY),
-        );
-        r.attach(
-            &format!("hand_{s}"),
-            MeshData::ellipsoid(1.35, 1.1, 1.1, 4, 8, slot::DARK)
-                .flat()
-                .translate(v3(0.2, -0.9, 0.0)),
-        );
-        // Bracer fin on the forearm.
-        r.attach(
-            &format!("forearm_{s}"),
-            MeshData::plate(&[(0.0, 0.0), (-2.6, -1.4), (0.0, -3.2)], 0.5, slot::ACCENT)
-                .translate(v3(-1.1, -0.6, 0.0)),
-        );
-        // Legs: sleek, greaves on the shins, talon boots.
-        r.attach(
-            &format!("thigh_{s}"),
-            limb(1.7, 1.35, p.thigh, slot::PRIMARY, slot::PRIMARY),
-        );
-        r.attach(
-            &format!("shin_{s}"),
-            limb(1.4, 1.15, p.shin, slot::DARK, slot::SECONDARY),
-        );
-        r.attach(&format!("foot_{s}"), foot(4.6, 2.4, 1.6, slot::ACCENT));
-    }
-
-    let palettes = super::palettes::KESTREL.to_vec();
-
-    fn secondary(rig: &Rig, pose: &mut Pose, f: &Fighter, frame: u64) {
-        let t = frame as f32;
-        // Scarf trails against motion; flutters when fast.
-        let speed = (f.vel.x * f.facing).clamp(-3.0, 3.0);
-        let vy = f.vel.y.clamp(-5.0, 5.0);
-        let flutter = (t * 0.45).sin() * (2.0 + speed.abs() * 3.0);
-        pose.rot(rig, "scarf1", 0.0, 0.0, 20.0 * speed - 8.0 * vy + flutter);
-        pose.rot(
-            rig,
-            "scarf2",
-            0.0,
-            0.0,
-            12.0 * speed - 6.0 * vy + flutter * 1.3,
-        );
-        // Crest lays back when running/falling fast.
-        pose.rot(rig, "crest", 0.0, 0.0, -10.0 * speed.abs() + 4.0 * vy);
-        // Tail fans on jumps / attacks.
-        let spread = match f.state {
-            State::Air | State::Attack { .. } => 1.0,
-            _ => 0.3,
-        };
-        pose.rot(
-            rig,
-            "tail",
-            0.0,
-            0.0,
-            -12.0 * spread + 6.0 * vy.max(-2.0) + (t * 0.2).sin() * 2.0,
-        );
-        pose.scale(rig, "tail", v3(1.0, 1.0, 0.6 + 0.6 * spread));
-    }
-
-    CharacterModel {
-        rig: r,
-        style: AnimStyle {
+    fn secondary(_rig: &Rig, _pose: &mut Pose, _f: &Fighter, _frame: u64) {}
+    from_spec(
+        "kestrel",
+        procedural::KESTREL_JSON,
+        AnimStyle {
             bob: 0.7,
             run_lean: 20.0,
             swing: 1.05,
@@ -285,8 +113,34 @@ fn kestrel() -> CharacterModel {
             run_cycle: 14.0,
             heavy: 0.0,
         },
+        secondary,
+    )
+}
+
+/// Build a model from an embedded art specification. The specs are checked
+/// by unit tests, so a failure here is a build-time authoring error.
+fn from_spec(
+    id: &'static str,
+    json: &str,
+    style: AnimStyle,
+    secondary: fn(&Rig, &mut Pose, &Fighter, u64),
+) -> CharacterModel {
+    let spec = procedural::parse(json).unwrap_or_else(|e| panic!("{id}.json: {e}"));
+    let built = procedural::build(&spec).unwrap_or_else(|e| panic!("{id}.json: {e}"));
+    let palettes = super::palettes::of(match id {
+        "kestrel" => CharacterId::Kestrel,
+        "boulder" => CharacterId::Boulder,
+        _ => CharacterId::Viper,
+    })
+    .to_vec();
+    CharacterModel {
+        rig: built.rig,
+        style,
         palettes,
         secondary,
+        extras: built.extras,
+        pieces: built.pieces,
+        spec_id: Some(id),
     }
 }
 
@@ -432,6 +286,9 @@ fn boulder() -> CharacterModel {
         },
         palettes,
         secondary,
+        extras: Vec::new(),
+        pieces: Vec::new(),
+        spec_id: None,
     }
 }
 
@@ -635,6 +492,9 @@ fn viper() -> CharacterModel {
         },
         palettes,
         secondary,
+        extras: Vec::new(),
+        pieces: Vec::new(),
+        spec_id: None,
     }
 }
 

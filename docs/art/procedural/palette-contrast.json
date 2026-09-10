@@ -1,0 +1,370 @@
+{
+  "kestrel": [
+    {
+      "a": 0,
+      "b": 1,
+      "primary_luminance_ratio": 2.25,
+      "recommended": false
+    },
+    {
+      "a": 0,
+      "b": 2,
+      "primary_luminance_ratio": 1.558,
+      "recommended": false
+    },
+    {
+      "a": 0,
+      "b": 3,
+      "primary_luminance_ratio": 4.073,
+      "recommended": true
+    },
+    {
+      "a": 0,
+      "b": 4,
+      "primary_luminance_ratio": 2.877,
+      "recommended": false
+    },
+    {
+      "a": 0,
+      "b": 5,
+      "primary_luminance_ratio": 3.847,
+      "recommended": false
+    },
+    {
+      "a": 1,
+      "b": 2,
+      "primary_luminance_ratio": 1.444,
+      "recommended": false
+    },
+    {
+      "a": 1,
+      "b": 3,
+      "primary_luminance_ratio": 9.163,
+      "recommended": false
+    },
+    {
+      "a": 1,
+      "b": 4,
+      "primary_luminance_ratio": 6.473,
+      "recommended": true
+    },
+    {
+      "a": 1,
+      "b": 5,
+      "primary_luminance_ratio": 8.654,
+      "recommended": false
+    },
+    {
+      "a": 2,
+      "b": 3,
+      "primary_luminance_ratio": 6.345,
+      "recommended": false
+    },
+    {
+      "a": 2,
+      "b": 4,
+      "primary_luminance_ratio": 4.483,
+      "recommended": false
+    },
+    {
+      "a": 2,
+      "b": 5,
+      "primary_luminance_ratio": 5.993,
+      "recommended": true
+    },
+    {
+      "a": 3,
+      "b": 4,
+      "primary_luminance_ratio": 1.416,
+      "recommended": false
+    },
+    {
+      "a": 3,
+      "b": 5,
+      "primary_luminance_ratio": 1.059,
+      "recommended": false
+    },
+    {
+      "a": 4,
+      "b": 5,
+      "primary_luminance_ratio": 1.337,
+      "recommended": false
+    }
+  ],
+  "boulder": [
+    {
+      "a": 0,
+      "b": 1,
+      "primary_luminance_ratio": 1.569,
+      "recommended": false
+    },
+    {
+      "a": 0,
+      "b": 2,
+      "primary_luminance_ratio": 1.163,
+      "recommended": false
+    },
+    {
+      "a": 0,
+      "b": 3,
+      "primary_luminance_ratio": 5.072,
+      "recommended": true
+    },
+    {
+      "a": 0,
+      "b": 4,
+      "primary_luminance_ratio": 4.01,
+      "recommended": false
+    },
+    {
+      "a": 0,
+      "b": 5,
+      "primary_luminance_ratio": 4.309,
+      "recommended": false
+    },
+    {
+      "a": 1,
+      "b": 2,
+      "primary_luminance_ratio": 1.824,
+      "recommended": false
+    },
+    {
+      "a": 1,
+      "b": 3,
+      "primary_luminance_ratio": 7.957,
+      "recommended": false
+    },
+    {
+      "a": 1,
+      "b": 4,
+      "primary_luminance_ratio": 6.29,
+      "recommended": true
+    },
+    {
+      "a": 1,
+      "b": 5,
+      "primary_luminance_ratio": 6.758,
+      "recommended": false
+    },
+    {
+      "a": 2,
+      "b": 3,
+      "primary_luminance_ratio": 4.362,
+      "recommended": false
+    },
+    {
+      "a": 2,
+      "b": 4,
+      "primary_luminance_ratio": 3.449,
+      "recommended": false
+    },
+    {
+      "a": 2,
+      "b": 5,
+      "primary_luminance_ratio": 3.705,
+      "recommended": true
+    },
+    {
+      "a": 3,
+      "b": 4,
+      "primary_luminance_ratio": 1.265,
+      "recommended": false
+    },
+    {
+      "a": 3,
+      "b": 5,
+      "primary_luminance_ratio": 1.177,
+      "recommended": false
+    },
+    {
+      "a": 4,
+      "b": 5,
+      "primary_luminance_ratio": 1.074,
+      "recommended": false
+    }
+  ],
+  "viper": [
+    {
+      "a": 0,
+      "b": 1,
+      "primary_luminance_ratio": 1.28,
+      "recommended": false
+    },
+    {
+      "a": 0,
+      "b": 2,
+      "primary_luminance_ratio": 1.036,
+      "recommended": false
+    },
+    {
+      "a": 0,
+      "b": 3,
+      "primary_luminance_ratio": 6.849,
+      "recommended": true
+    },
+    {
+      "a": 0,
+      "b": 4,
+      "primary_luminance_ratio": 6.604,
+      "recommended": false
+    },
+    {
+      "a": 0,
+      "b": 5,
+      "primary_luminance_ratio": 5.691,
+      "recommended": false
+    },
+    {
+      "a": 1,
+      "b": 2,
+      "primary_luminance_ratio": 1.236,
+      "recommended": false
+    },
+    {
+      "a": 1,
+      "b": 3,
+      "primary_luminance_ratio": 8.769,
+      "recommended": false
+    },
+    {
+      "a": 1,
+      "b": 4,
+      "primary_luminance_ratio": 8.456,
+      "recommended": true
+    },
+    {
+      "a": 1,
+      "b": 5,
+      "primary_luminance_ratio": 7.287,
+      "recommended": false
+    },
+    {
+      "a": 2,
+      "b": 3,
+      "primary_luminance_ratio": 7.094,
+      "recommended": false
+    },
+    {
+      "a": 2,
+      "b": 4,
+      "primary_luminance_ratio": 6.841,
+      "recommended": false
+    },
+    {
+      "a": 2,
+      "b": 5,
+      "primary_luminance_ratio": 5.895,
+      "recommended": true
+    },
+    {
+      "a": 3,
+      "b": 4,
+      "primary_luminance_ratio": 1.037,
+      "recommended": false
+    },
+    {
+      "a": 3,
+      "b": 5,
+      "primary_luminance_ratio": 1.203,
+      "recommended": false
+    },
+    {
+      "a": 4,
+      "b": 5,
+      "primary_luminance_ratio": 1.16,
+      "recommended": false
+    }
+  ],
+  "trama": [
+    {
+      "a": 0,
+      "b": 1,
+      "primary_luminance_ratio": 1.17,
+      "recommended": false
+    },
+    {
+      "a": 0,
+      "b": 2,
+      "primary_luminance_ratio": 1.177,
+      "recommended": false
+    },
+    {
+      "a": 0,
+      "b": 3,
+      "primary_luminance_ratio": 7.672,
+      "recommended": true
+    },
+    {
+      "a": 0,
+      "b": 4,
+      "primary_luminance_ratio": 6.966,
+      "recommended": false
+    },
+    {
+      "a": 0,
+      "b": 5,
+      "primary_luminance_ratio": 7.507,
+      "recommended": false
+    },
+    {
+      "a": 1,
+      "b": 2,
+      "primary_luminance_ratio": 1.006,
+      "recommended": false
+    },
+    {
+      "a": 1,
+      "b": 3,
+      "primary_luminance_ratio": 6.556,
+      "recommended": false
+    },
+    {
+      "a": 1,
+      "b": 4,
+      "primary_luminance_ratio": 5.953,
+      "recommended": true
+    },
+    {
+      "a": 1,
+      "b": 5,
+      "primary_luminance_ratio": 6.414,
+      "recommended": false
+    },
+    {
+      "a": 2,
+      "b": 3,
+      "primary_luminance_ratio": 6.515,
+      "recommended": false
+    },
+    {
+      "a": 2,
+      "b": 4,
+      "primary_luminance_ratio": 5.916,
+      "recommended": false
+    },
+    {
+      "a": 2,
+      "b": 5,
+      "primary_luminance_ratio": 6.375,
+      "recommended": true
+    },
+    {
+      "a": 3,
+      "b": 4,
+      "primary_luminance_ratio": 1.101,
+      "recommended": false
+    },
+    {
+      "a": 3,
+      "b": 5,
+      "primary_luminance_ratio": 1.022,
+      "recommended": false
+    },
+    {
+      "a": 4,
+      "b": 5,
+      "primary_luminance_ratio": 1.078,
+      "recommended": false
+    }
+  ]
+}

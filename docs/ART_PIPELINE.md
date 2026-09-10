@@ -137,3 +137,21 @@ pedestal so you can check a model in each pose.
 - [ ] ≤ 3k triangles; exported as `.glb` with *Apply Modifiers*, *+Y Up*.
 - [ ] `overframe --anim <name>` — no part detaches or intersects badly in any move.
 - [ ] Screenshot on each stage attached to the PR.
+
+## 8. The procedural route (art as a JSON specification)
+
+Since v0.6.0 a fighter can also be *specified* instead of modelled: a JSON
+file under `docs/art/procedural/` lists bones (name, parent, offset),
+rigid pieces (`bevel_box`, `cuboid`, `ellipsoid`, `cylinder`, `plate`; position,
+XYZ Euler rotation, material slot) and the lagged extras (delay, gain, limit
+about Z). `src/model/procedural.rs` parses it at model-build time with strict
+validation — unknown fields, unknown bones or slots, concave plates and
+non-finite numbers are authoring errors — and the shared animation applies
+because the standard bone names are required. The contract (units, axes,
+rotation order, capsule rules, the lag algorithm, renderer order) is
+`docs/art/procedural/FORMAT.md`; the exchange loop with the reviewer
+(evidence branch, fixed cameras, manifest, review format) is
+`docs/art/EXCHANGE.md`. Kestrel is the first fighter on this route.
+
+Both routes coexist: an installed `.glb` under `assets/characters/` still
+overrides the procedural model of that fighter.

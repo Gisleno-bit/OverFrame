@@ -393,11 +393,19 @@ impl Fighter {
         matches!(self.state, State::Shield)
     }
 
-    /// Current active hitbox in world space, if any.
+    /// Current active hitbox in world space, if any — `None` once it has
+    /// already connected this move (one hit per swing).
     pub fn active_hitbox(&self) -> Option<(attacks::Hitbox, Vec2)> {
         if self.already_hit {
             return None;
         }
+        self.hitbox_geometry()
+    }
+
+    /// The hitbox the current state frame *defines*, whether or not it has
+    /// already connected (tooling / overlays: the exporter reports geometry
+    /// on the contact tick too).
+    pub fn hitbox_geometry(&self) -> Option<(attacks::Hitbox, Vec2)> {
         let hb = match self.state {
             State::Attack { id, aerial } => {
                 let md = attacks::data(self.character.id, id);

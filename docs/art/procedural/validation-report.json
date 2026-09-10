@@ -1,0 +1,20 @@
+{
+  "kind": "authoring_validation_not_game_tests",
+  "piece_counts": {
+    "kestrel": 31,
+    "boulder": 31,
+    "viper": 31,
+    "trama": 38
+  },
+  "stage_piece_count": 41,
+  "palette_counts": [
+    6,
+    6,
+    6,
+    6
+  ],
+  "convex_plates_and_bone_references_ok": true,
+  "issues": [],
+  "runtime_tests": "not_run",
+  "runtime_visual_review": "not_run"
+}

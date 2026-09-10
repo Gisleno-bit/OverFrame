@@ -212,13 +212,37 @@ pub const VIPER: [Palette; 6] = [
     ),
 ];
 
-/// All palettes of a character.
-pub fn of(id: CharacterId) -> &'static [Palette; 6] {
+/// All palettes of a character. Characters that have been moved to the
+/// procedural art specification take theirs from
+/// `docs/art/procedural/palettes.json` (six, fixed order); the others keep
+/// the constants above until their round of the art exchange.
+pub fn of(id: CharacterId) -> &'static [Palette] {
     match id {
-        CharacterId::Kestrel => &KESTREL,
+        CharacterId::Kestrel => spec_palettes("kestrel", &KESTREL),
         CharacterId::Boulder => &BOULDER,
         CharacterId::Viper => &VIPER,
     }
+}
+
+type PaletteCache = std::sync::Mutex<Vec<(&'static str, &'static [Palette])>>;
+
+fn spec_palettes(name: &'static str, fallback: &'static [Palette; 6]) -> &'static [Palette] {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<PaletteCache> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(Vec::new()));
+    let mut c = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, p)) = c.iter().find(|(n, _)| *n == name) {
+        return p;
+    }
+    let p: &'static [Palette] = match super::procedural::palettes(name) {
+        Ok(v) => Box::leak(v.into_boxed_slice()),
+        Err(e) => {
+            eprintln!("palettes.json: {e}; using built-in {name} palettes");
+            fallback
+        }
+    };
+    c.push((name, p));
+    p
 }
 
 /// One palette (index wraps).

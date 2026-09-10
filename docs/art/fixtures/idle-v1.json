@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "idle-v1",
+  "seed": 305419896,
+  "stage": "lattice",
+  "stocks": 4,
+  "players": [
+    { "character": "kestrel", "palette": 0, "x": -45.0, "facing": 1.0 },
+    { "character": "kestrel", "palette": 3, "x": 45.0, "facing": -1.0 }
+  ],
+  "warmup_ticks": 64,
+  "ticks": 180,
+  "inputs": []
+}

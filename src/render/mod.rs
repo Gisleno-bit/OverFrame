@@ -4,6 +4,7 @@
 //! same bitmap font so nothing needs a font file.
 
 mod audio;
+pub mod capture;
 mod input;
 mod scene3d;
 mod widgets;
@@ -25,6 +26,16 @@ use widgets::*;
 /// Adapts macroquad's immediate-mode drawing to the [`Painter`] trait.
 pub(crate) struct MqPainter;
 
+thread_local! {
+    /// Drawing-surface size override while rendering into a texture (the
+    /// capture tool); `None` = the window.
+    static PAINTER_DIMS: std::cell::Cell<Option<(f32, f32)>> = const { std::cell::Cell::new(None) };
+}
+
+pub(crate) fn set_painter_dims(d: Option<(f32, f32)>) {
+    PAINTER_DIMS.with(|c| c.set(d));
+}
+
 #[inline]
 pub(crate) fn col(c: VColor) -> macroquad::color::Color {
     macroquad::color::Color::from_rgba(c.r, c.g, c.b, c.a)
@@ -41,7 +52,9 @@ impl Painter for MqPainter {
         draw_line(x0, y0, x1, y1, thick, col(c));
     }
     fn dims(&self) -> (f32, f32) {
-        (screen_width(), screen_height())
+        PAINTER_DIMS
+            .with(|c| c.get())
+            .unwrap_or_else(|| (screen_width(), screen_height()))
     }
 }
 
@@ -63,6 +76,9 @@ pub struct LaunchOpts {
     /// Open the animation viewer on this character, optionally at a clip
     /// index and frame (paused): `--anim viper:15:20`.
     pub anim: Option<(CharacterId, Option<usize>, Option<u32>)>,
+    /// Render the fixed-camera evidence suite into a directory and quit
+    /// (`--capture <dir>`; see `render::capture`).
+    pub capture: Option<capture::CaptureOpts>,
 }
 
 /// A match description parsed from the command line:
@@ -168,11 +184,17 @@ const MENU_ITEMS: [&str; 7] = [
 ];
 const ONLINE_ITEMS: [&str; 3] = ["HOST GAME", "JOIN GAME", "BACK"];
 
-fn window_conf() -> Conf {
+fn window_conf(opts: &LaunchOpts) -> Conf {
+    // Captures want the real menu at 1920×1080 (EXCHANGE.md).
+    let (w, h) = if opts.capture.is_some() {
+        (1920, 1080)
+    } else {
+        (1280, 720)
+    };
     Conf {
         window_title: "OVERFRAME".to_owned(),
-        window_width: 1280,
-        window_height: 720,
+        window_width: w,
+        window_height: h,
         high_dpi: true,
         ..Default::default()
     }
@@ -180,7 +202,8 @@ fn window_conf() -> Conf {
 
 /// Launch the game (blocks until the window closes).
 pub fn launch(opts: LaunchOpts) {
-    macroquad::Window::from_config(window_conf(), amain(opts));
+    let conf = window_conf(&opts);
+    macroquad::Window::from_config(conf, amain(opts));
 }
 
 /// Local match setup, edited on the setup screens and carried into the lobby as
@@ -1870,7 +1893,27 @@ impl App {
 }
 
 async fn amain(opts: LaunchOpts) {
+    let capture = opts.capture.clone();
     let mut app = App::new(opts);
+    if let Some(c) = capture {
+        // Let the window settle (some drivers report a size only after a frame).
+        next_frame().await;
+        match capture::run(&mut app, &c).await {
+            Ok(index) => {
+                eprintln!(
+                    "capture: {} files, {} skipped → {}",
+                    index.files.len(),
+                    index.skipped.len(),
+                    c.out.display()
+                );
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("capture failed: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
     app.audio = audio::load().await;
     loop {
         app.update();

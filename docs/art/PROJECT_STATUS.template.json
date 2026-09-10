@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "status": "not_run",
+  "source_sha": null,
+  "version": null,
+  "reference_only": {
+    "user_reported_version": "0.5.0",
+    "user_reported_commit": "db251b0",
+    "user_reported_test_count": 92
+  },
+  "latest_attempt": null,
+  "latest_pass": null,
+  "evidence_commit": null,
+  "checks": {
+    "fmt": "not_run",
+    "clippy": "not_run",
+    "tests": "not_run",
+    "tests_passed": null
+  },
+  "capabilities": {
+    "procedural_v1": "specified_not_implemented",
+    "trama": "specified_not_implemented",
+    "capture_game3d": "not_verified"
+  },
+  "note": "Plantilla: CI debe completar datos reales. No publicar como build aprobada."
+}

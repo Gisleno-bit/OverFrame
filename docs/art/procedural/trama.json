@@ -1,0 +1,1264 @@
+{
+  "schema_version": 1,
+  "id": "trama",
+  "units": "game_units",
+  "reference": {
+    "height": 32,
+    "half_width": 9.5,
+    "hurt_radius": 11.0,
+    "status": "proposed_requires_sim_table_and_tests"
+  },
+  "description": "Agrimensor de marcos: cuerpo vertical, cabeza hexagonal plana, faldón dividido y brazales rectangulares abiertos. Los marcos son ornamentales; no escudos ni nuevas colisiones.",
+  "proportions": {
+    "thigh": 6.5,
+    "shin": 6.3,
+    "ankle": 1.2,
+    "torso": 11.2,
+    "neck": 1,
+    "shoulder_half": 4.25,
+    "hip_half": 2.7,
+    "upper_arm": 5,
+    "forearm": 4.5
+  },
+  "bones": [
+    {
+      "name": "root",
+      "parent": null,
+      "offset": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "hips",
+      "parent": "root",
+      "offset": [
+        0,
+        14.0,
+        0
+      ]
+    },
+    {
+      "name": "spine",
+      "parent": "hips",
+      "offset": [
+        0,
+        3.36,
+        0
+      ]
+    },
+    {
+      "name": "chest",
+      "parent": "spine",
+      "offset": [
+        0,
+        3.92,
+        0
+      ]
+    },
+    {
+      "name": "neck",
+      "parent": "chest",
+      "offset": [
+        0,
+        3.92,
+        0
+      ]
+    },
+    {
+      "name": "head",
+      "parent": "neck",
+      "offset": [
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "name": "upper_arm_r",
+      "parent": "chest",
+      "offset": [
+        0,
+        3.136,
+        4.25
+      ]
+    },
+    {
+      "name": "forearm_r",
+      "parent": "upper_arm_r",
+      "offset": [
+        0,
+        -5,
+        0
+      ]
+    },
+    {
+      "name": "hand_r",
+      "parent": "forearm_r",
+      "offset": [
+        0,
+        -4.5,
+        0
+      ]
+    },
+    {
+      "name": "thigh_r",
+      "parent": "hips",
+      "offset": [
+        0,
+        0,
+        2.7
+      ]
+    },
+    {
+      "name": "shin_r",
+      "parent": "thigh_r",
+      "offset": [
+        0,
+        -6.5,
+        0
+      ]
+    },
+    {
+      "name": "foot_r",
+      "parent": "shin_r",
+      "offset": [
+        0,
+        -6.3,
+        0
+      ]
+    },
+    {
+      "name": "upper_arm_l",
+      "parent": "chest",
+      "offset": [
+        0,
+        3.136,
+        -4.25
+      ]
+    },
+    {
+      "name": "forearm_l",
+      "parent": "upper_arm_l",
+      "offset": [
+        0,
+        -5,
+        0
+      ]
+    },
+    {
+      "name": "hand_l",
+      "parent": "forearm_l",
+      "offset": [
+        0,
+        -4.5,
+        0
+      ]
+    },
+    {
+      "name": "thigh_l",
+      "parent": "hips",
+      "offset": [
+        0,
+        0,
+        -2.7
+      ]
+    },
+    {
+      "name": "shin_l",
+      "parent": "thigh_l",
+      "offset": [
+        0,
+        -6.5,
+        0
+      ]
+    },
+    {
+      "name": "foot_l",
+      "parent": "shin_l",
+      "offset": [
+        0,
+        -6.3,
+        0
+      ]
+    },
+    {
+      "name": "crown",
+      "parent": "head",
+      "offset": [
+        -0.6,
+        2.6,
+        0
+      ]
+    },
+    {
+      "name": "apron_r",
+      "parent": "hips",
+      "offset": [
+        -1.25,
+        -1,
+        2
+      ]
+    },
+    {
+      "name": "brace_r",
+      "parent": "forearm_r",
+      "offset": [
+        3,
+        -2.25,
+        2.0
+      ]
+    },
+    {
+      "name": "apron_l",
+      "parent": "hips",
+      "offset": [
+        -1.25,
+        -1,
+        -2
+      ]
+    },
+    {
+      "name": "brace_l",
+      "parent": "forearm_l",
+      "offset": [
+        -3,
+        -2.25,
+        -2.0
+      ]
+    }
+  ],
+  "pieces": [
+    {
+      "id": "t_pelvis",
+      "bone": "hips",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          4.5,
+          3,
+          5
+        ],
+        "bevel": 0.45
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "secondary"
+    },
+    {
+      "id": "t_neck",
+      "bone": "neck",
+      "primitive": "cylinder",
+      "parameters": {
+        "r0": 1.1,
+        "r1": 0.9,
+        "height": 2,
+        "segments": 8
+      },
+      "position": [
+        0,
+        0.1,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "t_upper_arm_r",
+      "bone": "upper_arm_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.5,
+          5.2,
+          2.2
+        ],
+        "bevel": 0.4
+      },
+      "position": [
+        0,
+        -2.5,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "secondary"
+    },
+    {
+      "id": "t_forearm_r",
+      "bone": "forearm_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.8,
+          4.7,
+          2.464
+        ],
+        "bevel": 0.448
+      },
+      "position": [
+        0,
+        -2.25,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "primary"
+    },
+    {
+      "id": "t_thigh_r",
+      "bone": "thigh_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          3,
+          6.7,
+          2.64
+        ],
+        "bevel": 0.45
+      },
+      "position": [
+        0,
+        -3.25,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "secondary"
+    },
+    {
+      "id": "t_shin_r",
+      "bone": "shin_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.55,
+          6.5,
+          2.244
+        ],
+        "bevel": 0.408
+      },
+      "position": [
+        0,
+        -3.15,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "primary"
+    },
+    {
+      "id": "t_elbow_r",
+      "bone": "forearm_r",
+      "primitive": "ellipsoid",
+      "parameters": {
+        "radii": [
+          1.15,
+          1.15,
+          1.15
+        ],
+        "lat": 4,
+        "lon": 8
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "t_knee_r",
+      "bone": "shin_r",
+      "primitive": "ellipsoid",
+      "parameters": {
+        "radii": [
+          1.224,
+          1.224,
+          1.224
+        ],
+        "lat": 4,
+        "lon": 8
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "t_hand_r",
+      "bone": "hand_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.576,
+          1.7,
+          2.52
+        ],
+        "bevel": 0.25
+      },
+      "position": [
+        0.25,
+        -0.65,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "light"
+    },
+    {
+      "id": "t_foot_r",
+      "bone": "foot_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          4.5,
+          1.9,
+          3
+        ],
+        "bevel": 0.25
+      },
+      "position": [
+        0.65,
+        -0.1,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "t_shin_mark_r",
+      "bone": "shin_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          1.6575,
+          1.15,
+          0.25
+        ],
+        "bevel": 0.08
+      },
+      "position": [
+        0.1,
+        -1.89,
+        1.242
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "accent"
+    },
+    {
+      "id": "t_upper_arm_l",
+      "bone": "upper_arm_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.5,
+          5.2,
+          2.2
+        ],
+        "bevel": 0.4
+      },
+      "position": [
+        0,
+        -2.5,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "secondary"
+    },
+    {
+      "id": "t_forearm_l",
+      "bone": "forearm_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.8,
+          4.7,
+          2.464
+        ],
+        "bevel": 0.448
+      },
+      "position": [
+        0,
+        -2.25,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "primary"
+    },
+    {
+      "id": "t_thigh_l",
+      "bone": "thigh_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          3,
+          6.7,
+          2.64
+        ],
+        "bevel": 0.45
+      },
+      "position": [
+        0,
+        -3.25,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "secondary"
+    },
+    {
+      "id": "t_shin_l",
+      "bone": "shin_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.55,
+          6.5,
+          2.244
+        ],
+        "bevel": 0.408
+      },
+      "position": [
+        0,
+        -3.15,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "primary"
+    },
+    {
+      "id": "t_elbow_l",
+      "bone": "forearm_l",
+      "primitive": "ellipsoid",
+      "parameters": {
+        "radii": [
+          1.15,
+          1.15,
+          1.15
+        ],
+        "lat": 4,
+        "lon": 8
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "t_knee_l",
+      "bone": "shin_l",
+      "primitive": "ellipsoid",
+      "parameters": {
+        "radii": [
+          1.224,
+          1.224,
+          1.224
+        ],
+        "lat": 4,
+        "lon": 8
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "t_hand_l",
+      "bone": "hand_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.576,
+          1.7,
+          2.52
+        ],
+        "bevel": 0.25
+      },
+      "position": [
+        0.25,
+        -0.65,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "light"
+    },
+    {
+      "id": "t_foot_l",
+      "bone": "foot_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          4.5,
+          1.9,
+          3
+        ],
+        "bevel": 0.25
+      },
+      "position": [
+        0.65,
+        -0.1,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "t_shin_mark_l",
+      "bone": "shin_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          1.6575,
+          1.15,
+          0.25
+        ],
+        "bevel": 0.08
+      },
+      "position": [
+        0.1,
+        -1.89,
+        -1.242
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "accent"
+    },
+    {
+      "id": "t_abdomen",
+      "bone": "spine",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          5.5,
+          6.5,
+          5.5
+        ],
+        "bevel": 0.4
+      },
+      "position": [
+        0,
+        -0.5,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "secondary"
+    },
+    {
+      "id": "t_chest",
+      "bone": "chest",
+      "primitive": "plate",
+      "parameters": {
+        "points_xy": [
+          [
+            -3,
+            -2.5
+          ],
+          [
+            3,
+            -2.5
+          ],
+          [
+            3,
+            3.5
+          ],
+          [
+            1.4,
+            4
+          ],
+          [
+            -2.8,
+            3.5
+          ]
+        ],
+        "thickness": 6.7
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "primary"
+    },
+    {
+      "id": "t_head",
+      "bone": "head",
+      "primitive": "plate",
+      "parameters": {
+        "points_xy": [
+          [
+            -2.6,
+            -1.8
+          ],
+          [
+            1.7,
+            -2.2
+          ],
+          [
+            2.8,
+            -0.5
+          ],
+          [
+            2.5,
+            2
+          ],
+          [
+            0,
+            2.7
+          ],
+          [
+            -2.6,
+            1.6
+          ]
+        ],
+        "thickness": 4.8
+      },
+      "position": [
+        0.3,
+        0.1,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "light"
+    },
+    {
+      "id": "t_face",
+      "bone": "head",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          1.0,
+          1.9,
+          3.6
+        ],
+        "bevel": 0.18
+      },
+      "position": [
+        2.55,
+        0.1,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "skin"
+    },
+    {
+      "id": "t_eye",
+      "bone": "head",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          0.25,
+          0.5,
+          3.1
+        ],
+        "bevel": 0.04
+      },
+      "position": [
+        3.1,
+        0.6,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "t_crown",
+      "bone": "crown",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.8,
+          2.6,
+          1.3
+        ],
+        "bevel": 0.2
+      },
+      "position": [
+        0,
+        1.1,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "accent"
+    },
+    {
+      "id": "t_apron_r",
+      "bone": "apron_r",
+      "primitive": "plate",
+      "parameters": {
+        "points_xy": [
+          [
+            -1.4,
+            -5.3
+          ],
+          [
+            1.4,
+            -4.9
+          ],
+          [
+            1.6,
+            0
+          ],
+          [
+            -1.6,
+            0
+          ]
+        ],
+        "thickness": 0.65
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "primary"
+    },
+    {
+      "id": "t_brace_r_top",
+      "bone": "brace_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          7.2,
+          1,
+          1.15
+        ],
+        "bevel": 0.15
+      },
+      "position": [
+        0,
+        3,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "extra"
+    },
+    {
+      "id": "t_brace_r_bottom",
+      "bone": "brace_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          7.2,
+          1,
+          1.15
+        ],
+        "bevel": 0.15
+      },
+      "position": [
+        0,
+        -3,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "extra"
+    },
+    {
+      "id": "t_brace_r_back",
+      "bone": "brace_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          1,
+          5,
+          1.15
+        ],
+        "bevel": 0.15
+      },
+      "position": [
+        -3.1,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "extra"
+    },
+    {
+      "id": "t_brace_r_front",
+      "bone": "brace_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          1,
+          5,
+          1.15
+        ],
+        "bevel": 0.15
+      },
+      "position": [
+        3.1,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "extra"
+    },
+    {
+      "id": "t_brace_r_key",
+      "bone": "brace_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          1.8,
+          0.5,
+          1.45
+        ],
+        "bevel": 0.08
+      },
+      "position": [
+        0,
+        3.1,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "accent"
+    },
+    {
+      "id": "t_apron_l",
+      "bone": "apron_l",
+      "primitive": "plate",
+      "parameters": {
+        "points_xy": [
+          [
+            -1.4,
+            -5.3
+          ],
+          [
+            1.4,
+            -4.9
+          ],
+          [
+            1.6,
+            0
+          ],
+          [
+            -1.6,
+            0
+          ]
+        ],
+        "thickness": 0.65
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "primary"
+    },
+    {
+      "id": "t_brace_l_top",
+      "bone": "brace_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          7.2,
+          1,
+          1.15
+        ],
+        "bevel": 0.15
+      },
+      "position": [
+        0,
+        3,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "extra"
+    },
+    {
+      "id": "t_brace_l_bottom",
+      "bone": "brace_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          7.2,
+          1,
+          1.15
+        ],
+        "bevel": 0.15
+      },
+      "position": [
+        0,
+        -3,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "extra"
+    },
+    {
+      "id": "t_brace_l_back",
+      "bone": "brace_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          1,
+          5,
+          1.15
+        ],
+        "bevel": 0.15
+      },
+      "position": [
+        -3.1,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "extra"
+    },
+    {
+      "id": "t_brace_l_front",
+      "bone": "brace_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          1,
+          5,
+          1.15
+        ],
+        "bevel": 0.15
+      },
+      "position": [
+        3.1,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "extra"
+    },
+    {
+      "id": "t_brace_l_key",
+      "bone": "brace_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          1.8,
+          0.5,
+          1.45
+        ],
+        "bevel": 0.08
+      },
+      "position": [
+        0,
+        3.1,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "accent"
+    }
+  ],
+  "extras": [
+    {
+      "bone": "crown",
+      "parent": "head",
+      "delay_ticks": 0,
+      "gain": 0,
+      "max_angle_deg": 0,
+      "axis": "z",
+      "translation_lag": 0,
+      "oscillation_amplitude": 0
+    },
+    {
+      "bone": "apron_r",
+      "parent": "hips",
+      "delay_ticks": 3,
+      "gain": 0.3,
+      "max_angle_deg": 5,
+      "axis": "z",
+      "translation_lag": 0,
+      "oscillation_amplitude": 0
+    },
+    {
+      "bone": "brace_r",
+      "parent": "forearm_r",
+      "delay_ticks": 0,
+      "gain": 0,
+      "max_angle_deg": 0,
+      "axis": "z",
+      "translation_lag": 0,
+      "oscillation_amplitude": 0
+    },
+    {
+      "bone": "apron_l",
+      "parent": "hips",
+      "delay_ticks": 3,
+      "gain": 0.3,
+      "max_angle_deg": 5,
+      "axis": "z",
+      "translation_lag": 0,
+      "oscillation_amplitude": 0
+    },
+    {
+      "bone": "brace_l",
+      "parent": "forearm_l",
+      "delay_ticks": 0,
+      "gain": 0,
+      "max_angle_deg": 0,
+      "axis": "z",
+      "translation_lag": 0,
+      "oscillation_amplitude": 0
+    }
+  ]
+}

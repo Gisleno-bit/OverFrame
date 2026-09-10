@@ -1,0 +1,981 @@
+{
+  "schema_version": 1,
+  "id": "the_lattice",
+  "units": "game_units",
+  "coordinates": "x right, y up, z towards camera",
+  "background_srgb": "#111F2B",
+  "colliders_reference": [
+    {
+      "id": "main",
+      "x_min": -155,
+      "x_max": 155,
+      "y": 0
+    },
+    {
+      "id": "left",
+      "x_min": -125,
+      "x_max": -43,
+      "y": 59
+    },
+    {
+      "id": "right",
+      "x_min": 43,
+      "x_max": 125,
+      "y": 59
+    },
+    {
+      "id": "top",
+      "x_min": -41,
+      "x_max": 41,
+      "y": 117
+    }
+  ],
+  "pieces": [
+    {
+      "id": "main_cap",
+      "primitive": "cuboid",
+      "size": [
+        310,
+        1,
+        32
+      ],
+      "bevel": 0,
+      "position": [
+        0,
+        -0.5,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#73878F",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "main_lip",
+      "primitive": "cuboid",
+      "size": [
+        310,
+        0.5,
+        0.6
+      ],
+      "bevel": 0,
+      "position": [
+        0,
+        -0.25,
+        16.3
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#A6B5B7",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "main_base",
+      "primitive": "bevel_box",
+      "size": [
+        309,
+        7,
+        31
+      ],
+      "bevel": 0.6,
+      "position": [
+        0,
+        -4.5,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#344B59",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "main_end_l",
+      "primitive": "bevel_box",
+      "size": [
+        2,
+        2,
+        33
+      ],
+      "bevel": 0.15,
+      "position": [
+        -154.0,
+        -2,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#B7A479",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "main_end_r",
+      "primitive": "bevel_box",
+      "size": [
+        2,
+        2,
+        33
+      ],
+      "bevel": 0.15,
+      "position": [
+        154.0,
+        -2,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#B7A479",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "left_cap",
+      "primitive": "cuboid",
+      "size": [
+        82,
+        1,
+        18
+      ],
+      "bevel": 0,
+      "position": [
+        -84,
+        58.5,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#73878F",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "left_lip",
+      "primitive": "cuboid",
+      "size": [
+        82,
+        0.5,
+        0.6
+      ],
+      "bevel": 0,
+      "position": [
+        -84,
+        58.75,
+        9.3
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#A6B5B7",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "left_base",
+      "primitive": "bevel_box",
+      "size": [
+        81,
+        4,
+        17
+      ],
+      "bevel": 0.6,
+      "position": [
+        -84,
+        56,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#344B59",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "left_end_l",
+      "primitive": "bevel_box",
+      "size": [
+        2,
+        2,
+        19
+      ],
+      "bevel": 0.15,
+      "position": [
+        -124.0,
+        57,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#B7A479",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "left_end_r",
+      "primitive": "bevel_box",
+      "size": [
+        2,
+        2,
+        19
+      ],
+      "bevel": 0.15,
+      "position": [
+        -44.0,
+        57,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#B7A479",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "right_cap",
+      "primitive": "cuboid",
+      "size": [
+        82,
+        1,
+        18
+      ],
+      "bevel": 0,
+      "position": [
+        84,
+        58.5,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#73878F",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "right_lip",
+      "primitive": "cuboid",
+      "size": [
+        82,
+        0.5,
+        0.6
+      ],
+      "bevel": 0,
+      "position": [
+        84,
+        58.75,
+        9.3
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#A6B5B7",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "right_base",
+      "primitive": "bevel_box",
+      "size": [
+        81,
+        4,
+        17
+      ],
+      "bevel": 0.6,
+      "position": [
+        84,
+        56,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#344B59",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "right_end_l",
+      "primitive": "bevel_box",
+      "size": [
+        2,
+        2,
+        19
+      ],
+      "bevel": 0.15,
+      "position": [
+        44.0,
+        57,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#B7A479",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "right_end_r",
+      "primitive": "bevel_box",
+      "size": [
+        2,
+        2,
+        19
+      ],
+      "bevel": 0.15,
+      "position": [
+        124.0,
+        57,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#B7A479",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "top_cap",
+      "primitive": "cuboid",
+      "size": [
+        82,
+        1,
+        18
+      ],
+      "bevel": 0,
+      "position": [
+        0,
+        116.5,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#73878F",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "top_lip",
+      "primitive": "cuboid",
+      "size": [
+        82,
+        0.5,
+        0.6
+      ],
+      "bevel": 0,
+      "position": [
+        0,
+        116.75,
+        9.3
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#A6B5B7",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "top_base",
+      "primitive": "bevel_box",
+      "size": [
+        81,
+        4,
+        17
+      ],
+      "bevel": 0.6,
+      "position": [
+        0,
+        114,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#344B59",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "top_end_l",
+      "primitive": "bevel_box",
+      "size": [
+        2,
+        2,
+        19
+      ],
+      "bevel": 0.15,
+      "position": [
+        -40.0,
+        115,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#B7A479",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "top_end_r",
+      "primitive": "bevel_box",
+      "size": [
+        2,
+        2,
+        19
+      ],
+      "bevel": 0.15,
+      "position": [
+        40.0,
+        115,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#B7A479",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "main_truss_0",
+      "primitive": "bevel_box",
+      "size": [
+        38,
+        2,
+        7
+      ],
+      "bevel": 0.2,
+      "position": [
+        -120,
+        -13,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        20
+      ],
+      "color": "#263C49",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "main_truss_1",
+      "primitive": "bevel_box",
+      "size": [
+        38,
+        2,
+        7
+      ],
+      "bevel": 0.2,
+      "position": [
+        -60,
+        -13,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        -20
+      ],
+      "color": "#263C49",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "main_truss_2",
+      "primitive": "bevel_box",
+      "size": [
+        38,
+        2,
+        7
+      ],
+      "bevel": 0.2,
+      "position": [
+        0,
+        -13,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        20
+      ],
+      "color": "#263C49",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "main_truss_3",
+      "primitive": "bevel_box",
+      "size": [
+        38,
+        2,
+        7
+      ],
+      "bevel": 0.2,
+      "position": [
+        60,
+        -13,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        -20
+      ],
+      "color": "#263C49",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "main_truss_4",
+      "primitive": "bevel_box",
+      "size": [
+        38,
+        2,
+        7
+      ],
+      "bevel": 0.2,
+      "position": [
+        120,
+        -13,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        20
+      ],
+      "color": "#263C49",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "main_keel",
+      "primitive": "bevel_box",
+      "size": [
+        190,
+        3,
+        9
+      ],
+      "bevel": 0.4,
+      "position": [
+        0,
+        -20,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#203540",
+      "layer": "playable",
+      "collision": false
+    },
+    {
+      "id": "bg_post_0",
+      "primitive": "bevel_box",
+      "size": [
+        5,
+        220,
+        5
+      ],
+      "bevel": 0.4,
+      "position": [
+        -180,
+        65,
+        -150
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#172C39",
+      "layer": "background",
+      "collision": false
+    },
+    {
+      "id": "bg_post_1",
+      "primitive": "bevel_box",
+      "size": [
+        5,
+        220,
+        5
+      ],
+      "bevel": 0.4,
+      "position": [
+        -120,
+        65,
+        -150
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#172C39",
+      "layer": "background",
+      "collision": false
+    },
+    {
+      "id": "bg_post_2",
+      "primitive": "bevel_box",
+      "size": [
+        5,
+        220,
+        5
+      ],
+      "bevel": 0.4,
+      "position": [
+        -60,
+        65,
+        -150
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#172C39",
+      "layer": "background",
+      "collision": false
+    },
+    {
+      "id": "bg_post_3",
+      "primitive": "bevel_box",
+      "size": [
+        5,
+        220,
+        5
+      ],
+      "bevel": 0.4,
+      "position": [
+        0,
+        65,
+        -150
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#172C39",
+      "layer": "background",
+      "collision": false
+    },
+    {
+      "id": "bg_post_4",
+      "primitive": "bevel_box",
+      "size": [
+        5,
+        220,
+        5
+      ],
+      "bevel": 0.4,
+      "position": [
+        60,
+        65,
+        -150
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#172C39",
+      "layer": "background",
+      "collision": false
+    },
+    {
+      "id": "bg_post_5",
+      "primitive": "bevel_box",
+      "size": [
+        5,
+        220,
+        5
+      ],
+      "bevel": 0.4,
+      "position": [
+        120,
+        65,
+        -150
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#172C39",
+      "layer": "background",
+      "collision": false
+    },
+    {
+      "id": "bg_post_6",
+      "primitive": "bevel_box",
+      "size": [
+        5,
+        220,
+        5
+      ],
+      "bevel": 0.4,
+      "position": [
+        180,
+        65,
+        -150
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#172C39",
+      "layer": "background",
+      "collision": false
+    },
+    {
+      "id": "bg_brace_0",
+      "primitive": "bevel_box",
+      "size": [
+        75,
+        3,
+        3
+      ],
+      "bevel": 0.2,
+      "position": [
+        -150,
+        20,
+        -148
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        35
+      ],
+      "color": "#1B303D",
+      "layer": "background",
+      "collision": false
+    },
+    {
+      "id": "bg_brace_1",
+      "primitive": "bevel_box",
+      "size": [
+        75,
+        3,
+        3
+      ],
+      "bevel": 0.2,
+      "position": [
+        -90,
+        85,
+        -148
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        -35
+      ],
+      "color": "#1B303D",
+      "layer": "background",
+      "collision": false
+    },
+    {
+      "id": "bg_brace_2",
+      "primitive": "bevel_box",
+      "size": [
+        75,
+        3,
+        3
+      ],
+      "bevel": 0.2,
+      "position": [
+        -30,
+        20,
+        -148
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        35
+      ],
+      "color": "#1B303D",
+      "layer": "background",
+      "collision": false
+    },
+    {
+      "id": "bg_brace_3",
+      "primitive": "bevel_box",
+      "size": [
+        75,
+        3,
+        3
+      ],
+      "bevel": 0.2,
+      "position": [
+        30,
+        85,
+        -148
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        -35
+      ],
+      "color": "#1B303D",
+      "layer": "background",
+      "collision": false
+    },
+    {
+      "id": "bg_brace_4",
+      "primitive": "bevel_box",
+      "size": [
+        75,
+        3,
+        3
+      ],
+      "bevel": 0.2,
+      "position": [
+        90,
+        20,
+        -148
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        35
+      ],
+      "color": "#1B303D",
+      "layer": "background",
+      "collision": false
+    },
+    {
+      "id": "bg_brace_5",
+      "primitive": "bevel_box",
+      "size": [
+        75,
+        3,
+        3
+      ],
+      "bevel": 0.2,
+      "position": [
+        150,
+        85,
+        -148
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        -35
+      ],
+      "color": "#1B303D",
+      "layer": "background",
+      "collision": false
+    },
+    {
+      "id": "bg_beam_low",
+      "primitive": "bevel_box",
+      "size": [
+        420,
+        5,
+        8
+      ],
+      "bevel": 0.5,
+      "position": [
+        0,
+        -40,
+        -155
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#203442",
+      "layer": "background",
+      "collision": false
+    },
+    {
+      "id": "bg_beam_high",
+      "primitive": "bevel_box",
+      "size": [
+        420,
+        4,
+        8
+      ],
+      "bevel": 0.5,
+      "position": [
+        0,
+        180,
+        -155
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "color": "#203442",
+      "layer": "background",
+      "collision": false
+    }
+  ],
+  "animation": "none",
+  "textures": "none",
+  "particles": "none"
+}

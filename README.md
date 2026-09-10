@@ -201,10 +201,11 @@ Because the simulation is pure and input-driven, the renderer is a *function of 
 
 ### 3D pipeline at a glance
 
-- **Models**: `src/model/characters.rs` builds Kestrel, Boulder and Viper from primitives on a shared humanoid skeleton plus signature extras (crest/scarf/tail feathers, orbiting stones, hood/tail). 1.4–2.5k triangles each.
+- **Models**: **Kestrel is built from an art specification** — `docs/art/procedural/kestrel.json` (31 rigid pieces on 21 bones, six palettes from `palettes.json`) parsed by `src/model/procedural.rs` at model-build time, so the numbers the art reviewer edits are exactly what the game draws (contract: `docs/art/procedural/FORMAT.md`). Its crest and scarf follow the closed *extras lag* algorithm of that contract (delay/gain/limit about Z; purely visual, reset on rollback). Boulder and Viper are still the hand-built models in `src/model/characters.rs` until their spec round. 1.1–1.5k triangles each.
 - **Animation**: `src/model/anim.rs` — stance, walk/run cycles, crouch, jump squash & stretch, air poses, shield, rolls, tumbles, ledge hang, knockdown, throws, and a wind-up → strike → recover timeline for every move driven by its own startup/active/endlag with the striking limb aimed at the hitbox. Per-character secondary motion for the extras.
 - **Look**: CPU toon lighting (hemisphere ambient + banded key + fill + rim) with 6 palettes per fighter; per-stage art direction (sky, materials, procedural tiled texture, light); inverted-hull outlines; soft blob shadows; billboard hit/dust/blast effects; strike trails; smooth tournament camera.
 - **Artist path**: `overframe --export-glb kestrel k.glb` → model over it in Blender → export `.glb` → drop into `assets/characters/` → the game uses it with the same animation. Import ↔ export round-trips in CI. Check any model with `overframe --anim kestrel`.
+- **Evidence path** (`docs/art/EXCHANGE.md`): `overframe --capture out/ --sha <git sha>` renders the fixed-camera suite with the production renderer — turnaround / silhouette / palettes / combat-size / contact sheets per character, three fixed stage shots, a 3-second combat GIF from a versioned fixture, the real select screen — and exports `runtime/frame-data.csv` (one row per hitbox and tick, driven through the real simulation), `characters.json` and `stages.json`. On every push to `main`, CI runs it under Xvfb/Mesa and publishes the images plus `PROJECT_STATUS.json` on the `visual-evidence` branch (`PROJECT_STATUS.md` explains the layout). Reviews land in `docs/art/reviews/<sha>.md`.
 
 ### Determinism & rollback
 
@@ -235,6 +236,8 @@ overframe --export-glb kestrel kestrel.glb     # rig for Blender
 
 `tests/feel.rs` pins the impact and response rules (hitlag by damage, grounded flinch, uniform knockback decay, crouch cancel, SDI, shieldstun and pushback, powershield, shield drop, helpless air-dodge, landing lag / L-cancel / autocancel, late hits, dash-attack momentum, run speed across the stage, per-character dash-dance, swept hitboxes) and `tests/grab_ledge.rs` the grab and ledge rules (grab windows, hold formula and mash-out, pummel, throws, ledge catch / intangibility / hang time, fresh and tired getup options, committed ledge jump); `tests/neutral.rs` the run turnaround, tech window and getups, jump-cancels, platform drops, clank / priority, stale moves, meteor cancelling, flick smashes and charging, edgehogging and edge-cancels. `tests/mechanics.rs` asserts the *relationships* that make it feel right — a full hop clears a short hop, fast-falling lands sooner, dashing outruns walking, an angled air-dodge wavedashes, L-cancel cuts landing lag, knockback grows with percent, and the sim is deterministic. `tests/determinism.rs` is the GGRS `SyncTest` rollback check.
 
+`tests/checksum.rs` flips every causal field of the state one at a time and checks the rollback checksum moves (and that visual-only fields do not). `src/export.rs` tests drive every move of every character through the real simulation with input recipes and require each to show its hitbox (the frame-data export), and check the capture fixtures do what they claim (idle stays idle; the combat fixture moves, jumps and lands a hit). `src/model/procedural.rs` tests parse every shipped art spec, build it, and check bounds against the hurt capsule, normals, piece counts, palette counts and slot order, and the extras-lag algorithm frame by frame.
+
 `tests/content.rs` checks every character has a complete, sane moveset and a genuinely distinct archetype, and that stages are well-formed. The `model` module carries its own unit tests (closed, outward-facing primitives; bone hierarchy maths; strike poses aim where the hitbox is; gait cycles are periodic; every fighter model fits its collision size; stage models sit on the sim's platforms; camera framing; glTF export → import round trip of every fighter). `tests/netcode_flow.rs` covers the online layer end to end: room-code and handshake round-trips, the ban-list format, and — the important one — **a real host and guest connecting over loopback UDP, synchronising through GGRS, playing 300 frames with deliberately uneven pacing so rollbacks actually happen, and finishing on byte-identical states**. It also checks that a banned id is refused. `tests/gamepad_map.rs` covers the gamepad mapping, deadzones, rebinding and persistence without hardware.
 
 ## Roadmap
@@ -247,9 +250,15 @@ overframe --export-glb kestrel kestrel.glb     # rig for Blender
   procedural animation, 3D stages, toon look and the Blender `.glb` pipeline**
   ✅. **Reference-calibrated game feel** — hitlag, knockback, DI/SDI, shield
   rules, dodge and landing timings, sound and rumble ✅ (this release).
-  Remaining: more fighters/stages toward 8-10, artist-made models through the
-  pipeline, and the Steam integration (matchmaking, invites, SDR transport)
-  planned in `docs/STEAM.md`.
+  **Procedural art v1**: Kestrel rebuilt from the reviewed JSON spec, the
+  fixed-camera evidence suite, runtime frame-data export and the
+  `visual-evidence` CI branch ✅ (this release). Remaining: Boulder, Viper and
+  the fourth fighter (Trama) from their specs, The Lattice dressing, HUD
+  identity, then more fighters/stages toward 8-10.
+- **Fase 3b — itch.io private pilot.** Free page with download keys, builds
+  from the Release workflow, feedback per version. Steam (fee, matchmaking,
+  invites, SDR transport — `docs/STEAM.md`) only after the pilot proves the
+  game works with players.
 - **Fase 4 — launch.** Ship free on Steam (Early Access); community tournament
   support.
 

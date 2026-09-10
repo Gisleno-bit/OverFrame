@@ -1,0 +1,193 @@
+name: Visual evidence
+
+# Publishes the fixed-camera evidence suite (docs/art/EXCHANGE.md) for every
+# push to main: checks → build → real-renderer captures under Xvfb/Mesa →
+# manifest → commit on the `visual-evidence` branch + PROJECT_STATUS.json.
+#
+# Guarantees (see docs/art/EXCHANGE.md "Publicación CI"):
+# * a pending attempt is registered before anything runs;
+# * the status is published even when a check fails (the final step always
+#   runs), and a failed run never borrows images from an older one;
+# * only pushes to main on this repository get write access — PRs and forks
+#   receive the captures as a workflow artifact only;
+# * publishing is serialised, and an older source commit never overwrites the
+#   pointer of a newer one (tools/evidence.py checks ancestry);
+# * the `visual-evidence` branch never triggers a build.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: visual-evidence
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  EVIDENCE_BRANCH: visual-evidence
+
+jobs:
+  evidence:
+    name: Checks, captures and publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether this run may publish
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ] && [ "${{ github.repository }}" = "Gisleno-bit/overframe" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')" >> "$GITHUB_OUTPUT"
+          echo "attempt_path=builds/${{ github.sha }}/attempt-${{ github.run_id }}-${{ github.run_attempt }}/" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the evidence branch
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          git config --global user.name "overframe-ci"
+          git config --global user.email "ci@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin "$EVIDENCE_BRANCH" >/dev/null 2>&1; then
+            git fetch origin "$EVIDENCE_BRANCH"
+            git worktree add evidence "origin/$EVIDENCE_BRANCH"
+            (cd evidence && git checkout -B "$EVIDENCE_BRANCH" "origin/$EVIDENCE_BRANCH")
+          else
+            git worktree add --detach evidence
+            (cd evidence && git checkout --orphan "$EVIDENCE_BRANCH" && git rm -rfq . && \
+             printf '# visual-evidence\n\nCI-published evidence; see PROJECT_STATUS.md on main.\n' > README.md && \
+             git add README.md && git commit -qm "visual-evidence: init")
+          fi
+
+      - name: Register the pending attempt
+        if: steps.mode.outputs.publish == 'true'
+        run: |
+          python3 tools/evidence.py pending --evidence evidence --sha "${{ github.sha }}" \
+            --run-id "${{ github.run_id }}" --attempt "${{ github.run_attempt }}" \
+            --version "${{ steps.mode.outputs.version }}"
+          cd evidence && git add -A && git commit -qm "pending ${{ github.sha }} run ${{ github.run_id }}-${{ github.run_attempt }}" && \
+            (git push origin "$EVIDENCE_BRANCH" || (git pull --rebase origin "$EVIDENCE_BRANCH" && git push origin "$EVIDENCE_BRANCH"))
+
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux GUI + virtual display deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxi-dev libgl1-mesa-dev libasound2-dev libudev-dev \
+            xvfb libgl1-mesa-dri mesa-utils
+
+      - name: Format check
+        id: fmt
+        continue-on-error: true
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (all features, all targets)
+        id: clippy
+        continue-on-error: true
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Tests (all features)
+        id: tests
+        continue-on-error: true
+        run: cargo test --all-features 2>&1 | tee tests.log; test "${PIPESTATUS[0]}" -eq 0
+
+      - name: Build game (release)
+        id: build
+        continue-on-error: true
+        run: cargo build --release
+
+      - name: Capture the evidence suite (real renderer under Xvfb/Mesa)
+        id: capture
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        run: |
+          xvfb-run -a -s "-screen 0 1920x1080x24" glxinfo -B || true
+          xvfb-run -a -s "-screen 0 1920x1080x24" target/release/overframe --capture out --sha "${{ github.sha }}"
+          ls -R out | head -50
+
+      - name: Record check results
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import json
+          def r(o):
+              return {"success": "pass", "failure": "fail"}.get(o, "not_run")
+          json.dump({
+              "fmt": r("${{ steps.fmt.outcome }}"),
+              "clippy": r("${{ steps.clippy.outcome }}"),
+              "tests": r("${{ steps.tests.outcome }}"),
+              "build": r("${{ steps.build.outcome }}"),
+              "capture": r("${{ steps.capture.outcome }}"),
+          }, open("checks.json", "w"), indent=2)
+          print(open("checks.json").read())
+          EOF
+
+      - name: Assemble the manifest
+        id: manifest
+        if: always()
+        continue-on-error: true
+        run: |
+          python3 tools/evidence.py manifest --capture out --out "attempt" \
+            --sha "${{ github.sha }}" --run-id "${{ github.run_id }}" --attempt "${{ github.run_attempt }}" \
+            --version "${{ steps.mode.outputs.version }}" --checks checks.json --tests-log tests.log --repo .
+
+      - name: Upload captures as a workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-evidence-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: attempt
+          if-no-files-found: warn
+
+      - name: Publish evidence and status
+        if: always() && steps.mode.outputs.publish == 'true'
+        run: |
+          set -e
+          RESULT=fail
+          if [ "${{ steps.fmt.outcome }}" = "success" ] && [ "${{ steps.clippy.outcome }}" = "success" ] && \
+             [ "${{ steps.tests.outcome }}" = "success" ] && [ "${{ steps.build.outcome }}" = "success" ] && \
+             [ "${{ steps.capture.outcome }}" = "success" ] && [ "${{ steps.manifest.outcome }}" = "success" ]; then
+            RESULT=pass
+          fi
+          DEST="evidence/${{ steps.mode.outputs.attempt_path }}"
+          mkdir -p "$DEST"
+          if [ -d attempt ]; then cp -r attempt/. "$DEST"; fi
+          python3 tools/evidence.py status --evidence evidence --sha "${{ github.sha }}" \
+            --run-id "${{ github.run_id }}" --attempt "${{ github.run_attempt }}" \
+            --version "${{ steps.mode.outputs.version }}" --attempt-path "${{ steps.mode.outputs.attempt_path }}" \
+            --result "$RESULT" --checks checks.json --tests-log tests.log --repo .
+          cd evidence
+          git add -A
+          git commit -qm "$RESULT ${{ github.sha }} run ${{ github.run_id }}-${{ github.run_attempt }}" || true
+          # Files and manifest go up in one commit; then the status gets the
+          # commit id that carries them (evidence_commit) in a second one.
+          for i in 1 2 3; do
+            git push origin "$EVIDENCE_BRANCH" && break
+            git pull --rebase origin "$EVIDENCE_BRANCH"
+          done
+          COMMIT=$(git rev-parse HEAD)
+          cd ..
+          python3 tools/evidence.py status --evidence evidence --sha "${{ github.sha }}" \
+            --run-id "${{ github.run_id }}" --attempt "${{ github.run_attempt }}" \
+            --version "${{ steps.mode.outputs.version }}" --attempt-path "${{ steps.mode.outputs.attempt_path }}" \
+            --result "$RESULT" --checks checks.json --tests-log tests.log --evidence-commit "$COMMIT" --repo .
+          cd evidence
+          git add -A
+          git commit -qm "status: $RESULT ${{ github.sha }} (evidence $COMMIT)" || true
+          for i in 1 2 3; do
+            git push origin "$EVIDENCE_BRANCH" && break
+            git pull --rebase origin "$EVIDENCE_BRANCH"
+          done
+          echo "published $RESULT → $EVIDENCE_BRANCH/${{ steps.mode.outputs.attempt_path }}"
+          test "$RESULT" = "pass"

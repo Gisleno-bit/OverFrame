@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "id": "procedural-v1",
+  "units": "game_units",
+  "kind_required": "game3d",
+  "warmup_ticks": 64,
+  "turnaround": {
+    "output": [
+      1024,
+      1024
+    ],
+    "grid": [
+      2,
+      2
+    ],
+    "eye": [
+      0,
+      22,
+      120
+    ],
+    "target": [
+      0,
+      22,
+      0
+    ],
+    "up": [
+      0,
+      1,
+      0
+    ],
+    "orthographic_height": 44,
+    "root_yaw_deg": [
+      0,
+      90,
+      180,
+      270
+    ],
+    "pose": "rest",
+    "lag_enabled": false,
+    "yaw_convention": "root rotated about +Y by yaw, right-handed; yaw 0 = fighter faces +X (screen right), 90 = back to camera, 180 = faces -X, 270 = face to camera"
+  },
+  "combat": {
+    "output": [
+      1920,
+      1080
+    ],
+    "eye": [
+      0,
+      52.5,
+      500
+    ],
+    "target": [
+      0,
+      52.5,
+      0
+    ],
+    "up": [
+      0,
+      1,
+      0
+    ],
+    "orthographic_width": 400,
+    "players": [
+      {
+        "root": [
+          -45,
+          0,
+          0
+        ],
+        "facing": 1
+      },
+      {
+        "root": [
+          45,
+          0,
+          0
+        ],
+        "facing": -1
+      }
+    ],
+    "fixture_tick": 120,
+    "depth_eye": [
+      0,
+      156.5,
+      489
+    ]
+  },
+  "gif": {
+    "output": [
+      960,
+      540
+    ],
+    "simulation_hz": 60,
+    "duration_ticks": 180,
+    "sample_stride": 3,
+    "playback_fps": 20
+  },
+  "runtime_frame_data": "export_required_no_rows_supplied",
+  "characters": [
+    "kestrel"
+  ],
+  "characters_note": "boulder and viper are captured once their spec round starts; until then their files are absent, never a renamed model",
+  "contact_actions": [
+    {
+      "action_id": "jab",
+      "variant_id": "ground"
+    },
+    {
+      "action_id": "ftilt",
+      "variant_id": "ground"
+    },
+    {
+      "action_id": "fsmash",
+      "variant_id": "cstick"
+    },
+    {
+      "action_id": "nair",
+      "variant_id": "fullhop"
+    },
+    {
+      "action_id": "fair",
+      "variant_id": "fullhop"
+    },
+    {
+      "action_id": "dair",
+      "variant_id": "fullhop"
+    }
+  ],
+  "contact_camera": {
+    "eye": [
+      "player.x + 10*facing",
+      "player.y + 22",
+      120
+    ],
+    "target": [
+      "player.x + 10*facing",
+      "player.y + 22",
+      0
+    ],
+    "orthographic_height": 44,
+    "cell": [
+      512,
+      512
+    ],
+    "cells": [
+      "last inactive tick",
+      "first active tick",
+      "first tick after last active"
+    ],
+    "overlay": "engine hitbox (sphere) + hurt capsule",
+    "values": "runtime/frame-data.csv rows"
+  },
+  "fixtures": {
+    "idle": "docs/art/fixtures/idle-v1.json",
+    "combat": "docs/art/fixtures/combat-v1.json"
+  },
+  "combat_size": {
+    "output": [
+      640,
+      180
+    ],
+    "cells": [
+      {
+        "projected_height_px": 72
+      },
+      {
+        "projected_height_px": 120
+      }
+    ],
+    "source": "idle fixture at fixture_tick, player 0, real stage, no HUD"
+  },
+  "ui_selection": {
+    "screen": "local versus setup",
+    "window": [
+      1920,
+      1080
+    ],
+    "p1": {
+      "character": "kestrel",
+      "palette": 0
+    },
+    "p2": {
+      "character": "kestrel",
+      "palette": 3
+    }
+  },
+  "tool": "overframe --capture <dir> --sha <source_sha>  (Linux CI: xvfb-run -a -s '-screen 0 1920x1080x24')"
+}

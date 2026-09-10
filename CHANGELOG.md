@@ -3,6 +3,63 @@
 All notable changes to OVERFRAME. Format follows *Keep a Changelog*; versions
 follow SemVer once `v1.0.0` ships.
 
+## [0.6.0] — Procedural art v1 and the visual-evidence pipeline
+
+The first round of the art exchange (`docs/art/EXCHANGE.md`): models are
+now *specified* as JSON by the art reviewer and *built* by the engine from
+that JSON, and every push publishes fixed-camera captures of the real
+renderer so corrections are made against concrete images and piece ids.
+
+### Added
+- **Art specifications** under `docs/art/procedural/` (FORMAT contract,
+  kestrel/boulder/viper/trama pieces and bones, six palettes per character,
+  The Lattice dressing, identity/HUD rules) plus brand SVGs in
+  `assets/brand/`. All four character specs and the stage spec are parsed
+  and validated by unit tests (bounds vs. hurt capsule, convex CCW plates,
+  finite normals, slot names, piece/bone counts, extras rules).
+- **`src/model/procedural.rs`**: strict spec parser (`deny_unknown_fields`),
+  primitive builders per FORMAT.md (`cuboid`, `bevel_box`, `ellipsoid` with
+  degenerate pole triangles removed, `cylinder`, `plate`), piece → vertex
+  ranges for diagnostics, and the **closed extras-lag algorithm** (twist
+  about Z of `parent_now⁻¹·parent_{now−delay}`, gain, clamp; frozen in
+  hitlag; reset on facing change, rollback, seek).
+- **Kestrel rebuilt from `kestrel.json`** (31 pieces, 21 bones, crest +
+  two scarf segments with lag) and its **six palettes from `palettes.json`**
+  (Coral, Escarcha, Azafrán, Abisal, Ciruela, Pino). Boulder and Viper keep
+  their previous models until their round.
+- **`overframe --capture <dir> --sha <sha>`**: the evidence suite rendered
+  by the production renderer into off-screen targets — `turnaround`,
+  `silhouette`, `palettes`, `combat-size`, `contact-<action>` (last
+  inactive / first active / first after last active ticks with the engine's
+  hitbox overlaid and the exporter's values printed), `lattice-fixed`,
+  `combat-fixed`, `combat-depth`, `combat.gif` (180 ticks, every 3rd, 20
+  fps) and `ui/selection` at 1920×1080 — plus `capture-index.json` with
+  cameras, ticks, renderer string and triangle counts.
+- **Versioned fixtures** `docs/art/fixtures/{idle,combat}-v1.json` (initial
+  placement + timed inputs) shared by the capture tool and tests.
+- **Runtime exports** (`src/export.rs`): `frame-data.csv` with the agreed
+  header, one row per hitbox and tick, produced by driving input recipes
+  through `sim::step` for every move of every character (tests require each
+  to show its hitbox); `characters.json` and `stages.json` from the engine's
+  own tables; `frame-data-report.json` with each recipe.
+- **CI `visual-evidence.yml`**: pending registration, fmt/clippy/tests/
+  build, Xvfb + Mesa capture, manifest with SHA-256/dimensions/checks/
+  capabilities and size budget (`tools/evidence.py`), publication on the
+  `visual-evidence` branch with `PROJECT_STATUS.json`, serialised and
+  ancestry-guarded; failures are published too; PRs get an artifact only.
+  `PROJECT_STATUS.md` on `main` documents the scheme.
+- **Rollback checksum** now covers every causal field (FNV-1a over the full
+  state, 64-bit frame, normalised floats) with a field-by-field sensitivity
+  test (`tests/checksum.rs`).
+- `Fighter::hitbox_geometry()` (the hitbox a state frame defines, even after
+  it connected) for tooling.
+
+### Changed
+- `serde`/`serde_json`/`image` are regular dependencies (specs are embedded
+  and parsed; captures encode PNG/GIF); the `headless` feature no longer
+  gates `image`.
+- `palettes::of()` returns a slice; Kestrel's palettes come from the JSON.
+
 ## [0.5.0] — Game feel: reference-calibrated impact and response
 
 The combat engine was re-tuned against public platform-fighter frame data

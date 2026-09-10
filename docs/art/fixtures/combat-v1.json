@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "id": "combat-v1",
+  "seed": 305419896,
+  "stage": "lattice",
+  "stocks": 4,
+  "players": [
+    {
+      "character": "kestrel",
+      "palette": 0,
+      "x": -45.0,
+      "facing": 1.0
+    },
+    {
+      "character": "kestrel",
+      "palette": 3,
+      "x": 45.0,
+      "facing": -1.0
+    }
+  ],
+  "warmup_ticks": 64,
+  "ticks": 180,
+  "inputs": [
+    {
+      "tick": 12,
+      "player": 0,
+      "buttons": [
+        "jump"
+      ],
+      "hold": 1
+    },
+    {
+      "tick": 14,
+      "player": 0,
+      "stick": [
+        0.6,
+        0.0
+      ],
+      "hold": 26
+    },
+    {
+      "tick": 44,
+      "player": 1,
+      "stick": [
+        -0.55,
+        0.0
+      ],
+      "hold": 10
+    },
+    {
+      "tick": 62,
+      "player": 0,
+      "stick": [
+        0.0,
+        -1.0
+      ],
+      "hold": 12
+    },
+    {
+      "tick": 72,
+      "player": 1,
+      "buttons": [
+        "shield"
+      ],
+      "hold": 10
+    },
+    {
+      "tick": 96,
+      "player": 0,
+      "stick": [
+        0.55,
+        0.0
+      ],
+      "buttons": [
+        "attack"
+      ],
+      "hold": 1
+    },
+    {
+      "tick": 150,
+      "player": 1,
+      "buttons": [
+        "jump"
+      ],
+      "hold": 1
+    },
+    {
+      "tick": 152,
+      "player": 1,
+      "stick": [
+        -0.5,
+        0.0
+      ],
+      "hold": 20
+    }
+  ]
+}

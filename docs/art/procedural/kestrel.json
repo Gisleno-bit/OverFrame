@@ -1,0 +1,1087 @@
+{
+  "schema_version": 1,
+  "id": "kestrel",
+  "units": "game_units",
+  "reference": {
+    "height": 30,
+    "half_width": 9,
+    "hurt_radius": 10.5,
+    "status": "uploaded_snapshot_not_live_verified"
+  },
+  "description": "Mensajero de aristas: perfil inclinado, tres aletas de cresta, dos tramos de bufanda hacia -X. Sin alas ni tela simulada.",
+  "proportions": {
+    "thigh": 6.5,
+    "shin": 6,
+    "ankle": 1.2,
+    "torso": 10.5,
+    "neck": 0.8,
+    "shoulder_half": 3.8,
+    "hip_half": 2.3,
+    "upper_arm": 5,
+    "forearm": 4.5
+  },
+  "bones": [
+    {
+      "name": "root",
+      "parent": null,
+      "offset": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "hips",
+      "parent": "root",
+      "offset": [
+        0,
+        13.7,
+        0
+      ]
+    },
+    {
+      "name": "spine",
+      "parent": "hips",
+      "offset": [
+        0,
+        3.15,
+        0
+      ]
+    },
+    {
+      "name": "chest",
+      "parent": "spine",
+      "offset": [
+        0,
+        3.675,
+        0
+      ]
+    },
+    {
+      "name": "neck",
+      "parent": "chest",
+      "offset": [
+        0,
+        3.675,
+        0
+      ]
+    },
+    {
+      "name": "head",
+      "parent": "neck",
+      "offset": [
+        0,
+        0.8,
+        0
+      ]
+    },
+    {
+      "name": "upper_arm_r",
+      "parent": "chest",
+      "offset": [
+        0,
+        2.94,
+        3.8
+      ]
+    },
+    {
+      "name": "forearm_r",
+      "parent": "upper_arm_r",
+      "offset": [
+        0,
+        -5,
+        0
+      ]
+    },
+    {
+      "name": "hand_r",
+      "parent": "forearm_r",
+      "offset": [
+        0,
+        -4.5,
+        0
+      ]
+    },
+    {
+      "name": "thigh_r",
+      "parent": "hips",
+      "offset": [
+        0,
+        0,
+        2.3
+      ]
+    },
+    {
+      "name": "shin_r",
+      "parent": "thigh_r",
+      "offset": [
+        0,
+        -6.5,
+        0
+      ]
+    },
+    {
+      "name": "foot_r",
+      "parent": "shin_r",
+      "offset": [
+        0,
+        -6,
+        0
+      ]
+    },
+    {
+      "name": "upper_arm_l",
+      "parent": "chest",
+      "offset": [
+        0,
+        2.94,
+        -3.8
+      ]
+    },
+    {
+      "name": "forearm_l",
+      "parent": "upper_arm_l",
+      "offset": [
+        0,
+        -5,
+        0
+      ]
+    },
+    {
+      "name": "hand_l",
+      "parent": "forearm_l",
+      "offset": [
+        0,
+        -4.5,
+        0
+      ]
+    },
+    {
+      "name": "thigh_l",
+      "parent": "hips",
+      "offset": [
+        0,
+        0,
+        -2.3
+      ]
+    },
+    {
+      "name": "shin_l",
+      "parent": "thigh_l",
+      "offset": [
+        0,
+        -6.5,
+        0
+      ]
+    },
+    {
+      "name": "foot_l",
+      "parent": "shin_l",
+      "offset": [
+        0,
+        -6,
+        0
+      ]
+    },
+    {
+      "name": "crest",
+      "parent": "head",
+      "offset": [
+        0,
+        2,
+        0
+      ]
+    },
+    {
+      "name": "scarf_a",
+      "parent": "neck",
+      "offset": [
+        -1.8,
+        -0.8,
+        0
+      ]
+    },
+    {
+      "name": "scarf_b",
+      "parent": "scarf_a",
+      "offset": [
+        -3.2,
+        -0.7,
+        0
+      ]
+    }
+  ],
+  "pieces": [
+    {
+      "id": "k_pelvis",
+      "bone": "hips",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          4.5,
+          3,
+          5
+        ],
+        "bevel": 0.45
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "secondary"
+    },
+    {
+      "id": "k_neck",
+      "bone": "neck",
+      "primitive": "cylinder",
+      "parameters": {
+        "r0": 1.1,
+        "r1": 0.9,
+        "height": 1.8,
+        "segments": 8
+      },
+      "position": [
+        0,
+        0.1,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "k_upper_arm_r",
+      "bone": "upper_arm_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.15,
+          5.2,
+          1.892
+        ],
+        "bevel": 0.344
+      },
+      "position": [
+        0,
+        -2.5,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "secondary"
+    },
+    {
+      "id": "k_forearm_r",
+      "bone": "forearm_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.65,
+          4.7,
+          2.332
+        ],
+        "bevel": 0.424
+      },
+      "position": [
+        0,
+        -2.25,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "primary"
+    },
+    {
+      "id": "k_thigh_r",
+      "bone": "thigh_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.8,
+          6.7,
+          2.464
+        ],
+        "bevel": 0.448
+      },
+      "position": [
+        0,
+        -3.25,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "secondary"
+    },
+    {
+      "id": "k_shin_r",
+      "bone": "shin_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.4,
+          6.2,
+          2.112
+        ],
+        "bevel": 0.384
+      },
+      "position": [
+        0,
+        -3.0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "primary"
+    },
+    {
+      "id": "k_elbow_r",
+      "bone": "forearm_r",
+      "primitive": "ellipsoid",
+      "parameters": {
+        "radii": [
+          0.989,
+          0.989,
+          0.989
+        ],
+        "lat": 4,
+        "lon": 8
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "k_knee_r",
+      "bone": "shin_r",
+      "primitive": "ellipsoid",
+      "parameters": {
+        "radii": [
+          1.152,
+          1.152,
+          1.152
+        ],
+        "lat": 4,
+        "lon": 8
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "k_hand_r",
+      "bone": "hand_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.438,
+          1.7,
+          2.385
+        ],
+        "bevel": 0.25
+      },
+      "position": [
+        0.25,
+        -0.65,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "light"
+    },
+    {
+      "id": "k_foot_r",
+      "bone": "foot_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          4.4,
+          1.8,
+          2.7
+        ],
+        "bevel": 0.25
+      },
+      "position": [
+        0.65,
+        -0.1,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "k_shin_mark_r",
+      "bone": "shin_r",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          1.56,
+          1.15,
+          0.25
+        ],
+        "bevel": 0.08
+      },
+      "position": [
+        0.1,
+        -1.8,
+        1.176
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "accent"
+    },
+    {
+      "id": "k_upper_arm_l",
+      "bone": "upper_arm_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.15,
+          5.2,
+          1.892
+        ],
+        "bevel": 0.344
+      },
+      "position": [
+        0,
+        -2.5,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "secondary"
+    },
+    {
+      "id": "k_forearm_l",
+      "bone": "forearm_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.65,
+          4.7,
+          2.332
+        ],
+        "bevel": 0.424
+      },
+      "position": [
+        0,
+        -2.25,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "primary"
+    },
+    {
+      "id": "k_thigh_l",
+      "bone": "thigh_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.8,
+          6.7,
+          2.464
+        ],
+        "bevel": 0.448
+      },
+      "position": [
+        0,
+        -3.25,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "secondary"
+    },
+    {
+      "id": "k_shin_l",
+      "bone": "shin_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.4,
+          6.2,
+          2.112
+        ],
+        "bevel": 0.384
+      },
+      "position": [
+        0,
+        -3.0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "primary"
+    },
+    {
+      "id": "k_elbow_l",
+      "bone": "forearm_l",
+      "primitive": "ellipsoid",
+      "parameters": {
+        "radii": [
+          0.989,
+          0.989,
+          0.989
+        ],
+        "lat": 4,
+        "lon": 8
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "k_knee_l",
+      "bone": "shin_l",
+      "primitive": "ellipsoid",
+      "parameters": {
+        "radii": [
+          1.152,
+          1.152,
+          1.152
+        ],
+        "lat": 4,
+        "lon": 8
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "k_hand_l",
+      "bone": "hand_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          2.438,
+          1.7,
+          2.385
+        ],
+        "bevel": 0.25
+      },
+      "position": [
+        0.25,
+        -0.65,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "light"
+    },
+    {
+      "id": "k_foot_l",
+      "bone": "foot_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          4.4,
+          1.8,
+          2.7
+        ],
+        "bevel": 0.25
+      },
+      "position": [
+        0.65,
+        -0.1,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "k_shin_mark_l",
+      "bone": "shin_l",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          1.56,
+          1.15,
+          0.25
+        ],
+        "bevel": 0.08
+      },
+      "position": [
+        0.1,
+        -1.8,
+        -1.176
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "accent"
+    },
+    {
+      "id": "k_abdomen",
+      "bone": "spine",
+      "primitive": "plate",
+      "parameters": {
+        "points_xy": [
+          [
+            -2.4,
+            -2.7
+          ],
+          [
+            2.4,
+            -2.7
+          ],
+          [
+            3.3,
+            2.5
+          ],
+          [
+            -2,
+            2.5
+          ]
+        ],
+        "thickness": 5.5
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "secondary"
+    },
+    {
+      "id": "k_chest",
+      "bone": "chest",
+      "primitive": "plate",
+      "parameters": {
+        "points_xy": [
+          [
+            -2.6,
+            -2.5
+          ],
+          [
+            2.8,
+            -2.5
+          ],
+          [
+            3.6,
+            2.8
+          ],
+          [
+            -1.7,
+            3.5
+          ]
+        ],
+        "thickness": 6.7
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "primary"
+    },
+    {
+      "id": "k_chest_stripe",
+      "bone": "chest",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          1.1,
+          4.5,
+          0.35
+        ],
+        "bevel": 0.1
+      },
+      "position": [
+        1.5,
+        0.4,
+        3.5
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        -12
+      ],
+      "slot": "accent"
+    },
+    {
+      "id": "k_head",
+      "bone": "head",
+      "primitive": "ellipsoid",
+      "parameters": {
+        "radii": [
+          2.65,
+          2.4,
+          2.5
+        ],
+        "lat": 4,
+        "lon": 8
+      },
+      "position": [
+        0.1,
+        0.2,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "light"
+    },
+    {
+      "id": "k_face",
+      "bone": "head",
+      "primitive": "plate",
+      "parameters": {
+        "points_xy": [
+          [
+            1.5,
+            -1
+          ],
+          [
+            3.15,
+            -0.45
+          ],
+          [
+            3.2,
+            0.6
+          ],
+          [
+            1.6,
+            1.1
+          ]
+        ],
+        "thickness": 3.8
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "skin"
+    },
+    {
+      "id": "k_eye",
+      "bone": "head",
+      "primitive": "bevel_box",
+      "parameters": {
+        "size": [
+          1.55,
+          0.45,
+          4.35
+        ],
+        "bevel": 0.1
+      },
+      "position": [
+        2.0,
+        0.75,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "dark"
+    },
+    {
+      "id": "k_crest_0",
+      "bone": "crest",
+      "primitive": "plate",
+      "parameters": {
+        "points_xy": [
+          [
+            -1,
+            0
+          ],
+          [
+            1.1,
+            0
+          ],
+          [
+            -0.5,
+            2.8
+          ]
+        ],
+        "thickness": 0.65
+      },
+      "position": [
+        -1.6,
+        0.1,
+        -0.9
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "accent"
+    },
+    {
+      "id": "k_crest_1",
+      "bone": "crest",
+      "primitive": "plate",
+      "parameters": {
+        "points_xy": [
+          [
+            -1,
+            0
+          ],
+          [
+            1.1,
+            0
+          ],
+          [
+            -0.5,
+            2.8
+          ]
+        ],
+        "thickness": 0.65
+      },
+      "position": [
+        -0.3,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "accent"
+    },
+    {
+      "id": "k_crest_2",
+      "bone": "crest",
+      "primitive": "plate",
+      "parameters": {
+        "points_xy": [
+          [
+            -1,
+            0
+          ],
+          [
+            1.1,
+            0
+          ],
+          [
+            -0.5,
+            2.8
+          ]
+        ],
+        "thickness": 0.65
+      },
+      "position": [
+        1,
+        -0.3,
+        0.9
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "accent"
+    },
+    {
+      "id": "k_scarf_a",
+      "bone": "scarf_a",
+      "primitive": "plate",
+      "parameters": {
+        "points_xy": [
+          [
+            0,
+            0
+          ],
+          [
+            -3.4,
+            -0.3
+          ],
+          [
+            -3.6,
+            -1.9
+          ],
+          [
+            -0.3,
+            -1.3
+          ]
+        ],
+        "thickness": 2.1
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "accent"
+    },
+    {
+      "id": "k_scarf_b",
+      "bone": "scarf_b",
+      "primitive": "plate",
+      "parameters": {
+        "points_xy": [
+          [
+            0,
+            0
+          ],
+          [
+            -3,
+            -0.4
+          ],
+          [
+            -3.2,
+            -2.0
+          ],
+          [
+            -0.3,
+            -1.3
+          ]
+        ],
+        "thickness": 1.5
+      },
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ],
+      "slot": "extra"
+    }
+  ],
+  "extras": [
+    {
+      "bone": "crest",
+      "parent": "head",
+      "delay_ticks": 1,
+      "gain": 0.25,
+      "max_angle_deg": 2,
+      "axis": "z",
+      "translation_lag": 0,
+      "oscillation_amplitude": 0
+    },
+    {
+      "bone": "scarf_a",
+      "parent": "neck",
+      "delay_ticks": 3,
+      "gain": 0.55,
+      "max_angle_deg": 9,
+      "axis": "z",
+      "translation_lag": 0,
+      "oscillation_amplitude": 0
+    },
+    {
+      "bone": "scarf_b",
+      "parent": "scarf_a",
+      "delay_ticks": 5,
+      "gain": 0.45,
+      "max_angle_deg": 11,
+      "axis": "z",
+      "translation_lag": 0,
+      "oscillation_amplitude": 0
+    }
+  ]
+}

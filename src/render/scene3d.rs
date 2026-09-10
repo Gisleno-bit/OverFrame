@@ -13,6 +13,7 @@ use crate::model::characters::CharacterModel;
 use crate::model::lighting::{shade_static, slot, Light, Tint};
 use crate::model::math3::{v3, Xf, M3, V3};
 use crate::model::mesh::MeshData;
+use crate::model::procedural::ExtrasState;
 use crate::model::rig::Vert;
 use crate::model::stage3d::{self, StageModel, SLAB_DEPTH, SOFT_DEPTH};
 use crate::model::MatchCamera;
@@ -66,6 +67,13 @@ pub struct Scene3D {
     outline: Option<Material>,
     /// Render-only per-port state: smoothed facing and strike trails.
     ports: Vec<PortFx>,
+    /// Capture overrides (see `render::capture`): drawing surface size when
+    /// not the window, a fixed outline width in world units, silhouette
+    /// mode (unlit black), and whether the extras lag layer runs.
+    pub(crate) viewport: Option<(f32, f32)>,
+    pub(crate) outline_width: Option<f32>,
+    pub(crate) silhouette: bool,
+    pub(crate) lag_enabled: bool,
 }
 
 /// Per-fighter render state that is *not* part of the simulation (so it is
@@ -78,6 +86,8 @@ struct PortFx {
     /// active, newest last. Drawn as a fading ribbon.
     trail: Vec<(V3, V3)>,
     last_frame: u64,
+    /// Lag history of the spec-built extras (scarf, crest…). Visual only.
+    lag: ExtrasState,
 }
 
 impl Default for PortFx {
@@ -86,6 +96,7 @@ impl Default for PortFx {
             facing: 1.0,
             trail: Vec::new(),
             last_frame: u64::MAX,
+            lag: ExtrasState::default(),
         }
     }
 }
@@ -172,6 +183,10 @@ impl Scene3D {
             preview_angle: 0.0,
             outline: make_outline_material(),
             ports: Vec::new(),
+            viewport: None,
+            outline_width: None,
+            silhouette: false,
+            lag_enabled: true,
         }
     }
 
@@ -432,6 +447,20 @@ impl Scene3D {
         let mut pose = anim::fighter_pose(&model.rig, f, &model.style, frame);
         (model.secondary)(&model.rig, &mut pose, f, frame);
         let mut root = Self::fighter_root(f, eased);
+        if !model.extras.is_empty() && self.lag_enabled {
+            // Extras lag (FORMAT.md): reads the parent bones of the combat
+            // pose, never writes them; frozen while the fighter is in hitlag.
+            let lag = &mut self.ports[f.port.min(7)].lag;
+            lag.apply(
+                &model.extras,
+                &model.rig,
+                &mut pose,
+                &root,
+                frame,
+                f.hitlag > 0,
+                f.facing,
+            );
+        }
         // Hitlag shake: the victim vibrates in place while frozen (the
         // classic freeze-frame "rattle"); harder hits rattle wider.
         if f.hitlag > 0 && matches!(f.state, State::Hitstun { .. }) {
@@ -439,7 +468,24 @@ impl Scene3D {
             let s = if frame % 2 == 0 { 1.0 } else { -1.0 };
             root.t = root.t + v3(s * amp, (frame % 4 == 0) as i32 as f32 * amp * 0.4, 0.0);
         }
-        let world = model.rig.world(&pose, &root);
+        self.draw_posed(f, frame, &pose, &root);
+    }
+
+    /// Draw a fighter in an explicit pose under an explicit root transform
+    /// (the capture tool uses this for rest poses and fixed yaws).
+    pub(crate) fn draw_posed(
+        &mut self,
+        f: &Fighter,
+        _frame: u64,
+        pose: &crate::model::rig::Pose,
+        root: &Xf,
+    ) {
+        let i = f.port.min(7);
+        if self.ports.len() <= i {
+            self.ports.resize(i + 1, PortFx::default());
+        }
+        let model = &self.models[f.character.id.index()];
+        let world = model.rig.world(pose, root);
         let tint = Self::tint_for(f);
         self.verts.clear();
         self.idx.clear();
@@ -451,6 +497,11 @@ impl Scene3D {
             &mut self.verts,
             &mut self.idx,
         );
+        if self.silhouette {
+            for v in &mut self.verts {
+                v.rgba = [0, 0, 0, 255];
+            }
+        }
         // Strike trail: remember the striking limb's tip while active.
         let limb_tip = f.active_hitbox().map(|_| {
             let spec = anim::strike_spec(match f.state {
@@ -497,10 +548,16 @@ impl Scene3D {
             }
         }
         self.flush_tris(None);
+        if self.silhouette {
+            return;
+        }
         // Toon outline: inverted hull, pushed out along normals in the shader.
         if let Some(mat) = self.outline.clone() {
             let dist = (self.camera.pos - self.camera.target).len();
-            mat.set_uniform("Width", (dist * 0.0011).clamp(0.18, 0.7));
+            let width = self
+                .outline_width
+                .unwrap_or_else(|| (dist * 0.0011).clamp(0.18, 0.7));
+            mat.set_uniform("Width", width);
             let oc = [
                 (dark[0] as f32 * 0.45) as u8,
                 (dark[1] as f32 * 0.45) as u8,
@@ -895,10 +952,10 @@ impl Scene3D {
             return None;
         }
         let ndc = vec2(clip.x / clip.w, clip.y / clip.w);
-        Some((
-            (ndc.x * 0.5 + 0.5) * screen_width(),
-            (1.0 - (ndc.y * 0.5 + 0.5)) * screen_height(),
-        ))
+        let (w, h) = self
+            .viewport
+            .unwrap_or_else(|| (screen_width(), screen_height()));
+        Some(((ndc.x * 0.5 + 0.5) * w, (1.0 - (ndc.y * 0.5 + 0.5)) * h))
     }
 
     /// "P1"/"P2" markers above each fighter's head.
@@ -1254,6 +1311,208 @@ impl Default for Scene3D {
 #[inline]
 fn mq(v: V3) -> Vec3 {
     vec3(v.x, v.y, v.z)
+}
+
+// ---------------------------------------------------------------- captures
+
+/// A fixed orthographic camera in world units (docs/art/capture-suite.json).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct FixedCam {
+    pub eye: V3,
+    pub target: V3,
+    /// Vertical extent of the view in world units.
+    pub ortho_height: f32,
+}
+
+impl FixedCam {
+    fn camera(&self, rt: &RenderTarget) -> Camera3D {
+        Camera3D {
+            position: mq(self.eye),
+            target: mq(self.target),
+            up: vec3(0.0, 1.0, 0.0),
+            fovy: self.ortho_height,
+            aspect: Some(rt.texture.width() / rt.texture.height().max(1.0)),
+            projection: Projection::Orthographics,
+            render_target: Some(rt.clone()),
+            ..Default::default()
+        }
+    }
+
+    /// Outline width for this camera: 1.5 px at 1080p-equivalent density,
+    /// clamped to FORMAT.md's 0.08–0.28 world units.
+    pub fn outline_width(&self, rt_height: f32) -> f32 {
+        let px = self.ortho_height / rt_height.max(1.0);
+        (1.5 * px * (rt_height / 1080.0)).clamp(0.08, 0.28)
+    }
+}
+
+/// 2D camera that maps `(0,0)-(w,h)` (y down) onto a render target in the
+/// same orientation as the 3D pass, so `get_texture_data` reads one
+/// consistent, bottom-up image.
+pub(crate) fn rt_camera_2d(rt: &RenderTarget) -> Camera2D {
+    let (w, h) = (rt.texture.width(), rt.texture.height());
+    Camera2D {
+        target: vec2(w * 0.5, h * 0.5),
+        zoom: vec2(2.0 / w, -2.0 / h),
+        render_target: Some(rt.clone()),
+        ..Default::default()
+    }
+}
+
+/// How a model capture is dressed.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ModelLook {
+    /// Black object on white, unlit, no outline, no backdrop.
+    pub silhouette: bool,
+    /// Studio gradient behind the model (else the caller's clear colour).
+    pub backdrop: bool,
+    /// Draw the fighter's overlays (hitboxes / hurt capsule).
+    pub hitboxes: bool,
+}
+
+impl Scene3D {
+    /// Draw a match frame with a fixed orthographic camera into `rt`.
+    pub(crate) fn draw_fixed(
+        &mut self,
+        gs: &GameState,
+        cam: &FixedCam,
+        rt: &RenderTarget,
+        opts: SceneOpts,
+    ) {
+        self.ensure_stage(gs);
+        let (w, h) = (rt.texture.width(), rt.texture.height());
+        self.viewport = Some((w, h));
+        super::set_painter_dims(Some((w, h)));
+        self.outline_width = Some(cam.outline_width(h));
+
+        set_camera(&rt_camera_2d(rt));
+        clear_background(BLACK);
+        self.draw_sky(w, h, gs);
+
+        let c3 = cam.camera(rt);
+        self.view_proj = c3.matrix();
+        set_camera(&c3);
+        for m in &self.stage_far {
+            draw_mesh(m);
+        }
+        for m in &self.stage_near {
+            draw_mesh(m);
+        }
+        for f in &gs.fighters {
+            self.draw_shadow(f, gs);
+        }
+        for f in &gs.fighters {
+            self.draw_fighter(f, gs.frame);
+        }
+        self.draw_projectiles(gs);
+        for f in &gs.fighters {
+            self.draw_overlays(f, opts);
+        }
+        self.draw_fx(gs);
+
+        set_camera(&rt_camera_2d(rt));
+        if opts.hud {
+            let mut p = MqPainter;
+            self.draw_port_tags(&mut p, gs, opts);
+            viz::draw_hud(&mut p, w, h, gs, opts.local_player);
+        }
+        set_default_camera();
+        self.viewport = None;
+        self.outline_width = None;
+        super::set_painter_dims(None);
+    }
+
+    /// Draw one fighter model (explicit pose and root) with a fixed camera
+    /// into `rt`. Lighting is the current stage's fighter light.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_model_fixed(
+        &mut self,
+        f: &Fighter,
+        frame: u64,
+        pose: &crate::model::rig::Pose,
+        root: &Xf,
+        cam: &FixedCam,
+        rt: &RenderTarget,
+        look: ModelLook,
+    ) {
+        let (w, h) = (rt.texture.width(), rt.texture.height());
+        self.viewport = Some((w, h));
+        super::set_painter_dims(Some((w, h)));
+        self.outline_width = Some(cam.outline_width(h));
+        self.silhouette = look.silhouette;
+
+        set_camera(&rt_camera_2d(rt));
+        if look.silhouette {
+            clear_background(WHITE);
+        } else if look.backdrop {
+            clear_background(BLACK);
+            let top = VColor::rgb(34, 36, 56);
+            let bottom = VColor::rgb(12, 12, 20);
+            let bands = 24;
+            for i in 0..bands {
+                let t = i as f32 / bands as f32;
+                draw_rectangle(
+                    0.0,
+                    h * t,
+                    w,
+                    h / bands as f32 + 1.0,
+                    col(top.lerp(bottom, t)),
+                );
+            }
+        }
+
+        let c3 = cam.camera(rt);
+        self.view_proj = c3.matrix();
+        set_camera(&c3);
+        self.draw_posed(f, frame, pose, root);
+        if look.hitboxes && !look.silhouette {
+            self.draw_overlays(
+                f,
+                SceneOpts {
+                    hitboxes: true,
+                    ..SceneOpts::default()
+                },
+            );
+        }
+        set_default_camera();
+        self.silhouette = false;
+        self.viewport = None;
+        self.outline_width = None;
+        super::set_painter_dims(None);
+    }
+
+    /// A character's rig (for rest poses in captures).
+    pub(crate) fn model_rig(&self, id: CharacterId) -> &crate::model::rig::Rig {
+        &self.models[id.index()].rig
+    }
+
+    /// Make sure a stage's geometry and lights are loaded (for captures that
+    /// draw only a model but want the stage's fighter light).
+    pub(crate) fn prepare_stage(&mut self, gs: &GameState) {
+        self.ensure_stage(gs);
+    }
+
+    /// Triangle counts: (per fighter model, stage near + far).
+    pub(crate) fn triangle_budget(&self) -> (Vec<(String, usize)>, usize) {
+        let models = self
+            .models
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                (
+                    crate::export::character_id(CharacterId::ALL[i]).to_string(),
+                    m.rig.triangle_count(),
+                )
+            })
+            .collect();
+        let stage = self
+            .stage_near
+            .iter()
+            .chain(self.stage_far.iter())
+            .map(|m| m.indices.len() / 3)
+            .sum();
+        (models, stage)
+    }
 }
 
 /// Bake lighting into a static mesh and split it into GPU-sized batches.

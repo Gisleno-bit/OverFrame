@@ -114,6 +114,23 @@ impl MeshData {
         out
     }
 
+    /// Remove zero-area triangles (the pole rows of a UV ellipsoid, for
+    /// instance) so that flat shading never produces a NaN normal.
+    pub fn drop_degenerate(mut self) -> MeshData {
+        let mut idx = Vec::with_capacity(self.idx.len());
+        for t in self.idx.chunks(3) {
+            let (a, b, c) = (t[0] as usize, t[1] as usize, t[2] as usize);
+            let area2 = (self.pos[b] - self.pos[a])
+                .cross(self.pos[c] - self.pos[a])
+                .len();
+            if area2 > 1e-6 {
+                idx.extend_from_slice(t);
+            }
+        }
+        self.idx = idx;
+        self
+    }
+
     /// Recompute smooth normals from the geometry (area-weighted).
     pub fn recompute_normals(&mut self) {
         let mut acc = vec![V3::ZERO; self.pos.len()];

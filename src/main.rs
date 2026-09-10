@@ -14,6 +14,7 @@
 //! overframe --demo --screenshot shot.png --at 180   # save a frame, quit
 //! overframe --export-glb kestrel kestrel.glb   # rig for Blender (docs/ART_PIPELINE.md)
 //! overframe --anim viper        # animation viewer: every state and move
+//! overframe --capture out/ --sha <git sha>   # fixed-camera evidence suite (docs/art/EXCHANGE.md)
 //! ```
 
 #[cfg(feature = "gui")]
@@ -117,6 +118,32 @@ fn main() {
                     .unwrap_or(180);
                 opts.record = Some((dir, from, count));
                 i += if args.get(i + 3).is_some() { 3 } else { 1 };
+            }
+            "--capture" => {
+                let Some(dir) = args.get(i + 1).filter(|a| !a.starts_with("--")) else {
+                    eprintln!("--capture needs an output directory");
+                    std::process::exit(2);
+                };
+                let mut c = overframe::render::capture::CaptureOpts {
+                    out: std::path::PathBuf::from(dir),
+                    source_sha: "unknown".into(),
+                    only: None,
+                };
+                i += 1;
+                while let Some(next) = args.get(i + 1) {
+                    match next.as_str() {
+                        "--sha" => {
+                            c.source_sha = args.get(i + 2).cloned().unwrap_or_default();
+                            i += 2;
+                        }
+                        "--only" => {
+                            c.only = args.get(i + 2).cloned();
+                            i += 2;
+                        }
+                        _ => break,
+                    }
+                }
+                opts.capture = Some(c);
             }
             "--screenshot" => {
                 let path = args.get(i + 1).cloned().unwrap_or_else(|| {
