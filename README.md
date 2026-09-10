@@ -10,7 +10,7 @@
 
 *The clip above is the actual game engine playing its scripted demo (not a pre-baked animation): dash-dance → wavedash → walk-in → tilt → forward smash → KO, rendered by the 3D renderer.*
 
-[![CI](https://github.com/Gisleno-bit/overframe/actions/workflows/ci.yml/badge.svg)](https://github.com/Gisleno-bit/overframe/actions/workflows/ci.yml)
+[![CI](https://github.com/Gisleno-bit/OverFrame/actions/workflows/ci.yml/badge.svg)](https://github.com/Gisleno-bit/OverFrame/actions/workflows/ci.yml)
 &nbsp;License: MIT &nbsp;•&nbsp; Language: Rust &nbsp;•&nbsp; Status: **Fase 3 (in progress) — reference-calibrated game feel, 3D models & stages, roster, online lobbies**
 
 ---
@@ -67,7 +67,7 @@ Yes. Copyright protects a game's *expression* (its art, music, characters, story
 
 ### Option A — download a build (no tools needed)
 
-Grab the latest build for your OS from the [**Releases**](https://github.com/Gisleno-bit/overframe/releases) page:
+Grab the latest build for your OS from the [**Releases**](https://github.com/Gisleno-bit/OverFrame/releases) page:
 
 - **Windows** → `overframe-windows-x86_64.zip` → unzip → run **`overframe.exe`**.
 - **macOS** → `overframe-macos-arm64.tar.gz`.
@@ -261,6 +261,14 @@ overframe --export-glb kestrel kestrel.glb     # rig for Blender
   game works with players.
 - **Fase 4 — launch.** Ship free on Steam (Early Access); community tournament
   support.
+
+## Team and references
+
+- **Espartaco** ([Gisleno-bit](https://github.com/Gisleno-bit)) — production, priorities, players and feedback.
+- **ChatGPT — visual direction**: characters, stage, palettes, identity/HUD and the animation/pose direction, delivered as specifications under `docs/art/` and reviewed against the evidence branch.
+- **Claude — code**: simulation, renderer, spec loader, captures, exports, CI and tests.
+
+Both study the same references for how a platform fighter moves and when it hits — [FightCore](https://www.fightcore.gg/) (Melee frame data with per-move animations and hitbox views), [Dragdown's RoA2 frame data](https://dragdown.wiki/wiki/RoA2/Frame_Data) and [SSBWiki](https://www.ssbwiki.com/) — as orientation for rhythm and contact poses; every number and asset in OVERFRAME stays original. Roles, the review loop and how references become poses: [`docs/art/ROLES.md`](docs/art/ROLES.md).
 
 ## Contributing
 

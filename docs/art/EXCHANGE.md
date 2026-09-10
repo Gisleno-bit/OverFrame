@@ -4,7 +4,7 @@ Estado de esta entrega: especificación propuesta; no implementación ni aprobac
 
 ## Autoridad y orden de lectura
 
-1. Leer `https://raw.githubusercontent.com/Gisleno-bit/overframe/visual-evidence/PROJECT_STATUS.json`.
+1. Leer `https://raw.githubusercontent.com/Gisleno-bit/OverFrame/visual-evidence/PROJECT_STATUS.json`.
 2. Comparar `source_sha` con el SHA actual de `main`. Si difieren: revisión histórica, nunca «estado actual».
 3. Leer manifiesto, specs y fuente por SHA completo. Las imágenes se leen desde `evidence_commit`, no desde una URL móvil de main.
 4. Si falta estado, manifiesto, imágenes o coincidencia de SHA: se puede especificar; no aprobar la implementación.
@@ -30,6 +30,7 @@ No existe todavía ese contrato en el repositorio accesible: Claude debe crearlo
 | visual-evidence | builds/.../ui/ | selección y HUD reales |
 | visual-evidence | builds/.../runtime/ | frame-data.csv, characters.json, stages.json |
 | main | docs/art/reviews/<source_sha>.md | Correcciones contra evidencia concreta |
+| main | docs/art/ROLES.md | Roles (ChatGPT = dirección visual, Claude = código) y referencias de animación/movimientos |
 
 No modificar el brief de Kestrel ni B/C/D/E. Esta especificación es un documento nuevo para la vía procedural. Los JSON son de autoría; no se exige un lector JSON dentro del ejecutable. Claude puede traducirlos a constructores Rust.
 

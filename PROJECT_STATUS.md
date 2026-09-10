@@ -8,12 +8,16 @@ the CI run that builds it).
 
 | What | Where | Written by |
 |---|---|---|
-| Latest CI attempt + latest fully-passing build | `https://raw.githubusercontent.com/Gisleno-bit/overframe/visual-evidence/PROJECT_STATUS.json` | CI (`.github/workflows/visual-evidence.yml`) |
+| Latest CI attempt + latest fully-passing build | `https://raw.githubusercontent.com/Gisleno-bit/OverFrame/visual-evidence/PROJECT_STATUS.json` | CI (`.github/workflows/visual-evidence.yml`) |
 | Evidence of one run (images, runtime exports, manifest) | `visual-evidence` branch: `builds/<source_sha>/attempt-<run_id>-<run_attempt>/` | CI |
 | Art specifications (JSON is the numeric source) | `docs/art/procedural/` on `main` | ChatGPT (spec) / Claude (implementation notes) |
 | Capture cameras, poses and fixtures | `docs/art/capture-suite.json` on `main` | Claude |
 | Review notes against one run | `docs/art/reviews/<source_sha>.md` on `main` | ChatGPT |
 | The exchange contract itself | `docs/art/EXCHANGE.md` | agreed |
+| Who does what, and the animation/move references | `docs/art/ROLES.md` | agreed |
+
+The repository must be **public** for the raw URLs above to answer; a
+private repository returns 404 to anyone without a token.
 
 Read order for a reviewer: `PROJECT_STATUS.json` → compare `source_sha` with
 the current `main` HEAD → open `manifest.json` of that attempt → read images

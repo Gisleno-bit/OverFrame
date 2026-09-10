@@ -43,7 +43,7 @@ jobs:
       - name: Decide whether this run may publish
         id: mode
         run: |
-          if [ "${{ github.event_name }}" != "pull_request" ] && [ "${{ github.repository }}" = "Gisleno-bit/overframe" ]; then
+          if [ "${{ github.event_name }}" != "pull_request" ] && [ "${{ github.repository_owner }}" = "Gisleno-bit" ]; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
             echo "publish=false" >> "$GITHUB_OUTPUT"
