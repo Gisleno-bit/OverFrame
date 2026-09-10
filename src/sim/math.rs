@@ -103,6 +103,12 @@ pub struct Rng {
 }
 
 impl Rng {
+    /// The generator's raw state, for the rollback checksum.
+    #[inline]
+    pub fn state(&self) -> u32 {
+        self.state
+    }
+
     pub fn new(seed: u32) -> Self {
         // Avoid a zero state, which xorshift cannot escape.
         Rng {

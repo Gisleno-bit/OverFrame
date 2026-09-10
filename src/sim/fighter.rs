@@ -35,6 +35,53 @@ pub enum GetupKind {
     Attack,
 }
 
+impl State {
+    /// A stable `(discriminant, payload)` pair for the rollback checksum.
+    /// Two states that differ in any way must produce different codes, so a
+    /// desync in a state *or its payload* is always detected.
+    pub fn code(&self) -> (u32, u32) {
+        match *self {
+            State::Stand => (0, 0),
+            State::Walk => (1, 0),
+            State::Crouch => (2, 0),
+            State::Dash => (3, 0),
+            State::Run => (4, 0),
+            State::RunTurn => (5, 0),
+            State::JumpSquat => (6, 0),
+            State::Air => (7, 0),
+            State::LandLag { total } => (8, total),
+            State::Waveland => (9, 0),
+            State::Attack { id, aerial } => (10, id as u32 * 2 + u32::from(aerial)),
+            State::Shield => (11, 0),
+            State::ShieldStun { total } => (12, total),
+            State::ShieldDrop => (13, 0),
+            State::Roll { dir } => (14, dir.to_bits()),
+            State::Spotdodge => (15, 0),
+            State::Airdodge => (16, 0),
+            State::Helpless => (17, 0),
+            State::Grab => (18, 0),
+            State::Hold => (19, 0),
+            State::Grabbed => (20, 0),
+            State::Throw { id } => (21, id as u32),
+            State::Tech { dir } => (22, dir.to_bits()),
+            State::Getup { kind } => (
+                23,
+                match kind {
+                    GetupKind::Stand => 0,
+                    GetupKind::Roll { dir } => dir.to_bits(),
+                    GetupKind::Attack => 1,
+                },
+            ),
+            State::Rebound { total } => (24, total),
+            State::LedgeGrab => (25, 0),
+            State::LedgeAction { kind } => (26, kind as u32),
+            State::Hitstun { tumble } => (27, u32::from(tumble)),
+            State::Knockdown => (28, 0),
+            State::Dead => (29, 0),
+        }
+    }
+}
+
 /// The fighter's current action.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum State {

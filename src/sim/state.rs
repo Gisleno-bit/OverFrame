@@ -132,38 +132,106 @@ impl GameState {
         }
     }
 
-    /// A deterministic checksum of the gameplay-relevant state. Used by the
-    /// GGRS `SyncTest` to prove that save→load→re-simulate reproduces the exact
-    /// same state (i.e. the simulation is rollback-safe).
+    /// A deterministic checksum of **every** piece of state that can affect a
+    /// future tick. Used by the GGRS `SyncTest` to prove that save → load →
+    /// re-simulate reproduces the exact same state, so it has to be complete:
+    /// a field left out here is a desync the test cannot see.
+    ///
+    /// Deliberately excluded (presentation only, never read by `step`):
+    /// `fx`, `camera_shake`, `hitstop_flash`, `anim_flash`, `last_hit_frame`,
+    /// `palette`, and `ledge_blocked` (recomputed from scratch every tick).
+    /// `tests/determinism.rs` checks field by field that everything else is in.
     pub fn checksum(&self) -> u128 {
-        // FNV-1a over the meaningful fields.
-        let mut h: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
-        let prime: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
-        let mix = |v: u32, h: &mut u128| {
-            for b in v.to_le_bytes() {
-                *h ^= b as u128;
-                *h = h.wrapping_mul(prime);
-            }
-        };
-        mix(self.frame as u32, &mut h);
+        let mut h = Fnv::new();
+        h.u64(self.frame);
+        h.u32(self.rng.state());
+        h.u32(self.stage.id as u32);
+        h.opt_usize(self.match_over);
+        h.u32(self.config.stocks as u32);
+        h.u32(self.config.time_limit_secs);
+
         for f in &self.fighters {
-            mix(f.pos.x.to_bits(), &mut h);
-            mix(f.pos.y.to_bits(), &mut h);
-            mix(f.vel.x.to_bits(), &mut h);
-            mix(f.vel.y.to_bits(), &mut h);
-            mix(f.percent.to_bits(), &mut h);
-            mix(f.facing.to_bits(), &mut h);
-            mix(f.stocks as u32, &mut h);
-            mix(f.state_frame, &mut h);
-            mix(f.intangible, &mut h);
-            mix(f.hitstun_timer, &mut h);
+            h.u32(f.character.id as u32);
+            h.u32(f.port as u32);
+            // --- body ---
+            h.vec2(f.pos);
+            h.vec2(f.vel);
+            h.f32(f.facing);
+            h.bool(f.grounded);
+            h.opt_usize(f.support);
+            h.vec2(f.prev_pos);
+            // --- action ---
+            let (tag, payload) = f.state.code();
+            h.u32(tag);
+            h.u32(payload);
+            h.u32(f.state_frame);
+            h.bool(f.already_hit);
+            // --- jumps / fall ---
+            h.u32(f.jumps_left as u32);
+            h.bool(f.fastfalling);
+            h.bool(f.jump_held_at_squat_start);
+            h.u32(f.coyote);
+            // --- damage / stocks ---
+            h.f32(f.percent);
+            h.u32(f.stocks as u32);
+            h.u32(f.respawn_timer);
+            // --- input memory (gates presses, flicks and SDI) ---
+            h.u32(f.prev_buttons as u32);
+            h.f32(f.prev_cstick_len);
+            h.vec2(f.stick_last);
+            h.vec2(f.prev_stick);
+            h.u32(f.stick_flick);
+            // --- defence ---
+            h.f32(f.shield_health);
+            h.u32(f.intangible);
+            h.u32(f.hitlag);
+            h.u32(f.hitstun_timer);
+            h.u32(f.tech_lockout);
+            h.u32(f.tech_armed);
+            h.vec2(f.airdodge_dir);
+            h.bool(f.lcancel_armed);
+            // --- knockback ---
+            h.vec2(f.kb_vel);
+            h.f32(f.kb_fall);
+            h.bool(f.ground_stun);
+            h.bool(f.meteor);
+            match f.pending_launch {
+                Some((kb, angle)) => {
+                    h.u32(1);
+                    h.f32(kb);
+                    h.f32(angle);
+                }
+                None => h.u32(0),
+            }
+            // --- ledge ---
+            h.opt_usize(f.ledge);
+            h.u32(f.ledge_regrab_cd);
+            // --- grabs ---
+            h.opt_usize(f.grabbing);
+            h.opt_usize(f.grabbed_by);
+            h.u32(f.grab_timer);
+            h.bool(f.grab_dash);
+            h.u32(f.pummel_cd);
+            // --- attacks ---
+            h.u32(f.charge);
+            h.bool(f.charge_armed);
+            for slot in &f.stale {
+                h.u32(match slot {
+                    Some(id) => *id as u32 + 1,
+                    None => 0,
+                });
+            }
         }
+
         for p in &self.projectiles {
-            mix(p.pos.x.to_bits(), &mut h);
-            mix(p.pos.y.to_bits(), &mut h);
-            mix(p.life, &mut h);
+            h.vec2(p.pos);
+            h.vec2(p.vel);
+            h.f32(p.facing);
+            h.u32(p.life);
+            h.u32(p.owner as u32);
+            h.bool(p.active);
         }
-        h
+        h.finish()
     }
 
     /// Advance one tick.
@@ -822,5 +890,68 @@ impl GameState {
                 who,
             });
         }
+    }
+}
+
+/// FNV-1a over the simulation's fields, for [`GameState::checksum`].
+struct Fnv(u128);
+
+impl Fnv {
+    const PRIME: u128 = 0x0000_0000_0100_0000_0000_0000_0000_013b;
+
+    fn new() -> Self {
+        Fnv(0x6c62_272e_07bb_0142_62b8_2175_6295_c58d)
+    }
+    #[inline]
+    fn byte(&mut self, b: u8) {
+        self.0 ^= b as u128;
+        self.0 = self.0.wrapping_mul(Self::PRIME);
+    }
+    #[inline]
+    fn u32(&mut self, v: u32) {
+        for b in v.to_le_bytes() {
+            self.byte(b);
+        }
+    }
+    #[inline]
+    fn u64(&mut self, v: u64) {
+        for b in v.to_le_bytes() {
+            self.byte(b);
+        }
+    }
+    /// `f32` by its bits, with every NaN normalised so two NaNs never look
+    /// different (and `-0.0` never differs from `0.0`).
+    #[inline]
+    fn f32(&mut self, v: f32) {
+        let bits = if v.is_nan() {
+            0x7fc0_0000
+        } else if v == 0.0 {
+            0
+        } else {
+            v.to_bits()
+        };
+        self.u32(bits);
+    }
+    #[inline]
+    fn vec2(&mut self, v: Vec2) {
+        self.f32(v.x);
+        self.f32(v.y);
+    }
+    #[inline]
+    fn bool(&mut self, v: bool) {
+        self.byte(u8::from(v));
+    }
+    #[inline]
+    fn opt_usize(&mut self, v: Option<usize>) {
+        match v {
+            Some(i) => {
+                self.byte(1);
+                self.u64(i as u64);
+            }
+            None => self.byte(0),
+        }
+    }
+    fn finish(self) -> u128 {
+        self.0
     }
 }
