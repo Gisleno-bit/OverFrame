@@ -1,0 +1,284 @@
+{
+  "schema_version": 1,
+  "character_id": "kestrel",
+  "status": "direction_ready_implementation_and_visual_review_pending",
+  "source_sha": "904644d91b0bc2d1f7b6a2fa789068dcad7b24b5",
+  "evidence_commit": "aa06eec465099404a1782c2988feea16350b0a71",
+  "runtime_actions": "runtime/frame-data.csv",
+  "intent": "Angular courier: direct purposeful strikes, a compact guard, asymmetric counterbalance and fast readable recovery. Scarf and crest are ornaments, never contact limbs.",
+  "timing_contract": {
+    "authority": "Runtime state_frame, hitlag and after_step action/variant export; no combat values originate in this file.",
+    "anticipation_fraction": "Authored fraction of available inactive startup, not a measured reference-game ratio. If no inactive sample exists, apply contact immediately. Never add a frame.",
+    "active": "Contact pose takes precedence over idle blending. Solve the named contact piece in world space after body and facing transforms, against the existing hit region.",
+    "recovery": "Begins after the real last active tick; honor hitlag freezes, landing transitions and any real late-active interval.",
+    "variants": "Cover the full exported action/variant set, including charged_max and jab2 after_jab1_hit; use both facings."
+  },
+  "geometry_contract": {
+    "units": "Existing world units; no scaling, bone-length changes or combat-data edits.",
+    "contact": "Measure transformed piece geometry against runtime geometry; report signed gap/intersection and the actual contact piece. If unreachable, report the constraint rather than moving the hitbox.",
+    "special_cases": "Projectile emission, radial effects and throw release use their real runtime events; a missing melee hitbox is not an authoring error.",
+    "extras": "Apply existing closed lag algorithm after the combat pose, on extra bones only."
+  },
+  "reference_review": [
+    {
+      "url": "https://www.fightcore.gg/characters/224/fox/",
+      "accessed": "2026-09-10",
+      "method": "Browser animation inspection of grounded jab, tilt and strong-attack examples plus timing terminology. Used only for separation of windup, readable leading limb and recovery. No numbers/assets copied."
+    },
+    {
+      "url": "https://dragdown.wiki/wiki/RoA2/Frame_Data",
+      "accessed": "2026-09-10",
+      "method": "Read in browser after direct fetch returned 403. Distinguishes startup conventions and active/endlag; OVERFRAME export remains authoritative."
+    },
+    {
+      "url": "https://dragdown.wiki/wiki/RoA2/Ranno",
+      "accessed": "2026-09-10",
+      "method": "Read move-category context and inspected forward-tilt imagery for the separation of kick, guard and counterbalance. These are representative references, not a completed per-move visual reference audit."
+    }
+  ],
+  "reference_audit_status": "Representative study complete; equivalent-reference visual audit of all 22 actions remains open. Directions below are original proposals for implementation, not copied poses or final visual approval.",
+  "actions": [
+    {
+      "action_id": "jab",
+      "contact_bone": "hand_r",
+      "contact_piece_id": "k_hand_r",
+      "pose_family": "punch",
+      "anticipation_fraction": 0.0,
+      "arc": "From the compact forward guard straight out and back along the same short line.",
+      "torso": "Lean through the chest only enough to place the fist in the measured contact region.",
+      "other_hand": "Left fist stays beside the upper chest, below the face.",
+      "recovery": "Immediate contact is permitted: this runtime action has no sampled inactive after_step tick. Never delay its hit."
+    },
+    {
+      "action_id": "jab2",
+      "contact_bone": "hand_l",
+      "contact_piece_id": "k_hand_l",
+      "pose_family": "punch",
+      "anticipation_fraction": 0.5,
+      "arc": "Left hand crosses forward on a shallow rising line as the right hand retracts.",
+      "torso": "Counter-rotate the chest from jab one, keeping the crest readable.",
+      "other_hand": "Right hand returns to guard without hiding the left fist.",
+      "recovery": "Return both hands by separate paths; respect hitlag and the real jab-chain state."
+    },
+    {
+      "action_id": "ftilt",
+      "contact_bone": "foot_r",
+      "contact_piece_id": "k_foot_r",
+      "pose_family": "kick",
+      "anticipation_fraction": 0.6,
+      "arc": "Lift the right knee, extend the sole forward at the runtime hitbox height, then fold the knee back.",
+      "torso": "Counterbalance behind the kick; solve the full hip-knee-ankle chain against contact geometry.",
+      "other_hand": "Both fists frame the chest, with the rear elbow visibly separated.",
+      "recovery": "Retract the shin before lowering the foot; no second unearned extension after the active interval."
+    },
+    {
+      "action_id": "utilt",
+      "contact_bone": "hand_r",
+      "contact_piece_id": "k_hand_r",
+      "pose_family": "uppercut",
+      "anticipation_fraction": 0.6,
+      "arc": "Coil the right fist close to the waist, then cut upward on the forward side of the head.",
+      "torso": "Uncoil upward without stretching bone lengths or dragging the root off its existing transform.",
+      "other_hand": "Left palm guards the chest rather than following the uppercut.",
+      "recovery": "Lower through the outside of the guard; avoid a second overhead strike silhouette."
+    },
+    {
+      "action_id": "dtilt",
+      "contact_bone": "foot_r",
+      "contact_piece_id": "k_foot_r",
+      "pose_family": "low_kick",
+      "anticipation_fraction": 0.6,
+      "arc": "Fold the support knee and skim the right sole forward through the low contact region.",
+      "torso": "Low diagonal from crest to support hip; head remains clear of the knee.",
+      "other_hand": "Near hand guards the chin; far hand extends back as a counterweight.",
+      "recovery": "Fold the striking knee, then rise; respect existing ground support."
+    },
+    {
+      "action_id": "fsmash",
+      "contact_bone": "hand_r",
+      "contact_piece_id": "k_hand_r",
+      "pose_family": "palm_drive",
+      "anticipation_fraction": 0.7,
+      "arc": "Draw the right palm near the rear shoulder, then drive it on a direct forward line through the measured contact region.",
+      "torso": "Chest and hips unfold into one forward diagonal; the visible body mass supports the palm.",
+      "other_hand": "Left hand pulls to the ribs and stays separated from the contact arm.",
+      "recovery": "Recover through the shoulder and bent elbow, without holding a second active-looking thrust. Charging holds the anticipation pose."
+    },
+    {
+      "action_id": "usmash",
+      "contact_bone": "hand_r",
+      "contact_piece_id": "k_hand_r",
+      "pose_family": "overhead_drive",
+      "anticipation_fraction": 0.7,
+      "arc": "Compress the right arm at the chest then thrust upward, palm leading above the crest.",
+      "torso": "Rise from a compact knee bend into an upward torso line.",
+      "other_hand": "Left hand remains lower, framing the abdomen and making the contact hand unambiguous.",
+      "recovery": "Keep the directed palm through the real clean and late active windows, then lower through the outside."
+    },
+    {
+      "action_id": "dsmash",
+      "contact_bone": "foot_r",
+      "contact_piece_id": "k_foot_r",
+      "pose_family": "low_sweep",
+      "anticipation_fraction": 0.65,
+      "arc": "Extend a low right heel from a tightly folded knee into a forward sweep.",
+      "torso": "Sit the hips over the support leg; preserve a readable gap between the arms and torso.",
+      "other_hand": "Front hand guards high and the rear hand counterbalances behind.",
+      "recovery": "Gather the extended leg beneath the body. Do not invent a rear damaging sweep when the runtime has no rear hitbox."
+    },
+    {
+      "action_id": "dash_attack",
+      "contact_bone": "hand_r",
+      "contact_piece_id": "k_hand_r",
+      "pose_family": "running_forearm",
+      "anticipation_fraction": 0.55,
+      "arc": "Drive the bent right forearm ahead of the chest, keeping the leading hand on the contact side.",
+      "torso": "Compact running diagonal; motion comes from the existing simulation displacement.",
+      "other_hand": "Left arm streams behind the torso with its elbow separated from the scarf.",
+      "recovery": "Unfold into the recovery stance without adding visual root travel that disagrees with the fighter position."
+    },
+    {
+      "action_id": "nair",
+      "contact_bone": "foot_r",
+      "contact_piece_id": "k_foot_r",
+      "pose_family": "split_kick",
+      "anticipation_fraction": 0.5,
+      "arc": "Snap the right foot forward while the left knee folds back, then gather both legs.",
+      "torso": "Tilt the torso opposite the right leg to create a single clear diagonal.",
+      "other_hand": "Hands spread at different heights and stay behind the leading sole.",
+      "recovery": "Hold a readable extended sole through all real late-active ticks; gather only after the active interval."
+    },
+    {
+      "action_id": "fair",
+      "contact_bone": "foot_r",
+      "contact_piece_id": "k_foot_r",
+      "pose_family": "rising_kick",
+      "anticipation_fraction": 0.65,
+      "arc": "Fold the right knee beneath the chest, then push the sole forward and slightly up to the actual contact region.",
+      "torso": "Counterlean with the chest while keeping the face directed toward the strike.",
+      "other_hand": "Left hand guards near the face, right hand stays low and behind the knee.",
+      "recovery": "Retract the knee before dropping the foot; avoid raising it farther only after the hitbox disappears."
+    },
+    {
+      "action_id": "bair",
+      "contact_bone": "foot_l",
+      "contact_piece_id": "k_foot_l",
+      "pose_family": "back_kick",
+      "anticipation_fraction": 0.55,
+      "arc": "Look back, coil the left knee, then extend the heel behind the hips toward the rear hitbox.",
+      "torso": "Incline the chest forward to balance the rearward strike, without changing facing in simulation.",
+      "other_hand": "Near hand stays in front of the chest; far hand opens downward.",
+      "recovery": "Fold the rear knee and recover the torso without a second kick."
+    },
+    {
+      "action_id": "uair",
+      "contact_bone": "foot_r",
+      "contact_piece_id": "k_foot_r",
+      "pose_family": "overhead_kick",
+      "anticipation_fraction": 0.6,
+      "arc": "Tuck the right knee close then extend the foot upward into the overhead contact region.",
+      "torso": "Recline enough to clear the leg from the crest silhouette; keep the other knee bent.",
+      "other_hand": "Hands remain below the chest and at different depths.",
+      "recovery": "Fold the knee first; untuck the torso only after the active window."
+    },
+    {
+      "action_id": "dair",
+      "contact_bone": "foot_r",
+      "contact_piece_id": "k_foot_r",
+      "pose_family": "heel_drop",
+      "anticipation_fraction": 0.65,
+      "arc": "Tuck the right heel beneath the hips, then drive it down and slightly forward into the downward hitbox.",
+      "torso": "Upright compact torso with a small counterlean; no root plunge beyond the simulation.",
+      "other_hand": "One hand guards the chest and the other opens backward to reveal the leg.",
+      "recovery": "Retract through the knee after the last active tick; do not turn the noncontact leg into a second strike."
+    },
+    {
+      "action_id": "special_n",
+      "contact_bone": "hand_r",
+      "contact_piece_id": "k_hand_r",
+      "pose_family": "projectile_release",
+      "anticipation_fraction": 0.65,
+      "arc": "Gather the right palm to the sternum, then extend it toward the runtime projectile emission line.",
+      "torso": "Face forward with a small recoil confined to the pose.",
+      "other_hand": "Left hand braces the upper chest, below the emission line.",
+      "recovery": "Release is evidenced by the real projectile spawn. Do not draw or require a fictitious melee hitbox, or chase the moving projectile with the hand."
+    },
+    {
+      "action_id": "special_up",
+      "contact_bone": "hand_r",
+      "contact_piece_id": "k_hand_r",
+      "pose_family": "rising_drive",
+      "anticipation_fraction": 0.6,
+      "arc": "Gather the right arm at the chest and lead the ascent with the palm through the upper contact region.",
+      "torso": "Long upward diagonal following the existing launch trajectory; knees trail at different heights.",
+      "other_hand": "Left hand stays near the ribs, separated from the scarf.",
+      "recovery": "Transition through the existing recovery state. Do not introduce extra flight or drift."
+    },
+    {
+      "action_id": "special_side",
+      "contact_bone": "hand_r",
+      "contact_piece_id": "k_hand_r",
+      "pose_family": "lateral_drive",
+      "anticipation_fraction": 0.65,
+      "arc": "Coil the right elbow back then extend the palm toward the side-special contact region.",
+      "torso": "Low forward diagonal with the head above the leading forearm.",
+      "other_hand": "Left hand trails behind the hip rather than overlapping the lead arm.",
+      "recovery": "Use the existing displacement and active duration, then recover through a bent elbow."
+    },
+    {
+      "action_id": "special_down",
+      "contact_bone": "chest",
+      "contact_piece_id": "k_chest",
+      "pose_family": "radial_pulse",
+      "anticipation_fraction": 0.0,
+      "arc": "Open the elbows from a compact guard into a short symmetric pulse around the chest.",
+      "torso": "Center the body in the actual radial effect; keep crest and scarf outlines unobscured.",
+      "other_hand": "Both hands frame the pulse at different depths; neither pretends to define its whole radius.",
+      "recovery": "Zero startup means immediate visual response. Align the real radial effect with its runtime origin; do not force a hand to its boundary."
+    },
+    {
+      "action_id": "throw_f",
+      "contact_bone": "hand_r",
+      "contact_piece_id": "k_hand_r",
+      "pose_family": "throw_forward",
+      "anticipation_fraction": 0.65,
+      "arc": "Keep the held target visibly connected to the forward hands, then open the right palm toward the release direction.",
+      "torso": "Transfer the chest forward during release while the support foot stays coherent.",
+      "other_hand": "Left hand guides the hold, then withdraws toward the chest.",
+      "recovery": "Capture the actual grab/release event and victim. Do not fabricate an ordinary hitbox if the throw uses a direct release event."
+    },
+    {
+      "action_id": "throw_b",
+      "contact_bone": "hand_l",
+      "contact_piece_id": "k_hand_l",
+      "pose_family": "throw_backward",
+      "anticipation_fraction": 0.65,
+      "arc": "Guide the held target across the body and open the left hand backward at release.",
+      "torso": "Twist the chest and glance back; use the actual runtime facing and victim position.",
+      "other_hand": "Right hand guides the crossing target, then opens away from the release line.",
+      "recovery": "Recover from the twist without visually teleporting the held fighter or inventing a second strike."
+    },
+    {
+      "action_id": "throw_u",
+      "contact_bone": "hand_r",
+      "contact_piece_id": "k_hand_r",
+      "pose_family": "throw_upward",
+      "anticipation_fraction": 0.65,
+      "arc": "Lift the held target with both hands, right palm leading the upward release.",
+      "torso": "Extend upward from a compact bend, with head offset enough to keep the hands visible.",
+      "other_hand": "Left hand supports below the right and opens away at release.",
+      "recovery": "Lower the hands outside the crest; evidence must show the real release event and target."
+    },
+    {
+      "action_id": "throw_d",
+      "contact_bone": "hand_r",
+      "contact_piece_id": "k_hand_r",
+      "pose_family": "throw_downward",
+      "anticipation_fraction": 0.65,
+      "arc": "Guide the held target downward in front, right hand finishing above the release point.",
+      "torso": "Fold at hips and knees toward the actual target position, without sinking the feet.",
+      "other_hand": "Left hand releases early and returns beside the chest.",
+      "recovery": "Rise only after the actual release; avoid a false ground impact when the runtime does not create one."
+    }
+  ]
+}
