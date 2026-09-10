@@ -1,0 +1,1783 @@
+{
+  "schema_version": 1,
+  "source_sha": "f4591d95fa93bfd501b431ad76a94b53ba41dcae",
+  "version": "0.6.0",
+  "run_id": "34529840558",
+  "run_attempt": "1",
+  "utc": "2026-09-10T21:03:19Z",
+  "platform": {
+    "runner_os": "Linux",
+    "runner_arch": "X64",
+    "image": "ubuntu24",
+    "python": "3.12.3"
+  },
+  "renderer": {
+    "kind": "game3d",
+    "description": "macroquad 0.4 / miniquad OpenGl; GL version string: 4.5 (Compatibility Profile) Mesa 25.2.8-0ubuntu0.24.04.2",
+    "context": "Xvfb + Mesa llvmpipe (software GL); validates shape/colour, not GPU performance",
+    "window": [
+      1920,
+      1080
+    ],
+    "outline_widths_world_units": [
+      [
+        "turnaround",
+        0.08
+      ],
+      [
+        "scenes",
+        0.28
+      ]
+    ]
+  },
+  "capture_suite": "procedural-v1",
+  "tool": "overframe 0.6.0 --capture",
+  "spec_sha256": {
+    "docs/art/procedural/FORMAT.md": "37d93986f40fcd550def94a51b21909e951960e26bc10ff8e9e15609fc07ff3c",
+    "docs/art/procedural/kestrel.json": "affc3b9afc9ecff3b7e7327c39f0a198f374fbf740154c5b9b004b50f6da3a21",
+    "docs/art/procedural/boulder.json": "6fdd158699580755ff4b6d39bfdd8f2fa915caa59a6b4335cf18f2facf1b1c0e",
+    "docs/art/procedural/viper.json": "d319fd2d0c80c9ae7e1f984359ed2ced60cee8c39f86456cbea31114044b7746",
+    "docs/art/procedural/trama.json": "e6a83d249139b7558bca916e15f49166fdb35299948e6ed07fe34c97424e4aaa",
+    "docs/art/procedural/palettes.json": "b0d2ff2c00519eebf4aea6be9d6f6fc0e69d65b7e812c5b18d4b142f2de9767e",
+    "docs/art/procedural/lattice.json": "34a05d48bf00edbc322676efba3d6436a1d210057b83705bd03e007442a1f1a1",
+    "docs/art/capture-suite.json": "7a2c22b0d5f487c35fd1d4a6a3072092dc80804db38f97d791713c90bdfb468f",
+    "docs/art/fixtures/idle-v1.json": "957b10275270a08f11961cf9720d04e9a1e763e24da3d5d0958f61fcfbe063a3",
+    "docs/art/fixtures/combat-v1.json": "d8c51f0508e688fbe5afe666628d5b24e27371f82b88afcc2c668fd76ca0eb0f"
+  },
+  "checks": {
+    "fmt": {
+      "command": "cargo fmt --all -- --check",
+      "result": "pass"
+    },
+    "clippy": {
+      "command": "cargo clippy --all-targets --all-features -- -D warnings",
+      "result": "pass"
+    },
+    "tests": {
+      "command": "cargo test --all-features",
+      "result": "pass",
+      "passed": 110,
+      "failed": 0
+    },
+    "build": {
+      "command": "cargo build --release",
+      "result": "pass"
+    },
+    "capture": {
+      "command": "xvfb-run -a -s '-screen 0 1920x1080x24' target/release/overframe --capture out --sha <sha>",
+      "result": "pass"
+    }
+  },
+  "triangles": {
+    "budget": {
+      "character": 3000,
+      "stage": 6000
+    },
+    "characters": [
+      {
+        "character_id": "kestrel",
+        "triangles": 1104
+      },
+      {
+        "character_id": "boulder",
+        "triangles": 1488
+      },
+      {
+        "character_id": "viper",
+        "triangles": 1480
+      }
+    ],
+    "stage_visible": 2386
+  },
+  "files": [
+    {
+      "path": "characters/kestrel/combat-size.png",
+      "bytes": 19285,
+      "sha256": "fe4aab745205738c8c80d9cce620ce9770b24c7c7391b05b091299774c6e3210",
+      "width": 640,
+      "height": 180,
+      "kind": "game3d",
+      "tick": 120,
+      "fixture": "idle-v1",
+      "camera": {
+        "cells": [
+          {
+            "camera": {
+              "eye": [
+                -45.0,
+                31.499998092651367,
+                120.0
+              ],
+              "orthographic_height": 75.0,
+              "orthographic_width": 133.3333282470703,
+              "pixels_per_unit": 2.4000000953674316,
+              "projection": "orthographic",
+              "target": [
+                -45.0,
+                31.499998092651367,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "projected_height_px": 72.0,
+            "scale_px_per_unit": 2.4000000953674316
+          },
+          {
+            "camera": {
+              "eye": [
+                -45.0,
+                18.899999618530273,
+                120.0
+              ],
+              "orthographic_height": 45.0,
+              "orthographic_width": 80.0,
+              "pixels_per_unit": 4.0,
+              "projection": "orthographic",
+              "target": [
+                -45.0,
+                18.899999618530273,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "projected_height_px": 120.0,
+            "scale_px_per_unit": 4.0
+          }
+        ],
+        "player": 0
+      },
+      "note": "idle fixture, real stage, no HUD"
+    },
+    {
+      "path": "characters/kestrel/contact-dair.png",
+      "bytes": 67995,
+      "sha256": "4eafe01c350f394e66abda9411e9c04ceb5a333ed7bf6bea5345d6e057a9774f",
+      "width": 1536,
+      "height": 512,
+      "kind": "game3d",
+      "camera": {
+        "action_id": "dair",
+        "cells": [
+          {
+            "camera": {
+              "eye": [
+                10.0,
+                80.19998931884766,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                10.0,
+                80.19998931884766,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": null,
+            "hitbox_active": false,
+            "hitbox_id": "",
+            "hitlag_remaining": 0,
+            "radius": null,
+            "state_frame": 6,
+            "tick_index": 13,
+            "which": "last inactive"
+          },
+          {
+            "camera": {
+              "eye": [
+                10.0,
+                81.79998779296875,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                10.0,
+                81.79998779296875,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": [
+              8.0,
+              58.79998779296875
+            ],
+            "hitbox_active": true,
+            "hitbox_id": "clean",
+            "hitlag_remaining": 0,
+            "radius": 9.0,
+            "state_frame": 7,
+            "tick_index": 14,
+            "which": "first active"
+          },
+          {
+            "camera": {
+              "eye": [
+                10.0,
+                82.29998016357422,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                10.0,
+                82.29998016357422,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": null,
+            "hitbox_active": false,
+            "hitbox_id": "",
+            "hitlag_remaining": 0,
+            "radius": null,
+            "state_frame": 12,
+            "tick_index": 19,
+            "which": "first after last active"
+          }
+        ],
+        "sample_phase": "after_step",
+        "variant_id": "fullhop"
+      },
+      "note": "values from the runtime exporter (frame-data.csv)"
+    },
+    {
+      "path": "characters/kestrel/contact-fair.png",
+      "bytes": 76647,
+      "sha256": "a11ad039e2a64e8d39718609c4b96db10598275ec36255db73c226d46bc62b6a",
+      "width": 1536,
+      "height": 512,
+      "kind": "game3d",
+      "camera": {
+        "action_id": "fair",
+        "cells": [
+          {
+            "camera": {
+              "eye": [
+                11.704999923706055,
+                80.19998931884766,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                11.704999923706055,
+                80.19998931884766,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": null,
+            "hitbox_active": false,
+            "hitbox_id": "",
+            "hitlag_remaining": 0,
+            "radius": null,
+            "state_frame": 6,
+            "tick_index": 13,
+            "which": "last inactive"
+          },
+          {
+            "camera": {
+              "eye": [
+                11.920000076293945,
+                81.79998779296875,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                11.920000076293945,
+                81.79998779296875,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": [
+              19.920000076293945,
+              80.79998779296875
+            ],
+            "hitbox_active": true,
+            "hitbox_id": "clean",
+            "hitlag_remaining": 0,
+            "radius": 9.0,
+            "state_frame": 7,
+            "tick_index": 14,
+            "which": "first active"
+          },
+          {
+            "camera": {
+              "eye": [
+                12.329998970031738,
+                83.19998168945312,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                12.329998970031738,
+                83.19998168945312,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": null,
+            "hitbox_active": false,
+            "hitbox_id": "",
+            "hitlag_remaining": 0,
+            "radius": null,
+            "state_frame": 11,
+            "tick_index": 18,
+            "which": "first after last active"
+          }
+        ],
+        "sample_phase": "after_step",
+        "variant_id": "fullhop"
+      },
+      "note": "values from the runtime exporter (frame-data.csv)"
+    },
+    {
+      "path": "characters/kestrel/contact-fsmash.png",
+      "bytes": 65545,
+      "sha256": "248fb8081d05e3298eb40a47ceb180329e2ac419ceafad345e9940fa0e66c794",
+      "width": 1536,
+      "height": 512,
+      "kind": "game3d",
+      "camera": {
+        "action_id": "fsmash",
+        "cells": [
+          {
+            "camera": {
+              "eye": [
+                10.0,
+                22.0,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                10.0,
+                22.0,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": null,
+            "hitbox_active": false,
+            "hitbox_id": "",
+            "hitlag_remaining": 0,
+            "radius": null,
+            "state_frame": 10,
+            "tick_index": 9,
+            "which": "last inactive"
+          },
+          {
+            "camera": {
+              "eye": [
+                10.0,
+                22.0,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                10.0,
+                22.0,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": [
+              22.0,
+              19.0
+            ],
+            "hitbox_active": true,
+            "hitbox_id": "clean",
+            "hitlag_remaining": 0,
+            "radius": 10.5,
+            "state_frame": 11,
+            "tick_index": 10,
+            "which": "first active"
+          },
+          {
+            "camera": {
+              "eye": [
+                10.0,
+                22.0,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                10.0,
+                22.0,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": null,
+            "hitbox_active": false,
+            "hitbox_id": "",
+            "hitlag_remaining": 0,
+            "radius": null,
+            "state_frame": 14,
+            "tick_index": 13,
+            "which": "first after last active"
+          }
+        ],
+        "sample_phase": "after_step",
+        "variant_id": "cstick"
+      },
+      "note": "values from the runtime exporter (frame-data.csv)"
+    },
+    {
+      "path": "characters/kestrel/contact-ftilt.png",
+      "bytes": 74181,
+      "sha256": "ea1d2f7a11c230321b8ced1652ae018fbe560e4f7382c4f8edfb74bd923ebf1a",
+      "width": 1536,
+      "height": 512,
+      "kind": "game3d",
+      "camera": {
+        "action_id": "ftilt",
+        "cells": [
+          {
+            "camera": {
+              "eye": [
+                10.0,
+                22.0,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                10.0,
+                22.0,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": null,
+            "hitbox_active": false,
+            "hitbox_id": "",
+            "hitlag_remaining": 0,
+            "radius": null,
+            "state_frame": 3,
+            "tick_index": 2,
+            "which": "last inactive"
+          },
+          {
+            "camera": {
+              "eye": [
+                10.0,
+                22.0,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                10.0,
+                22.0,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": [
+              18.0,
+              19.0
+            ],
+            "hitbox_active": true,
+            "hitbox_id": "clean",
+            "hitlag_remaining": 0,
+            "radius": 8.5,
+            "state_frame": 4,
+            "tick_index": 3,
+            "which": "first active"
+          },
+          {
+            "camera": {
+              "eye": [
+                10.0,
+                22.0,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                10.0,
+                22.0,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": null,
+            "hitbox_active": false,
+            "hitbox_id": "",
+            "hitlag_remaining": 0,
+            "radius": null,
+            "state_frame": 7,
+            "tick_index": 6,
+            "which": "first after last active"
+          }
+        ],
+        "sample_phase": "after_step",
+        "variant_id": "ground"
+      },
+      "note": "values from the runtime exporter (frame-data.csv)"
+    },
+    {
+      "path": "characters/kestrel/contact-jab.png",
+      "bytes": 61139,
+      "sha256": "ec84ddab8bb89416372ef0d1d07a2b1996af7bdbd781441918a32671819600db",
+      "width": 1536,
+      "height": 512,
+      "kind": "game3d",
+      "camera": {
+        "action_id": "jab",
+        "cells": [
+          {
+            "camera": {
+              "eye": [
+                10.0,
+                22.0,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                10.0,
+                22.0,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": null,
+            "hitbox_active": false,
+            "hitbox_id": "",
+            "hitlag_remaining": 0,
+            "radius": null,
+            "state_frame": 8,
+            "tick_index": -1,
+            "which": "last inactive"
+          },
+          {
+            "camera": {
+              "eye": [
+                10.0,
+                22.0,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                10.0,
+                22.0,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": [
+              13.0,
+              21.0
+            ],
+            "hitbox_active": true,
+            "hitbox_id": "clean",
+            "hitlag_remaining": 0,
+            "radius": 7.5,
+            "state_frame": 1,
+            "tick_index": 0,
+            "which": "first active"
+          },
+          {
+            "camera": {
+              "eye": [
+                10.0,
+                22.0,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                10.0,
+                22.0,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": null,
+            "hitbox_active": false,
+            "hitbox_id": "",
+            "hitlag_remaining": 0,
+            "radius": null,
+            "state_frame": 3,
+            "tick_index": 2,
+            "which": "first after last active"
+          }
+        ],
+        "sample_phase": "after_step",
+        "variant_id": "ground"
+      },
+      "note": "values from the runtime exporter (frame-data.csv)"
+    },
+    {
+      "path": "characters/kestrel/contact-nair.png",
+      "bytes": 76973,
+      "sha256": "0f6c566aa431ac80abd974a1fbb06ccd3b504163bddc6e7f884d777382ecaa17",
+      "width": 1536,
+      "height": 512,
+      "kind": "game3d",
+      "camera": {
+        "action_id": "nair",
+        "cells": [
+          {
+            "camera": {
+              "eye": [
+                10.0,
+                68.79999542236328,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                10.0,
+                68.79999542236328,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": null,
+            "hitbox_active": false,
+            "hitbox_id": "",
+            "hitlag_remaining": 0,
+            "radius": null,
+            "state_frame": 2,
+            "tick_index": 9,
+            "which": "last inactive"
+          },
+          {
+            "camera": {
+              "eye": [
+                10.0,
+                72.39999389648438,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                10.0,
+                72.39999389648438,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": [
+              12.0,
+              69.39999389648438
+            ],
+            "hitbox_active": true,
+            "hitbox_id": "clean",
+            "hitlag_remaining": 0,
+            "radius": 10.5,
+            "state_frame": 3,
+            "tick_index": 10,
+            "which": "first active"
+          },
+          {
+            "camera": {
+              "eye": [
+                10.0,
+                22.0,
+                120.0
+              ],
+              "orthographic_height": 44.0,
+              "orthographic_width": 44.0,
+              "pixels_per_unit": 11.636363983154297,
+              "projection": "orthographic",
+              "target": [
+                10.0,
+                22.0,
+                0.0
+              ],
+              "up": [
+                0,
+                1,
+                0
+              ]
+            },
+            "center": null,
+            "hitbox_active": false,
+            "hitbox_id": "",
+            "hitlag_remaining": 0,
+            "radius": null,
+            "state_frame": 1,
+            "tick_index": 33,
+            "which": "first after last active"
+          }
+        ],
+        "sample_phase": "after_step",
+        "variant_id": "fullhop"
+      },
+      "note": "values from the runtime exporter (frame-data.csv)"
+    },
+    {
+      "path": "characters/kestrel/palettes.png",
+      "bytes": 55936,
+      "sha256": "ebd940f8dc07869a9f4f75ad1696e5f2cca80bf8c1555098ac0d28e8fc427b1a",
+      "width": 1536,
+      "height": 1024,
+      "kind": "game3d",
+      "camera": {
+        "palette_indices": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "palette_names": [
+          "Coral",
+          "Escarcha",
+          "Azafrán",
+          "Abisal",
+          "Ciruela",
+          "Pino"
+        ],
+        "per_cell": {
+          "eye": [
+            0.0,
+            22.0,
+            120.0
+          ],
+          "orthographic_height": 44.0,
+          "orthographic_width": 44.0,
+          "pixels_per_unit": 11.636363983154297,
+          "projection": "orthographic",
+          "target": [
+            0.0,
+            22.0,
+            0.0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ]
+        },
+        "pose": "rest",
+        "root_yaw_deg": 0
+      }
+    },
+    {
+      "path": "characters/kestrel/silhouette.png",
+      "bytes": 24811,
+      "sha256": "f0fba84ba44ed41bdd6cc79dc4fe069cea19d628ecd649721fe5bba7d51c9a9d",
+      "width": 1024,
+      "height": 1024,
+      "kind": "game3d",
+      "camera": {
+        "cells": [
+          {
+            "root_yaw_deg": 0.0
+          },
+          {
+            "root_yaw_deg": 90.0
+          },
+          {
+            "root_yaw_deg": 180.0
+          },
+          {
+            "root_yaw_deg": 270.0
+          }
+        ],
+        "lag_enabled": false,
+        "per_cell": {
+          "eye": [
+            0.0,
+            22.0,
+            120.0
+          ],
+          "orthographic_height": 44.0,
+          "orthographic_width": 44.0,
+          "pixels_per_unit": 11.636363983154297,
+          "projection": "orthographic",
+          "target": [
+            0.0,
+            22.0,
+            0.0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ]
+        },
+        "pose": "rest",
+        "yaw_convention": "root rotated about +Y by yaw, right-handed (model::math3::M3::rot_y); yaw 0 = fighter faces +X (screen right), 90 = back to camera, 180 = faces -X, 270 = face to camera"
+      },
+      "note": "black object, white ground, unlit, no outline"
+    },
+    {
+      "path": "characters/kestrel/turnaround.png",
+      "bytes": 35092,
+      "sha256": "d19a75fef12395a293c7241096f2dcacf05bdf3fa75563d2abdc5c79ecb77693",
+      "width": 1024,
+      "height": 1024,
+      "kind": "game3d",
+      "camera": {
+        "cells": [
+          {
+            "root_yaw_deg": 0.0
+          },
+          {
+            "root_yaw_deg": 90.0
+          },
+          {
+            "root_yaw_deg": 180.0
+          },
+          {
+            "root_yaw_deg": 270.0
+          }
+        ],
+        "lag_enabled": false,
+        "per_cell": {
+          "eye": [
+            0.0,
+            22.0,
+            120.0
+          ],
+          "orthographic_height": 44.0,
+          "orthographic_width": 44.0,
+          "pixels_per_unit": 11.636363983154297,
+          "projection": "orthographic",
+          "target": [
+            0.0,
+            22.0,
+            0.0
+          ],
+          "up": [
+            0,
+            1,
+            0
+          ]
+        },
+        "pose": "rest",
+        "yaw_convention": "root rotated about +Y by yaw, right-handed (model::math3::M3::rot_y); yaw 0 = fighter faces +X (screen right), 90 = back to camera, 180 = faces -X, 270 = face to camera"
+      },
+      "note": "studio backdrop, stage fighter light"
+    },
+    {
+      "path": "ui/selection.png",
+      "bytes": 121911,
+      "sha256": "1fe10bd09789ffb12be9c42b4d225a6560f85a7bf5af947a8135d05b07f27db3",
+      "width": 1920,
+      "height": 1080,
+      "kind": "game3d",
+      "camera": {
+        "p1": {
+          "character": "kestrel",
+          "palette": 0
+        },
+        "p2": {
+          "character": "kestrel",
+          "palette": 3
+        },
+        "screen": "local versus setup (real menu)"
+      },
+      "note": "window at 1920x1080"
+    },
+    {
+      "path": "scenes/combat-depth.png",
+      "bytes": 366230,
+      "sha256": "5a5d09ba6ac199ce7e0703072e0fc7494d42aa0f4cb08e6f9d0d57c92b1af74f",
+      "width": 1920,
+      "height": 1080,
+      "kind": "game3d",
+      "tick": 120,
+      "fixture": "idle-v1",
+      "camera": {
+        "eye": [
+          0.0,
+          156.5,
+          489.0
+        ],
+        "orthographic_height": 225.0,
+        "orthographic_width": 400.0,
+        "pixels_per_unit": 4.800000190734863,
+        "projection": "orthographic",
+        "target": [
+          0.0,
+          52.5,
+          0.0
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ]
+      },
+      "note": "idle fixture, second angle"
+    },
+    {
+      "path": "scenes/combat-fixed.png",
+      "bytes": 236755,
+      "sha256": "1a7fafe48823dd71a9d657c4d8192259eacdc50864cc35f79a53f50ade441d7c",
+      "width": 1920,
+      "height": 1080,
+      "kind": "game3d",
+      "tick": 120,
+      "fixture": "idle-v1",
+      "camera": {
+        "eye": [
+          0.0,
+          52.5,
+          500.0
+        ],
+        "orthographic_height": 225.0,
+        "orthographic_width": 400.0,
+        "pixels_per_unit": 4.800000190734863,
+        "projection": "orthographic",
+        "target": [
+          0.0,
+          52.5,
+          0.0
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ]
+      },
+      "note": "idle fixture, HUD on"
+    },
+    {
+      "path": "scenes/combat.gif",
+      "bytes": 2776375,
+      "sha256": "a0ae551f917472d52e118ace7b758f9d0fc2f26bcd7f22a8e41ebe1ba1eeaea7",
+      "width": 960,
+      "height": 540,
+      "kind": "game3d",
+      "tick": 0,
+      "fixture": "combat-v1",
+      "camera": {
+        "eye": [
+          0.0,
+          52.5,
+          500.0
+        ],
+        "orthographic_height": 225.0,
+        "orthographic_width": 400.0,
+        "pixels_per_unit": 2.4000000953674316,
+        "projection": "orthographic",
+        "target": [
+          0.0,
+          52.5,
+          0.0
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ]
+      },
+      "note": "60 frames: ticks 0..180 every 3 at 20 fps (60 Hz sim); warmup 64 ticks drawn, not saved"
+    },
+    {
+      "path": "scenes/lattice-fixed.png",
+      "bytes": 231576,
+      "sha256": "959f2b1c05df2744ab7f49d1b0563a71642274dd278c3d08c71f7526832e93b6",
+      "width": 1920,
+      "height": 1080,
+      "kind": "game3d",
+      "camera": {
+        "eye": [
+          0.0,
+          52.5,
+          500.0
+        ],
+        "orthographic_height": 225.0,
+        "orthographic_width": 400.0,
+        "pixels_per_unit": 4.800000190734863,
+        "projection": "orthographic",
+        "target": [
+          0.0,
+          52.5,
+          0.0
+        ],
+        "up": [
+          0,
+          1,
+          0
+        ]
+      },
+      "note": "no players"
+    },
+    {
+      "path": "runtime/characters.json",
+      "bytes": 36392,
+      "sha256": "4398c8073395c1fcc46ce2e6692c0ccddf8f748d286920228c9415a2d08c193c"
+    },
+    {
+      "path": "runtime/frame-data-report.json",
+      "bytes": 13137,
+      "sha256": "bc43d948fe540ea9824a7000bfabb14983b00832ff1385e668ec1da35edd1750"
+    },
+    {
+      "path": "runtime/frame-data.csv",
+      "bytes": 255289,
+      "sha256": "6d38f314c32088b20c071289a2ab2116b579c895d08ba556b0b0c970206f70c8"
+    },
+    {
+      "path": "runtime/stages.json",
+      "bytes": 2646,
+      "sha256": "420379c5cfe2594d6efff4a7bad8bb90dbaf5816e83e004402ff9b12d1484454"
+    }
+  ],
+  "skipped": [],
+  "frame_data_cases": [
+    {
+      "character_id": "kestrel",
+      "action_id": "jab",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 19,
+      "recipe": "t0: attack"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "jab2",
+      "variant_id": "after_jab1_hit",
+      "status": "exported",
+      "rows": 29,
+      "recipe": "target at +11; t0: attack (jab 1 hits); attack re-pressed every 2 ticks from t4"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "ftilt",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 27,
+      "recipe": "t0: stick (0.55,0) + attack"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "utilt",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 25,
+      "recipe": "t0: stick (0,0.55) + attack"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "dtilt",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 29,
+      "recipe": "t0: stick (0,-0.55) + attack"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "fsmash",
+      "variant_id": "cstick",
+      "status": "exported",
+      "rows": 42,
+      "recipe": "t0: c-stick (1,0)"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "fsmash",
+      "variant_id": "charged_max",
+      "status": "exported",
+      "rows": 102,
+      "recipe": "t0..70: stick flick (1,0) + attack held (full charge)"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "usmash",
+      "variant_id": "cstick",
+      "status": "exported",
+      "rows": 42,
+      "recipe": "t0: c-stick (0,1)"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "dsmash",
+      "variant_id": "cstick",
+      "status": "exported",
+      "rows": 41,
+      "recipe": "t0: c-stick (0,-1)"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "dash_attack",
+      "variant_id": "from_dash",
+      "status": "exported",
+      "rows": 38,
+      "recipe": "t0..4: stick (1,0) dash; t4: + attack"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "nair",
+      "variant_id": "fullhop",
+      "status": "exported",
+      "rows": 27,
+      "recipe": "t0..6: jump held (full hop); t8, t10: attack"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "fair",
+      "variant_id": "fullhop",
+      "status": "exported",
+      "rows": 27,
+      "recipe": "t0..6: jump held; t8, t10: stick (0.6,0) + attack"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "bair",
+      "variant_id": "fullhop",
+      "status": "exported",
+      "rows": 27,
+      "recipe": "t0..6: jump held; t8, t10: stick (-0.6,0) + attack"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "uair",
+      "variant_id": "fullhop",
+      "status": "exported",
+      "rows": 27,
+      "recipe": "t0..6: jump held; t8, t10: stick (0,1) + attack"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "dair",
+      "variant_id": "fullhop",
+      "status": "exported",
+      "rows": 27,
+      "recipe": "t0..6: jump held; t8, t10: stick (0,-1) + attack"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "special_n",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 34,
+      "recipe": "t0: special"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "special_up",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 39,
+      "recipe": "t0: stick (0,1) + special"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "special_side",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 42,
+      "recipe": "t0: stick (1,0) + special"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "special_down",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 33,
+      "recipe": "t0: stick (0,-1) + special"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "throw_f",
+      "variant_id": "from_grab",
+      "status": "exported",
+      "rows": 36,
+      "recipe": "target at +10; t0: grab; t12+: stick (1,0)"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "throw_b",
+      "variant_id": "from_grab",
+      "status": "exported",
+      "rows": 41,
+      "recipe": "target at +10; t0: grab; t12+: stick (-1,0)"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "throw_u",
+      "variant_id": "from_grab",
+      "status": "exported",
+      "rows": 36,
+      "recipe": "target at +10; t0: grab; t12+: stick (0,1)"
+    },
+    {
+      "character_id": "kestrel",
+      "action_id": "throw_d",
+      "variant_id": "from_grab",
+      "status": "exported",
+      "rows": 39,
+      "recipe": "target at +10; t0: grab; t12+: stick (0,-1)"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "jab",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 24,
+      "recipe": "t0: attack"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "jab2",
+      "variant_id": "after_jab1_hit",
+      "status": "exported",
+      "rows": 37,
+      "recipe": "target at +11; t0: attack (jab 1 hits); attack re-pressed every 2 ticks from t4"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "ftilt",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 38,
+      "recipe": "t0: stick (0.55,0) + attack"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "utilt",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 37,
+      "recipe": "t0: stick (0,0.55) + attack"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "dtilt",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 36,
+      "recipe": "t0: stick (0,-0.55) + attack"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "fsmash",
+      "variant_id": "cstick",
+      "status": "exported",
+      "rows": 57,
+      "recipe": "t0: c-stick (1,0)"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "fsmash",
+      "variant_id": "charged_max",
+      "status": "exported",
+      "rows": 117,
+      "recipe": "t0..70: stick flick (1,0) + attack held (full charge)"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "usmash",
+      "variant_id": "cstick",
+      "status": "exported",
+      "rows": 57,
+      "recipe": "t0: c-stick (0,1)"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "dsmash",
+      "variant_id": "cstick",
+      "status": "exported",
+      "rows": 51,
+      "recipe": "t0: c-stick (0,-1)"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "dash_attack",
+      "variant_id": "from_dash",
+      "status": "exported",
+      "rows": 50,
+      "recipe": "t0..4: stick (1,0) dash; t4: + attack"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "nair",
+      "variant_id": "fullhop",
+      "status": "exported",
+      "rows": 39,
+      "recipe": "t0..6: jump held (full hop); t8, t10: attack"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "fair",
+      "variant_id": "fullhop",
+      "status": "exported",
+      "rows": 39,
+      "recipe": "t0..6: jump held; t8, t10: stick (0.6,0) + attack"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "bair",
+      "variant_id": "fullhop",
+      "status": "exported",
+      "rows": 39,
+      "recipe": "t0..6: jump held; t8, t10: stick (-0.6,0) + attack"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "uair",
+      "variant_id": "fullhop",
+      "status": "exported",
+      "rows": 39,
+      "recipe": "t0..6: jump held; t8, t10: stick (0,1) + attack"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "dair",
+      "variant_id": "fullhop",
+      "status": "exported",
+      "rows": 39,
+      "recipe": "t0..6: jump held; t8, t10: stick (0,-1) + attack"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "special_n",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 45,
+      "recipe": "t0: special"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "special_up",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 49,
+      "recipe": "t0: stick (0,1) + special"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "special_side",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 54,
+      "recipe": "t0: stick (1,0) + special"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "special_down",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 52,
+      "recipe": "t0: stick (0,-1) + special"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "throw_f",
+      "variant_id": "from_grab",
+      "status": "exported",
+      "rows": 43,
+      "recipe": "target at +10; t0: grab; t12+: stick (1,0)"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "throw_b",
+      "variant_id": "from_grab",
+      "status": "exported",
+      "rows": 48,
+      "recipe": "target at +10; t0: grab; t12+: stick (-1,0)"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "throw_u",
+      "variant_id": "from_grab",
+      "status": "exported",
+      "rows": 43,
+      "recipe": "target at +10; t0: grab; t12+: stick (0,1)"
+    },
+    {
+      "character_id": "boulder",
+      "action_id": "throw_d",
+      "variant_id": "from_grab",
+      "status": "exported",
+      "rows": 46,
+      "recipe": "target at +10; t0: grab; t12+: stick (0,-1)"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "jab",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 16,
+      "recipe": "t0: attack"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "jab2",
+      "variant_id": "after_jab1_hit",
+      "status": "exported",
+      "rows": 26,
+      "recipe": "target at +11; t0: attack (jab 1 hits); attack re-pressed every 2 ticks from t4"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "ftilt",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 23,
+      "recipe": "t0: stick (0.55,0) + attack"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "utilt",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 22,
+      "recipe": "t0: stick (0,0.55) + attack"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "dtilt",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 23,
+      "recipe": "t0: stick (0,-0.55) + attack"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "fsmash",
+      "variant_id": "cstick",
+      "status": "exported",
+      "rows": 39,
+      "recipe": "t0: c-stick (1,0)"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "fsmash",
+      "variant_id": "charged_max",
+      "status": "exported",
+      "rows": 99,
+      "recipe": "t0..70: stick flick (1,0) + attack held (full charge)"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "usmash",
+      "variant_id": "cstick",
+      "status": "exported",
+      "rows": 40,
+      "recipe": "t0: c-stick (0,1)"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "dsmash",
+      "variant_id": "cstick",
+      "status": "exported",
+      "rows": 36,
+      "recipe": "t0: c-stick (0,-1)"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "dash_attack",
+      "variant_id": "from_dash",
+      "status": "exported",
+      "rows": 35,
+      "recipe": "t0..4: stick (1,0) dash; t4: + attack"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "nair",
+      "variant_id": "fullhop",
+      "status": "exported",
+      "rows": 36,
+      "recipe": "t0..6: jump held (full hop); t8, t10: attack"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "fair",
+      "variant_id": "fullhop",
+      "status": "exported",
+      "rows": 33,
+      "recipe": "t0..6: jump held; t8, t10: stick (0.6,0) + attack"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "bair",
+      "variant_id": "fullhop",
+      "status": "exported",
+      "rows": 36,
+      "recipe": "t0..6: jump held; t8, t10: stick (-0.6,0) + attack"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "uair",
+      "variant_id": "fullhop",
+      "status": "exported",
+      "rows": 30,
+      "recipe": "t0..6: jump held; t8, t10: stick (0,1) + attack"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "dair",
+      "variant_id": "fullhop",
+      "status": "exported",
+      "rows": 37,
+      "recipe": "t0..6: jump held; t8, t10: stick (0,-1) + attack"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "special_n",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 29,
+      "recipe": "t0: special"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "special_up",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 36,
+      "recipe": "t0: stick (0,1) + special"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "special_side",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 36,
+      "recipe": "t0: stick (1,0) + special"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "special_down",
+      "variant_id": "ground",
+      "status": "exported",
+      "rows": 29,
+      "recipe": "t0: stick (0,-1) + special"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "throw_f",
+      "variant_id": "from_grab",
+      "status": "exported",
+      "rows": 33,
+      "recipe": "target at +10; t0: grab; t12+: stick (1,0)"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "throw_b",
+      "variant_id": "from_grab",
+      "status": "exported",
+      "rows": 37,
+      "recipe": "target at +10; t0: grab; t12+: stick (-1,0)"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "throw_u",
+      "variant_id": "from_grab",
+      "status": "exported",
+      "rows": 33,
+      "recipe": "target at +10; t0: grab; t12+: stick (0,1)"
+    },
+    {
+      "character_id": "viper",
+      "action_id": "throw_d",
+      "variant_id": "from_grab",
+      "status": "exported",
+      "rows": 35,
+      "recipe": "target at +10; t0: grab; t12+: stick (0,-1)"
+    }
+  ],
+  "capabilities": {
+    "procedural_v1_kestrel": {
+      "state": "verified",
+      "evidence": [
+        "characters/kestrel/turnaround.png",
+        "characters/kestrel/silhouette.png",
+        "src/model/procedural.rs tests: every_shipped_spec_parses_builds_and_fits_its_capsule"
+      ]
+    },
+    "palettes_json_kestrel": {
+      "state": "verified",
+      "evidence": [
+        "characters/kestrel/palettes.png",
+        "test palettes_json_has_six_per_character_in_slot_order"
+      ]
+    },
+    "extras_lag": {
+      "state": "verified",
+      "evidence": [
+        "test extras_lag_follows_the_closed_algorithm (unit); scenes/combat.gif (visual, not measured)"
+      ]
+    },
+    "capture_game3d": {
+      "state": "verified",
+      "evidence": [
+        "characters/kestrel/combat-size.png",
+        "characters/kestrel/contact-dair.png",
+        "characters/kestrel/contact-fair.png",
+        "characters/kestrel/contact-fsmash.png",
+        "characters/kestrel/contact-ftilt.png",
+        "characters/kestrel/contact-jab.png"
+      ],
+      "renderer": "macroquad 0.4 / miniquad OpenGl; GL version string: 4.5 (Compatibility Profile) Mesa 25.2.8-0ubuntu0.24.04.2"
+    },
+    "frame_data_export": {
+      "state": "verified",
+      "evidence": [
+        "runtime/frame-data.csv",
+        "test every_recipe_produces_its_move_on_every_character"
+      ],
+      "cases_exported": 69,
+      "cases_total": 69
+    },
+    "procedural_v1_boulder": {
+      "state": "specified_not_implemented",
+      "evidence": []
+    },
+    "procedural_v1_viper": {
+      "state": "specified_not_implemented",
+      "evidence": []
+    },
+    "trama": {
+      "state": "specified_not_implemented",
+      "evidence": []
+    },
+    "lattice_dressing": {
+      "state": "specified_not_implemented",
+      "evidence": []
+    },
+    "hud_identity": {
+      "state": "specified_not_implemented",
+      "evidence": []
+    },
+    "rollback_checksum_full_coverage": {
+      "state": "verified",
+      "evidence": [
+        "tests/checksum.rs"
+      ]
+    },
+    "windows_gamepad_performance": {
+      "state": "not_verified",
+      "evidence": [],
+      "note": "needs a real Windows machine; CI runs Mesa/llvmpipe"
+    },
+    "tests_passed_total": 110
+  },
+  "size_budget": {
+    "png": 2097152,
+    "gif": 8388608,
+    "run": 25165824,
+    "total_bytes": 4597915
+  },
+  "problems": []
+}
