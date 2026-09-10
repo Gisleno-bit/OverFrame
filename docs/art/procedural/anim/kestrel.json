@@ -23,7 +23,7 @@
     {
       "url": "https://www.fightcore.gg/characters/224/fox/",
       "accessed": "2026-09-10",
-      "method": "Browser animation inspection of grounded jab, tilt and strong-attack examples plus timing terminology. Used only for separation of windup, readable leading limb and recovery. No numbers/assets copied."
+      "method": "Browser animation inspection of grounded jab, tilt, strong-attack, projectile, dash-special and radial-effect examples. Used only for windup/contact/recovery readability; no values or assets copied."
     },
     {
       "url": "https://dragdown.wiki/wiki/RoA2/Frame_Data",
@@ -33,10 +33,10 @@
     {
       "url": "https://dragdown.wiki/wiki/RoA2/Ranno",
       "accessed": "2026-09-10",
-      "method": "Read move-category context and inspected forward-tilt imagery for the separation of kick, guard and counterbalance. These are representative references, not a completed per-move visual reference audit."
+      "method": "Browser imagery and descriptions inspected across normal moves, strong attacks, all five aerials, four specials and four throws. Original Kestrel directions preserve its own runtime mechanics; see the action-by-action reference study."
     }
   ],
-  "reference_audit_status": "Representative study complete; equivalent-reference visual audit of all 22 actions remains open. Directions below are original proposals for implementation, not copied poses or final visual approval.",
+  "reference_audit_status": "Pose-family study completed for all 22 actions; see kestrel-reference-study.md. This is not an exact per-frame reconstruction of the reference games. Implementation and game3d review remain pending.",
   "actions": [
     {
       "action_id": "jab",
