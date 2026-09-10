@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "id": "procedural-v1",
+  "id": "procedural-v1-contact-v2",
   "units": "game_units",
   "kind_required": "game3d",
   "warmup_ticks": 64,
@@ -106,12 +106,40 @@
       "variant_id": "ground"
     },
     {
+      "action_id": "jab2",
+      "variant_id": "after_jab1_hit"
+    },
+    {
       "action_id": "ftilt",
+      "variant_id": "ground"
+    },
+    {
+      "action_id": "utilt",
+      "variant_id": "ground"
+    },
+    {
+      "action_id": "dtilt",
       "variant_id": "ground"
     },
     {
       "action_id": "fsmash",
       "variant_id": "cstick"
+    },
+    {
+      "action_id": "fsmash",
+      "variant_id": "charged_max"
+    },
+    {
+      "action_id": "usmash",
+      "variant_id": "cstick"
+    },
+    {
+      "action_id": "dsmash",
+      "variant_id": "cstick"
+    },
+    {
+      "action_id": "dash_attack",
+      "variant_id": "from_dash"
     },
     {
       "action_id": "nair",
@@ -122,8 +150,48 @@
       "variant_id": "fullhop"
     },
     {
+      "action_id": "bair",
+      "variant_id": "fullhop"
+    },
+    {
+      "action_id": "uair",
+      "variant_id": "fullhop"
+    },
+    {
       "action_id": "dair",
       "variant_id": "fullhop"
+    },
+    {
+      "action_id": "special_n",
+      "variant_id": "ground"
+    },
+    {
+      "action_id": "special_up",
+      "variant_id": "ground"
+    },
+    {
+      "action_id": "special_side",
+      "variant_id": "ground"
+    },
+    {
+      "action_id": "special_down",
+      "variant_id": "ground"
+    },
+    {
+      "action_id": "throw_f",
+      "variant_id": "from_grab"
+    },
+    {
+      "action_id": "throw_b",
+      "variant_id": "from_grab"
+    },
+    {
+      "action_id": "throw_u",
+      "variant_id": "from_grab"
+    },
+    {
+      "action_id": "throw_d",
+      "variant_id": "from_grab"
     }
   ],
   "contact_camera": {
@@ -147,8 +215,13 @@
       "first active tick",
       "first tick after last active"
     ],
-    "overlay": "engine hitbox (sphere) + hurt capsule",
-    "values": "runtime/frame-data.csv rows"
+    "overlay": "Runtime hitbox and hurt capsule; world-space contact-piece bounds, joint, tip, nearest projected mesh point and measured signed separation.",
+    "values": "runtime/frame-data.csv and runtime/contact/<character>/<action>-<variant>.json",
+    "output": [
+      1536,
+      512
+    ],
+    "sample_phase": "Use after_step runtime rows; when the action is active on its first input, the context cell is explicitly pre_step of tick 0, never a fabricated after_step tick -1."
   },
   "fixtures": {
     "idle": "docs/art/fixtures/idle-v1.json",
@@ -184,5 +257,76 @@
       "palette": 3
     }
   },
-  "tool": "overframe --capture <dir> --sha <source_sha>  (Linux CI: xvfb-run -a -s '-screen 0 1920x1080x24')"
+  "tool": "overframe --capture <dir> --sha <source_sha>  (Linux CI: xvfb-run -a -s '-screen 0 1920x1080x24')",
+  "contact_actions_note": "Baseline inventory for comparison. Required coverage is every action/variant in the current runtime frame-data-report.json for each selected character; an omitted declaration must not reduce coverage.",
+  "contact_wide_camera": {
+    "output": [
+      2048,
+      1024
+    ],
+    "cell": [
+      512,
+      512
+    ],
+    "grid": [
+      4,
+      2
+    ],
+    "eye": [
+      "root.x@anchor + 10*facing",
+      "root.y@anchor + 22",
+      120
+    ],
+    "target": [
+      "root.x@anchor + 10*facing",
+      "root.y@anchor + 22",
+      0
+    ],
+    "up": [
+      0,
+      1,
+      0
+    ],
+    "orthographic_height": 88,
+    "rows_facing": [
+      1,
+      -1
+    ],
+    "cells": [
+      "last inactive tick",
+      "first active tick",
+      "last active tick",
+      "first tick after last active"
+    ],
+    "anchor": "First active tick for a fighter hitbox; first projectile spawn or throw start for the explicit exceptions below.",
+    "camera_rule": "One fixed camera for all four cells of each facing row. No per-pose fit, scale change or automatic recentering.",
+    "naming": "characters/<character>/contact-<action>[-<nonprimary-variant>]-wide.png",
+    "overlay": "Same diagnostics as the primary sheet. Record every camera, selected tick, sample phase and facing in capture-index.json."
+  },
+  "contact_exceptions": {
+    "projectile_primary": [
+      "before spawn",
+      "projectile spawned",
+      "after move"
+    ],
+    "projectile_wide": [
+      "before spawn",
+      "projectile spawned",
+      "projectile in flight",
+      "after move"
+    ],
+    "throw_primary": [
+      "before throw",
+      "throw start",
+      "after throw"
+    ],
+    "throw_wide": [
+      "before throw",
+      "throw start",
+      "release",
+      "after throw"
+    ],
+    "contract": "Label real events explicitly. A projectile still alive after the move is not an inactive projectile. Throws have no invented melee hitbox. Radial fields are effect geometry, not limb reach."
+  },
+  "contact_render_contract": "Diagnostics must describe the exact pose and root drawn, including facing interpolation. Isolate renderer history per recipe/facing, reconstruct sampled state deterministically, and record any explicit diagnostic reset; never compare a sim-facing measurement with an eased-facing mesh. Active intervals include the true late-active end."
 }
