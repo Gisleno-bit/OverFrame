@@ -16,7 +16,7 @@
   "geometry_contract": {
     "units": "Existing world units; no scaling, bone-length changes or combat-data edits.",
     "contact": "Measure transformed piece geometry against runtime geometry; report signed gap/intersection and the actual contact piece. If unreachable, report the constraint rather than moving the hitbox.",
-    "special_cases": "Projectile emission, radial effects and throw release use their real runtime events; a missing melee hitbox is not an authoring error.",
+    "special_cases": "Projectile emission, radial effects and throw release use their real runtime events; a missing melee hitbox is not an authoring error. An exception never suppresses an additional real fighter hitbox: if a move both emits a projectile and later exposes a fighter hitbox, preserve and measure both events with the designated contact piece.",
     "extras": "Apply existing closed lag algorithm after the combat pose, on extra bones only."
   },
   "reference_review": [
