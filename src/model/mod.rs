@@ -7,11 +7,13 @@
 pub mod anim;
 pub mod camera;
 pub mod characters;
+pub mod contact;
 pub mod lighting;
 pub mod math3;
 pub mod mesh;
 pub mod palettes;
 pub mod procedural;
+pub mod render_eval;
 pub mod rig;
 pub mod stage3d;
 

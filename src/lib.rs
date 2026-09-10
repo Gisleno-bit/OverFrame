@@ -37,6 +37,8 @@ pub mod netcode;
 #[cfg(feature = "headless")]
 pub mod headless;
 
+/// The declared evidence suite (`docs/art/capture-suite.json`), strictly parsed.
+pub mod capture_suite;
 /// A scripted demo match shared by the headless GIF tool and the game's attract
 /// mode, so both show the same choreography of movement tech and a KO.
 pub mod demo;

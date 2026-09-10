@@ -13,7 +13,7 @@ use crate::model::characters::CharacterModel;
 use crate::model::lighting::{shade_static, slot, Light, Tint};
 use crate::model::math3::{v3, Xf, M3, V3};
 use crate::model::mesh::MeshData;
-use crate::model::procedural::ExtrasState;
+use crate::model::render_eval::{self, PortState};
 use crate::model::rig::Vert;
 use crate::model::stage3d::{self, StageModel, SLAB_DEPTH, SOFT_DEPTH};
 use crate::model::MatchCamera;
@@ -78,27 +78,14 @@ pub struct Scene3D {
 
 /// Per-fighter render state that is *not* part of the simulation (so it is
 /// never saved/rolled back; it just eases visuals between sim frames).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct PortFx {
-    /// Eased facing in -1..1 (the sim's is ±1); turns take a few frames.
-    facing: f32,
+    /// Eased facing, frame continuity and extras lag: the shared render
+    /// evaluation state (`model::render_eval`), also used by measurements.
+    state: PortState,
     /// Recent world positions of the striking limb's tip while a hitbox is
     /// active, newest last. Drawn as a fading ribbon.
     trail: Vec<(V3, V3)>,
-    last_frame: u64,
-    /// Lag history of the spec-built extras (scarf, crest…). Visual only.
-    lag: ExtrasState,
-}
-
-impl Default for PortFx {
-    fn default() -> Self {
-        PortFx {
-            facing: 1.0,
-            trail: Vec::new(),
-            last_frame: u64::MAX,
-            lag: ExtrasState::default(),
-        }
-    }
 }
 
 const OUTLINE_VERTEX: &str = r#"#version 100
@@ -390,37 +377,30 @@ impl Scene3D {
 
     /// Root transform: the model faces +X and turns about Y to face left
     /// (a real turn, not a mirror — a few frames long, purely visual).
-    fn fighter_root(f: &Fighter, eased_facing: f32) -> Xf {
-        // facing +1 → 0°, -1 → 180°; in between the fighter faces the camera.
-        let deg = (1.0 - eased_facing) * 90.0;
-        Xf::new(M3::rot_y(deg), v3(f.pos.x, f.pos.y, 0.0))
-    }
-
-    /// Update per-port render state for this frame and return the eased
-    /// facing.
-    fn port_state(&mut self, f: &Fighter, frame: u64) -> f32 {
+    /// Evaluate what this fighter looks like on `frame` (advancing its
+    /// render history) without drawing it — the capture tool replays a
+    /// case's earlier ticks this way to reconstruct the render state of the
+    /// tick it draws.
+    pub(crate) fn evaluate_fighter(&mut self, f: &Fighter, frame: u64) -> render_eval::Evaluated {
+        let lag = self.lag_enabled;
         let i = f.port.min(7);
         if self.ports.len() <= i {
             self.ports.resize(i + 1, PortFx::default());
         }
-        let p = &mut self.ports[i];
-        let fresh = p.last_frame == u64::MAX || frame < p.last_frame || frame > p.last_frame + 30;
-        if fresh {
-            p.facing = f.facing;
-            p.trail.clear();
-        } else if frame != p.last_frame {
-            // Ease toward the sim facing over ~5 frames (per sim frame, so
-            // rollback re-simulation does not speed it up).
-            let steps = (frame - p.last_frame).min(6);
-            for _ in 0..steps {
-                p.facing += (f.facing - p.facing) * 0.42;
-            }
-            if (p.facing - f.facing).abs() < 0.02 {
-                p.facing = f.facing;
-            }
+        // Disjoint field borrows: the model table and the port state.
+        let model = &self.models[f.character.id.index()];
+        let port = &mut self.ports[i];
+        let ev = render_eval::evaluate(model, &mut port.state, f, frame, lag);
+        if ev.fresh {
+            port.trail.clear();
         }
-        p.last_frame = frame;
-        p.facing
+        ev
+    }
+
+    /// Forget every port's render history (eased facing, trails, extras
+    /// lag). The capture tool calls this before reconstructing a tick.
+    pub(crate) fn reset_render_history(&mut self) {
+        self.ports.clear();
     }
 
     fn tint_for(f: &Fighter) -> Tint {
@@ -442,33 +422,37 @@ impl Scene3D {
         if matches!(f.state, State::Dead) {
             return;
         }
-        let eased = self.port_state(f, frame);
-        let model = &self.models[f.character.id.index()];
-        let mut pose = anim::fighter_pose(&model.rig, f, &model.style, frame);
-        (model.secondary)(&model.rig, &mut pose, f, frame);
-        let mut root = Self::fighter_root(f, eased);
-        if !model.extras.is_empty() && self.lag_enabled {
-            // Extras lag (FORMAT.md): reads the parent bones of the combat
-            // pose, never writes them; frozen while the fighter is in hitlag.
-            let lag = &mut self.ports[f.port.min(7)].lag;
-            lag.apply(
-                &model.extras,
-                &model.rig,
-                &mut pose,
-                &root,
-                frame,
-                f.hitlag > 0,
-                f.facing,
-            );
+        let ev = self.evaluate_fighter(f, frame);
+        self.draw_posed(f, frame, &ev.pose, &ev.root);
+    }
+
+    /// Draw a fighter and, for the diagnostics' player, measure the contact
+    /// piece on the *same* evaluated pose and root that were drawn.
+    fn draw_fighter_measured(
+        &mut self,
+        f: &Fighter,
+        frame: u64,
+        query: Option<&ContactQuery>,
+    ) -> Option<crate::model::contact::ContactMeasure> {
+        if matches!(f.state, State::Dead) {
+            return None;
         }
-        // Hitlag shake: the victim vibrates in place while frozen (the
-        // classic freeze-frame "rattle"); harder hits rattle wider.
-        if f.hitlag > 0 && matches!(f.state, State::Hitstun { .. }) {
-            let amp = 0.9 + (f.hitlag as f32).min(12.0) * 0.12;
-            let s = if frame % 2 == 0 { 1.0 } else { -1.0 };
-            root.t = root.t + v3(s * amp, (frame % 4 == 0) as i32 as f32 * amp * 0.4, 0.0);
-        }
-        self.draw_posed(f, frame, &pose, &root);
+        let ev = self.evaluate_fighter(f, frame);
+        let measured = query.filter(|q| q.port == f.port).and_then(|q| {
+            let model = &self.models[f.character.id.index()];
+            let hb = q.hitbox.as_ref().map(|(id, c, r)| (id.as_str(), *c, *r));
+            crate::model::contact::measure_posed(
+                model,
+                f,
+                &ev.pose,
+                &ev.root,
+                ev.eased_facing,
+                q.action,
+                hb,
+            )
+        });
+        self.draw_posed(f, frame, &ev.pose, &ev.root);
+        measured
     }
 
     /// Draw a fighter in an explicit pose under an explicit root transform
@@ -1370,6 +1354,29 @@ pub(crate) struct ModelLook {
     pub hitboxes: bool,
 }
 
+/// Measured overlays for a diagnostic capture: what the simulation tests
+/// and where the model's contact piece is, drawn as wireframes over the
+/// scene (never in normal play).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Diagnostics {
+    /// Hurt capsules of every fighter.
+    pub capsules: bool,
+    /// Runtime hitbox of player 0 this tick (x, y, radius).
+    pub hitbox: Option<(f32, f32, f32)>,
+    /// Projectile hitbox (x, y, radius).
+    pub projectile: Option<(f32, f32, f32)>,
+    /// Measure the contact piece of one fighter on the pose actually drawn.
+    pub contact: Option<ContactQuery>,
+}
+
+/// What to measure: which port, for which action, against which hitbox.
+#[derive(Clone, Debug)]
+pub(crate) struct ContactQuery {
+    pub port: usize,
+    pub action: crate::sim::attacks::MoveId,
+    pub hitbox: Option<(String, [f32; 2], f32)>,
+}
+
 impl Scene3D {
     /// Draw a match frame with a fixed orthographic camera into `rt`.
     pub(crate) fn draw_fixed(
@@ -1379,6 +1386,19 @@ impl Scene3D {
         rt: &RenderTarget,
         opts: SceneOpts,
     ) {
+        let _ = self.draw_fixed_diag(gs, cam, rt, opts, None);
+    }
+
+    /// [`draw_fixed`] plus measured overlays. Returns the contact
+    /// measurement taken on the drawn pose when `diag.contact` asks for one.
+    pub(crate) fn draw_fixed_diag(
+        &mut self,
+        gs: &GameState,
+        cam: &FixedCam,
+        rt: &RenderTarget,
+        opts: SceneOpts,
+        diag: Option<&Diagnostics>,
+    ) -> Option<crate::model::contact::ContactMeasure> {
         self.ensure_stage(gs);
         let (w, h) = (rt.texture.width(), rt.texture.height());
         self.viewport = Some((w, h));
@@ -1401,25 +1421,112 @@ impl Scene3D {
         for f in &gs.fighters {
             self.draw_shadow(f, gs);
         }
+        let query = diag.and_then(|d| d.contact.as_ref());
+        let mut measured = None;
         for f in &gs.fighters {
-            self.draw_fighter(f, gs.frame);
+            if let Some(m) = self.draw_fighter_measured(f, gs.frame, query) {
+                measured = Some(m);
+            }
         }
         self.draw_projectiles(gs);
         for f in &gs.fighters {
             self.draw_overlays(f, opts);
         }
         self.draw_fx(gs);
+        if let Some(d) = diag {
+            self.draw_diagnostics(gs, d, measured.as_ref());
+        }
 
+        // Submit the 3D pass before the 2D one, and the 2D one before the
+        // caller switches passes again: draw calls never straddle a pass.
+        flush_gl();
         set_camera(&rt_camera_2d(rt));
         if opts.hud {
             let mut p = MqPainter;
             self.draw_port_tags(&mut p, gs, opts);
             viz::draw_hud(&mut p, w, h, gs, opts.local_player);
         }
+        flush_gl();
         set_default_camera();
         self.viewport = None;
         self.outline_width = None;
         super::set_painter_dims(None);
+        measured
+    }
+
+    /// Measured overlays drawn as flat strokes in the fighting plane (in
+    /// front of the models, z = [`DIAG_Z`]): hurt capsules (green), the
+    /// runtime hitbox (red circle + centre cross), a projectile (orange),
+    /// and the contact-piece markers — cyan box = piece bounds, white ring =
+    /// joint, magenta ring = tip, yellow cross = point of the piece's
+    /// projected surface nearest the hitbox centre, with a line to it. Strokes are built as thin quads
+    /// (not GL lines) so their width is exact in world units.
+    fn draw_diagnostics(
+        &self,
+        gs: &GameState,
+        d: &Diagnostics,
+        measured: Option<&crate::model::contact::ContactMeasure>,
+    ) {
+        let w = DIAG_STROKE;
+        if d.capsules {
+            for f in &gs.fighters {
+                if matches!(f.state, State::Dead) {
+                    continue;
+                }
+                let c = crate::model::contact::capsule(f);
+                let col = [110, 230, 120, 220];
+                stroke_circle(c.a[0], c.a[1], c.radius, w, col);
+                stroke_circle(c.b[0], c.b[1], c.radius, w, col);
+                stroke_polyline(
+                    &[(c.a[0] - c.radius, c.a[1]), (c.b[0] - c.radius, c.b[1])],
+                    w,
+                    col,
+                );
+                stroke_polyline(
+                    &[(c.a[0] + c.radius, c.a[1]), (c.b[0] + c.radius, c.b[1])],
+                    w,
+                    col,
+                );
+            }
+        }
+        if let Some((x, y, r)) = d.hitbox {
+            let col = [255, 70, 70, 240];
+            stroke_circle(x, y, r, w, col);
+            let k = (r * 0.2).max(0.6);
+            stroke_polyline(&[(x - k, y), (x + k, y)], w, col);
+            stroke_polyline(&[(x, y - k), (x, y + k)], w, col);
+        }
+        if let Some((x, y, r)) = d.projectile {
+            stroke_circle(x, y, r, w, [255, 170, 60, 240]);
+        }
+        if let Some(m) = measured {
+            let cyan = [90, 220, 255, 220];
+            let (lo, hi) = (m.aabb_min, m.aabb_max);
+            stroke_polyline(
+                &[
+                    (lo[0], lo[1]),
+                    (hi[0], lo[1]),
+                    (hi[0], hi[1]),
+                    (lo[0], hi[1]),
+                    (lo[0], lo[1]),
+                ],
+                w,
+                cyan,
+            );
+            stroke_circle(m.joint[0], m.joint[1], 0.6, w, [255, 255, 255, 255]);
+            stroke_circle(m.tip[0], m.tip[1], 0.6, w, [255, 90, 255, 255]);
+            if let (Some(nv), Some(hb)) = (m.nearest_point, &m.hitbox) {
+                let yellow = [255, 230, 80, 255];
+                let k = 1.2;
+                stroke_polyline(&[(nv[0] - k, nv[1] - k), (nv[0] + k, nv[1] + k)], w, yellow);
+                stroke_polyline(&[(nv[0] - k, nv[1] + k), (nv[0] + k, nv[1] - k)], w, yellow);
+                stroke_polyline(
+                    &[(nv[0], nv[1]), (hb.center[0], hb.center[1])],
+                    w * 0.7,
+                    [255, 230, 80, 200],
+                );
+            }
+        }
     }
 
     /// Draw one fighter model (explicit pose and root) with a fixed camera
@@ -1474,6 +1581,7 @@ impl Scene3D {
                 },
             );
         }
+        flush_gl();
         set_default_camera();
         self.silhouette = false;
         self.viewport = None;
@@ -1513,6 +1621,74 @@ impl Scene3D {
             .sum();
         (models, stage)
     }
+}
+
+/// Submit every queued draw call now.
+pub(crate) fn flush_gl() {
+    // SAFETY: main thread, between draw calls — the documented way to reach
+    // the miniquad context.
+    unsafe {
+        get_internal_gl().flush();
+    }
+}
+
+/// Depth at which diagnostic strokes are drawn (in front of every model,
+/// whose depth extent is within ±9 units).
+const DIAG_Z: f32 = 10.0;
+/// Stroke width of diagnostic overlays in world units (≈2 px at the 44-unit
+/// contact camera on 512 px).
+const DIAG_STROKE: f32 = 0.18;
+
+/// A polyline in the XY fighting plane as a strip of thin quads.
+fn stroke_polyline(pts: &[(f32, f32)], width: f32, rgba: [u8; 4]) {
+    if pts.len() < 2 {
+        return;
+    }
+    let mut vertices = Vec::with_capacity(pts.len() * 2);
+    let mut indices: Vec<u16> = Vec::with_capacity((pts.len() - 1) * 6);
+    let hw = width * 0.5;
+    for i in 0..pts.len() {
+        // Direction of the adjacent segment(s), averaged at interior points.
+        let prev = if i > 0 { pts[i - 1] } else { pts[i] };
+        let next = if i + 1 < pts.len() {
+            pts[i + 1]
+        } else {
+            pts[i]
+        };
+        let (dx, dy) = (next.0 - prev.0, next.1 - prev.1);
+        let len = (dx * dx + dy * dy).sqrt().max(1e-5);
+        let (nx, ny) = (-dy / len * hw, dx / len * hw);
+        let (x, y) = pts[i];
+        for (ox, oy) in [(nx, ny), (-nx, -ny)] {
+            vertices.push(Vertex {
+                position: vec3(x + ox, y + oy, DIAG_Z),
+                uv: vec2(0.0, 0.0),
+                color: rgba,
+                normal: vec4(0.0, 0.0, 1.0, 0.0),
+            });
+        }
+        if i + 1 < pts.len() {
+            let b = (i * 2) as u16;
+            indices.extend_from_slice(&[b, b + 1, b + 3, b, b + 3, b + 2]);
+        }
+    }
+    draw_mesh(&Mesh {
+        vertices,
+        indices,
+        texture: None,
+    });
+}
+
+/// A circle outline in the XY fighting plane.
+fn stroke_circle(cx: f32, cy: f32, r: f32, width: f32, rgba: [u8; 4]) {
+    let n = 48;
+    let pts: Vec<(f32, f32)> = (0..=n)
+        .map(|i| {
+            let a = i as f32 / n as f32 * std::f32::consts::TAU;
+            (cx + a.cos() * r, cy + a.sin() * r)
+        })
+        .collect();
+    stroke_polyline(&pts, width, rgba);
 }
 
 /// Bake lighting into a static mesh and split it into GPU-sized batches.

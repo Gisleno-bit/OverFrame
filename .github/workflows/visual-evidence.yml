@@ -97,10 +97,12 @@ jobs:
         continue-on-error: true
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Tests (all features)
+      - name: Tests (all features + evidence tool self-test)
         id: tests
         continue-on-error: true
-        run: cargo test --all-features 2>&1 | tee tests.log; test "${PIPESTATUS[0]}" -eq 0
+        run: |
+          cargo test --all-features 2>&1 | tee tests.log; test "${PIPESTATUS[0]}" -eq 0
+          python3 tools/test_evidence.py
 
       - name: Build game (release)
         id: build

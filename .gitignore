@@ -6,3 +6,4 @@ Cargo.lock.bak
 /overframe-demo.gif
 *.log
 .DS_Store
+__pycache__/

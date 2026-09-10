@@ -44,10 +44,28 @@ SPEC_FILES = [
     "docs/art/procedural/trama.json",
     "docs/art/procedural/palettes.json",
     "docs/art/procedural/lattice.json",
+    "docs/art/procedural/anim/FORMAT.md",
+    "docs/art/procedural/anim/kestrel.json",
     "docs/art/capture-suite.json",
     "docs/art/fixtures/idle-v1.json",
     "docs/art/fixtures/combat-v1.json",
 ]
+
+# The only capability states the exchange schema knows (PROJECT_STATUS.md).
+STATES = ("verified", "implemented_unverified", "specified_not_implemented", "not_verified")
+
+
+def log(msg):
+    """Console output that never raises on a narrow console encoding
+    (Windows cp1252): the message itself is ASCII by construction, and any
+    non-ASCII path or reason it carries is escaped rather than encoded."""
+    text = str(msg)
+    try:
+        enc = sys.stdout.encoding or "ascii"
+        text.encode(enc)
+    except (UnicodeEncodeError, LookupError):
+        text = text.encode("ascii", "backslashreplace").decode("ascii")
+    print(text)
 
 
 def sha256(path):
@@ -142,51 +160,159 @@ def cmd_pending(a):
     st.setdefault("capabilities", {})
     st["note"] = "pending: the attempt is running; images of this path do not exist yet"
     dump_json(path, st)
-    print(f"pending attempt registered in {path}")
+    log(f"pending attempt registered in {path}")
 
 
-def capabilities(index, checks, tests_passed):
-    """A capability is `verified` only when the manifest names its evidence."""
-    files = {f["path"] for f in (index or {}).get("files", [])}
+def contact_coverage(index, present, problems, capture_dir):
+    """Coverage = every (character, action, variant) case the runtime
+    exporter reports for the suite's characters must have its primary PNG,
+    its wide PNG and its contact JSON among the files actually copied.
+    Sources cross-checked: runtime/frame-data-report.json (the case set),
+    runtime/contact-report.json (per-case JSON outcome), the tool's own
+    `contact_expected` list, and the file set. An unexplained gap is a
+    problem (publish fails); an explained one stays `missing` and keeps
+    the capability from being `verified`. Never trusts index.files alone."""
+    chars = (index or {}).get("characters") or []
+    report = load_json(os.path.join(capture_dir, "runtime", "frame-data-report.json"), []) or []
+    contact_report = load_json(os.path.join(capture_dir, "runtime", "contact-report.json"), []) or []
+    contact_status = {(c.get("character_id"), c.get("action_id"), c.get("variant_id")): c for c in contact_report}
+    expected = {(e["character_id"], e["action_id"], e["variant_id"]): e
+                for e in (index or {}).get("contact_expected", [])}
+    skipped = {s[0]: s[1] for s in (index or {}).get("skipped", []) if isinstance(s, list) and len(s) == 2}
+    per_char = {}
+    seen_in_report = set()
+    for r in report:
+        ch = r.get("character_id")
+        if ch not in chars:
+            continue
+        key = (ch, r.get("action_id"), r.get("variant_id"))
+        seen_in_report.add(key)
+        c = per_char.setdefault(ch, {"cases": 0, "expected_files": 0, "present": 0, "missing": [], "kinds": {}})
+        c["cases"] += 1
+        if r.get("status") != "exported":
+            c["missing"].append({"case": key[1:], "path": None, "reason": f"runtime export: {r.get('status')}"})
+            continue
+        e = expected.get(key)
+        if e is None:
+            # The tool never declared sheets for a case the exporter has.
+            c["missing"].append({"case": key[1:], "path": None, "reason": "unexplained: no contact sheets declared for this runtime case"})
+            problems.append(f"no contact sheets declared for runtime case {key}")
+            continue
+        c["kinds"][e["evidence_kind"]] = c["kinds"].get(e["evidence_kind"], 0) + 1
+        json_path = f"runtime/contact/{ch}/{key[1]}-{key[2]}.json"
+        for path in (e["primary"], e["wide"], json_path):
+            c["expected_files"] += 1
+            if path in present:
+                c["present"] += 1
+            else:
+                reason = skipped.get(path)
+                if reason is None and path == json_path:
+                    st = contact_status.get(key, {}).get("status")
+                    reason = st if st and st != "written" else None
+                if reason is None:
+                    reason = "unexplained"
+                    problems.append(f"contact evidence missing without a reason: {path}")
+                c["missing"].append({"case": key[1:], "path": path, "reason": reason})
+    for key, e in expected.items():
+        if key[0] in chars and key not in seen_in_report:
+            c = per_char.setdefault(key[0], {"cases": 0, "expected_files": 0, "present": 0, "missing": [], "kinds": {}})
+            c["missing"].append({"case": key[1:], "path": e["primary"], "reason": "unexplained: declared sheet has no runtime case"})
+            problems.append(f"declared contact case {key} is not in frame-data-report.json")
+    if not report:
+        problems.append("runtime/frame-data-report.json missing: coverage cannot be established")
+    for ch in chars:
+        c = per_char.setdefault(ch, {"cases": 0, "expected_files": 0, "present": 0, "missing": [], "kinds": {}})
+        c["complete"] = c["cases"] > 0 and c["expected_files"] > 0 and c["present"] == c["expected_files"] and not c["missing"]
+    return {
+        "rule": "per runtime case of each selected character: primary PNG + wide PNG + runtime/contact JSON, all present in the copied files; sources: frame-data-report.json, contact-report.json, contact_expected, file set",
+        "characters": per_char,
+    }
+
+
+def capabilities(index, checks, tests_passed, coverage=None, present=None):
+    """A capability is `verified` only when the manifest names evidence that
+    exists in this run and the checks passed. States are limited to the
+    exchange schema; art approval is never a CI state (it lives in the
+    reviewer's docs/art/reviews/<sha>.md, which CI does not read)."""
+    files = set(present or [])
     cases = (index or {}).get("frame_data_cases", [])
     exported = [c for c in cases if c.get("status") == "exported"]
     tests_ok = checks.get("tests") == "pass"
+
+    def st(ok, implemented=True):
+        if ok and tests_ok:
+            return "verified"
+        return "implemented_unverified" if implemented else "not_verified"
+
     caps = {}
     caps["procedural_v1_kestrel"] = {
-        "state": "verified" if ("characters/kestrel/turnaround.png" in files and tests_ok) else "implemented_unverified",
+        "state": st("characters/kestrel/turnaround.png" in files),
         "evidence": ["characters/kestrel/turnaround.png", "characters/kestrel/silhouette.png",
                      "src/model/procedural.rs tests: every_shipped_spec_parses_builds_and_fits_its_capsule"],
     }
     caps["palettes_json_kestrel"] = {
-        "state": "verified" if ("characters/kestrel/palettes.png" in files and tests_ok) else "implemented_unverified",
+        "state": st("characters/kestrel/palettes.png" in files),
         "evidence": ["characters/kestrel/palettes.png", "test palettes_json_has_six_per_character_in_slot_order"],
     }
     caps["extras_lag"] = {
-        "state": "verified" if tests_ok else "implemented_unverified",
+        "state": st(True),
         "evidence": ["test extras_lag_follows_the_closed_algorithm (unit); scenes/combat.gif (visual, not measured)"],
     }
+    imgs = sorted(f for f in files if f.endswith(".png") or f.endswith(".gif"))
     caps["capture_game3d"] = {
-        "state": "verified" if files else "not_verified",
-        "evidence": [f for f in sorted(files) if f.endswith(".png") or f.endswith(".gif")][:6],
+        "state": st(bool(imgs), implemented=bool(imgs)),
+        "evidence": imgs[:6],
         "renderer": (index or {}).get("renderer"),
     }
     caps["frame_data_export"] = {
-        "state": "verified" if exported and tests_ok else ("implemented_unverified" if exported else "not_verified"),
+        "state": st(bool(exported) and "runtime/frame-data.csv" in files, implemented=bool(exported)),
         "evidence": ["runtime/frame-data.csv", "test every_recipe_produces_its_move_on_every_character"],
         "cases_exported": len(exported),
         "cases_total": len(cases),
     }
+    for ch, c in ((coverage or {}).get("characters") or {}).items():
+        caps[f"contact_coverage_{ch}"] = {
+            "state": st(c.get("complete", False), implemented=c.get("present", 0) > 0),
+            "evidence": [f"characters/{ch}/contact-*.png", f"runtime/contact/{ch}/*.json", "manifest.coverage"],
+            "cases": c.get("cases", 0), "expected_files": c.get("expected_files", 0),
+            "present": c.get("present", 0), "missing": len(c.get("missing", [])),
+        }
+    caps["contact_measurements"] = {
+        "state": st(any(f.startswith("runtime/contact/") for f in files),
+                    implemented=any(f.startswith("runtime/contact/") for f in files)),
+        "evidence": ["runtime/contact/<character>/<action>-<variant>.json (mesh_distance, signed_separation, tip_reach_x, capsule, eased_facing, both facings)",
+                     "src/model/contact.rs and src/model/render_eval.rs tests"],
+    }
+    iso = (index or {}).get("isolation_check") or {}
+    caps["capture_isolation"] = {
+        "state": st(iso.get("identical") is True, implemented=bool(iso)),
+        "evidence": ["manifest.isolation_check (first contact case re-rendered after the run and compared pixel for pixel)"],
+    }
+    caps["hurt_capsule_overlays"] = {
+        "state": st("characters/kestrel/capsules.png" in files),
+        "evidence": ["characters/kestrel/capsules.png", "test capsule_shrinks_in_crouch_and_matches_the_sim"],
+    }
+    caps["mirror_0_3_sheet_kestrel"] = {
+        "state": st("characters/kestrel/mirror-0-3.png" in files),
+        "evidence": ["characters/kestrel/mirror-0-3.png"],
+        "note": "technical presence only; readability is an art-review verdict recorded outside CI",
+    }
+    caps["art_review_kestrel"] = {"state": "not_verified", "evidence": [],
+                                  "note": "set only by the reviewer against this SHA's evidence; CI never marks it"}
+    caps["animation_direction_kestrel"] = {"state": "specified_not_implemented", "evidence": []}
     caps["procedural_v1_boulder"] = {"state": "specified_not_implemented", "evidence": []}
     caps["procedural_v1_viper"] = {"state": "specified_not_implemented", "evidence": []}
     caps["trama"] = {"state": "specified_not_implemented", "evidence": []}
     caps["lattice_dressing"] = {"state": "specified_not_implemented", "evidence": []}
     caps["hud_identity"] = {"state": "specified_not_implemented", "evidence": []}
     caps["rollback_checksum_full_coverage"] = {
-        "state": "verified" if tests_ok else "implemented_unverified",
+        "state": st(True),
         "evidence": ["tests/checksum.rs"],
     }
     caps["windows_gamepad_performance"] = {"state": "not_verified", "evidence": [],
                                           "note": "needs a real Windows machine; CI runs Mesa/llvmpipe"}
+    for k, v in caps.items():
+        assert v["state"] in STATES, (k, v["state"])
     if tests_passed is not None:
         caps["tests_passed_total"] = tests_passed
     return caps
@@ -230,12 +356,14 @@ def cmd_manifest(a):
                 files.append(entry)
     if total > RUN_LIMIT:
         problems.append(f"run total {total} B > budget {RUN_LIMIT}")
+    present = {f["path"] for f in files}
+    coverage = contact_coverage(index, present, problems, a.capture)
     passed, failed = parse_test_totals(a.tests_log)
     specs = {}
     for rel in SPEC_FILES:
         p = os.path.join(a.repo, rel)
-        if os.path.exists(p):
-            specs[rel] = sha256(p)
+        # A missing spec is recorded, never silently skipped.
+        specs[rel] = sha256(p) if os.path.exists(p) else None
     manifest = {
         "schema_version": 1,
         "source_sha": a.sha,
@@ -269,17 +397,19 @@ def cmd_manifest(a):
                         "result": checks.get("capture", "not_run")},
         },
         "triangles": (index or {}).get("triangles"),
+        "coverage": coverage,
         "files": files,
         "skipped": (index or {}).get("skipped", []),
         "frame_data_cases": (index or {}).get("frame_data_cases", []),
-        "capabilities": capabilities(index, checks, passed),
+        "isolation_check": (index or {}).get("isolation_check"),
+        "capabilities": capabilities(index, checks, passed, coverage, present),
         "size_budget": {"png": PNG_LIMIT, "gif": GIF_LIMIT, "run": RUN_LIMIT, "total_bytes": total},
         "problems": problems,
     }
     dump_json(os.path.join(a.out, "manifest.json"), manifest)
-    print(f"manifest: {len(files)} files, {total} bytes, {len(problems)} problems → {a.out}")
+    log(f"manifest: {len(files)} files, {total} bytes, {len(problems)} problems -> {a.out}")
     for p in problems:
-        print("  problem:", p)
+        log("  problem: " + p)
     if problems:
         sys.exit(3)
 
@@ -291,7 +421,7 @@ def cmd_status(a):
     passed, _ = parse_test_totals(a.tests_log) if a.tests_log else (None, None)
     current = st.get("source_sha")
     if current and not is_ancestor(a.repo, current, a.sha) and st.get("status") != "pending":
-        print(f"refusing to move the pointer from newer {current} to older {a.sha}")
+        log(f"refusing to move the pointer from newer {current} to older {a.sha}")
         # Still record this attempt under history so nothing is lost.
         st.setdefault("history", []).append({
             "source_sha": a.sha, "run_id": a.run_id, "run_attempt": a.attempt,
@@ -323,13 +453,27 @@ def cmd_status(a):
     manifest = load_json(os.path.join(a.evidence, a.attempt_path, "manifest.json"), None)
     st["capabilities"] = {k: (v.get("state") if isinstance(v, dict) else v)
                           for k, v in ((manifest or {}).get("capabilities", {})).items()}
+    st["coverage"] = {ch: {"complete": c.get("complete", False), "present": c.get("present", 0),
+                           "expected_files": c.get("expected_files", 0), "missing": len(c.get("missing", []))}
+                      for ch, c in ((manifest or {}).get("coverage", {}).get("characters", {})).items()}
     st["note"] = ("evidence_commit is filled by the publish step after this file is committed; "
                   "read images from that commit, not from the branch tip")
     dump_json(path, st)
-    print(f"status {a.result} for {a.sha} → {path}")
+    log(f"status {a.result} for {a.sha} -> {path}")
+
+
+def _tolerant_streams():
+    """Never let a console encoding abort a publish: replace what cannot
+    be encoded instead of raising (JSON files are always written UTF-8)."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
 
 
 def main():
+    _tolerant_streams()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 

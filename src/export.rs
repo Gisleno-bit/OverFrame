@@ -242,8 +242,12 @@ pub struct Row {
     pub character_id: &'static str,
     pub action_id: &'static str,
     pub variant_id: &'static str,
-    /// Ticks since the recipe's first input; `-1` is the context row (the
-    /// tick before the move began).
+    /// `after_step`: the state after `sim::step` of `tick_index`.
+    /// `pre_step`: the state *before* the step of `tick_index` — only used
+    /// for the context row of a move that starts on its very first input
+    /// tick (there is no earlier after_step sample inside the recipe).
+    pub sample_phase: &'static str,
+    /// Ticks since the recipe's first input.
     pub tick_index: i64,
     pub state_frame: u32,
     pub hitbox_id: String,
@@ -272,7 +276,14 @@ pub struct CaseReport {
 pub struct CaseTick {
     pub tick_index: i64,
     pub state: GameState,
+    /// The fighter's own hitbox row.
     pub row: Row,
+    /// The projectile the fighter owns this tick, as its own hitbox row
+    /// (`hitbox_id = "projectile"`, radius = the sim's collision radius).
+    pub projectile: Option<Row>,
+    /// What this tick is, for captions: `pre_step`, `windup`, `active`,
+    /// `recovery`, `throw`, `release`, `after`.
+    pub label: &'static str,
 }
 
 struct Recipe {
@@ -626,6 +637,29 @@ fn is_move(state: State, id: MoveId) -> bool {
 /// per-tick snapshots from one tick before the move starts to the tick it
 /// ends, or an error naming the state the recipe produced instead.
 pub fn run_case(ch: CharacterId, id: MoveId, variant: &str) -> Result<Vec<CaseTick>, String> {
+    run_case_facing(ch, id, variant, 1.0)
+}
+
+/// Mirror a recipe input for a fighter facing −X (stick and C-stick X
+/// negated; buttons unchanged).
+fn mirror_input(mut i: PlayerInput, facing: f32) -> PlayerInput {
+    if facing < 0.0 {
+        i.stick.x = -i.stick.x;
+        i.cstick.x = -i.cstick.x;
+    }
+    i
+}
+
+/// [`run_case`] with an explicit facing: the fighter starts facing
+/// `facing` (±1) and the recipe's horizontal inputs and the practice
+/// target are mirrored accordingly, so "forward" stays forward.
+pub fn run_case_facing(
+    ch: CharacterId,
+    id: MoveId,
+    variant: &str,
+    facing: f32,
+) -> Result<Vec<CaseTick>, String> {
+    let facing = if facing < 0.0 { -1.0 } else { 1.0 };
     let recipe = recipes(id)
         .into_iter()
         .find(|r| r.variant == variant)
@@ -637,7 +671,7 @@ pub fn run_case(ch: CharacterId, id: MoveId, variant: &str) -> Result<Vec<CaseTi
     cfg.chars[0] = ch;
     cfg.chars[1] = CharacterId::Boulder;
     let mut gs = GameState::new(2, cfg);
-    let target_x = recipe.target.unwrap_or(120.0);
+    let target_x = recipe.target.unwrap_or(120.0) * facing;
     place_on_main(
         &mut gs,
         &[
@@ -645,13 +679,13 @@ pub fn run_case(ch: CharacterId, id: MoveId, variant: &str) -> Result<Vec<CaseTi
                 character: character_id(ch).into(),
                 palette: 0,
                 x: 0.0,
-                facing: 1.0,
+                facing,
             },
             FixturePlayer {
                 character: "boulder".into(),
                 palette: 1,
                 x: target_x,
-                facing: -1.0,
+                facing: -facing,
             },
         ],
     );
@@ -664,8 +698,12 @@ pub fn run_case(ch: CharacterId, id: MoveId, variant: &str) -> Result<Vec<CaseTi
     let mut prev: Option<GameState> = None;
     let mut seen_states: Vec<String> = Vec::new();
     let mut prev_target_hitlag = 0u32;
+    let mut prev_target_grabbed = false;
     for t in 0..240u32 {
-        let inp = [(recipe.script)(t), PlayerInput::default()];
+        let inp = [
+            mirror_input((recipe.script)(t), facing),
+            PlayerInput::default(),
+        ];
         let before = gs.clone();
         gs.step(&inp);
         let f = &gs.fighters[0];
@@ -673,9 +711,30 @@ pub fn run_case(ch: CharacterId, id: MoveId, variant: &str) -> Result<Vec<CaseTi
         if !started {
             if active {
                 started = true;
-                // Context row: the tick before the move began.
-                if let Some(p) = prev.take().or(Some(before)) {
-                    out.push(snapshot(&p, ch, id, recipe.variant, t as i64 - 1, 0));
+                // Context row: the last after_step sample before the move,
+                // or — when the move starts on the first input tick — the
+                // pre_step state of that tick, labelled as such.
+                match prev.take() {
+                    Some(p) => out.push(snapshot(
+                        &p,
+                        ch,
+                        id,
+                        recipe.variant,
+                        "after_step",
+                        t as i64 - 1,
+                        0,
+                        "windup",
+                    )),
+                    None => out.push(snapshot(
+                        &before,
+                        ch,
+                        id,
+                        recipe.variant,
+                        "pre_step",
+                        t as i64,
+                        0,
+                        "pre_step",
+                    )),
                 }
             } else {
                 let s = format!("{:?}", f.state);
@@ -683,24 +742,54 @@ pub fn run_case(ch: CharacterId, id: MoveId, variant: &str) -> Result<Vec<CaseTi
                     seen_states.push(s);
                 }
                 prev = Some(gs.clone());
+                prev_target_grabbed = matches!(gs.fighters[1].state, State::Grabbed);
                 continue;
             }
         } else if !active {
             // One row after the move: shows the recovery state.
-            out.push(snapshot(&gs, ch, id, recipe.variant, t as i64, 0));
+            out.push(snapshot(
+                &gs,
+                ch,
+                id,
+                recipe.variant,
+                "after_step",
+                t as i64,
+                0,
+                "after",
+            ));
             break;
         }
-        let victim_hitlag = gs.fighters[1].hitlag;
-        let contact = victim_hitlag > 0 && prev_target_hitlag == 0;
+        let victim = &gs.fighters[1];
+        let victim_hitlag = victim.hitlag;
+        let grabbed = matches!(victim.state, State::Grabbed);
+        let released = prev_target_grabbed && !grabbed;
+        let contact = (victim_hitlag > 0 && prev_target_hitlag == 0) || released;
+        let label = if released {
+            "release"
+        } else if matches!(f.state, State::Throw { .. }) {
+            "throw"
+        } else {
+            let md = attacks::data(ch, id);
+            if md.is_active(f.state_frame) {
+                "active"
+            } else if f.state_frame < md.startup {
+                "windup"
+            } else {
+                "recovery"
+            }
+        };
         out.push(snapshot(
             &gs,
             ch,
             id,
             recipe.variant,
+            "after_step",
             t as i64,
             if contact { 1 } else { 0 },
+            label,
         ));
         prev_target_hitlag = victim_hitlag;
+        prev_target_grabbed = grabbed;
     }
     if !started {
         return Err(format!(
@@ -711,13 +800,16 @@ pub fn run_case(ch: CharacterId, id: MoveId, variant: &str) -> Result<Vec<CaseTi
     Ok(out)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn snapshot(
     gs: &GameState,
     ch: CharacterId,
     id: MoveId,
     variant: &'static str,
+    sample_phase: &'static str,
     tick_index: i64,
     contact: u8,
+    label: &'static str,
 ) -> CaseTick {
     let f = &gs.fighters[0];
     let md = attacks::data(ch, id);
@@ -733,32 +825,50 @@ fn snapshot(
     } else {
         String::new()
     };
+    let base = Row {
+        character_id: character_id(ch),
+        action_id: action_id(id),
+        variant_id: variant,
+        sample_phase,
+        tick_index,
+        state_frame: f.state_frame,
+        hitbox_id,
+        hitbox_active: hb.is_some(),
+        center: hb.map(|(_, c)| (c.x, c.y)),
+        radius: hb.map(|(h, _)| h.radius),
+        hitlag_remaining: f.hitlag,
+        contact_marker: contact == 1,
+    };
+    // A live projectile owned by the fighter is a real runtime hitbox
+    // (`PROJECTILE_RADIUS` around its position); export it as its own row.
+    let projectile = gs
+        .projectiles
+        .iter()
+        .find(|p| p.owner == 0 && p.active)
+        .map(|p| Row {
+            hitbox_id: "projectile".into(),
+            hitbox_active: true,
+            center: Some((p.pos.x, p.pos.y)),
+            radius: Some(attacks::PROJECTILE_RADIUS),
+            ..base.clone()
+        });
     CaseTick {
         tick_index,
         state: gs.clone(),
-        row: Row {
-            character_id: character_id(ch),
-            action_id: action_id(id),
-            variant_id: variant,
-            tick_index,
-            state_frame: f.state_frame,
-            hitbox_id,
-            hitbox_active: hb.is_some(),
-            center: hb.map(|(_, c)| (c.x, c.y)),
-            radius: hb.map(|(h, _)| h.radius),
-            hitlag_remaining: f.hitlag,
-            contact_marker: contact == 1,
-        },
+        row: base,
+        projectile,
+        label,
     }
 }
 
 fn csv_row(out: &mut String, sha: &str, r: &Row) {
     let _ = writeln!(
         out,
-        "{sha},{},{},{},after_step,{},{},{},{},{},{},{},{},{}",
+        "{sha},{},{},{},{},{},{},{},{},{},{},{},{},{}",
         r.character_id,
         r.action_id,
         r.variant_id,
+        r.sample_phase,
         r.tick_index,
         r.state_frame,
         r.hitbox_id,
@@ -775,13 +885,35 @@ fn csv_row(out: &mut String, sha: &str, r: &Row) {
 pub fn all_cases() -> Vec<(CharacterId, MoveId, &'static str)> {
     let mut v = Vec::new();
     for ch in CharacterId::ALL {
-        for id in attacks::ALL_MOVES {
-            for r in recipes(id) {
-                v.push((ch, id, r.variant));
-            }
+        v.extend(cases_for(ch));
+    }
+    v
+}
+
+/// Every (action, variant) recipe of one character, in `ALL_MOVES` order.
+/// The first variant of an action is its primary one.
+pub fn cases_for(ch: CharacterId) -> Vec<(CharacterId, MoveId, &'static str)> {
+    let mut v = Vec::new();
+    for id in attacks::ALL_MOVES {
+        for r in recipes(id) {
+            v.push((ch, id, r.variant));
         }
     }
     v
+}
+
+/// Does this action define a fighter hitbox at all (throws do not)?
+pub fn action_has_hitbox(id: MoveId) -> bool {
+    !matches!(
+        id,
+        MoveId::ThrowF | MoveId::ThrowB | MoveId::ThrowU | MoveId::ThrowD
+    )
+}
+
+/// Does this action spawn a projectile (its real hitbox lives in
+/// `GameState::projectiles`)?
+pub fn action_spawns_projectile(id: MoveId) -> bool {
+    id == MoveId::SpecialN
 }
 
 /// `frame-data.csv` text plus one report per case.
@@ -798,6 +930,9 @@ pub fn frame_data_csv(source_sha: &str) -> (String, Vec<CaseReport>) {
             Ok(ticks) => {
                 for t in &ticks {
                     csv_row(&mut csv, source_sha, &t.row);
+                    if let Some(p) = &t.projectile {
+                        csv_row(&mut csv, source_sha, p);
+                    }
                 }
                 reports.push(CaseReport {
                     character_id: character_id(ch),
@@ -910,11 +1045,115 @@ pub fn stages_json() -> serde_json::Value {
 
 /// Write `runtime/frame-data.csv`, `runtime/characters.json`,
 /// `runtime/stages.json` and `runtime/frame-data-report.json` under `dir`.
-pub fn write_runtime(dir: &std::path::Path, source_sha: &str) -> std::io::Result<Vec<CaseReport>> {
+/// Per-tick contact measurements of one case (both facings), for
+/// `runtime/contact/<character>/<action>-<variant>.json`.
+pub fn contact_json(
+    ch: CharacterId,
+    id: MoveId,
+    variant: &str,
+) -> Result<serde_json::Value, String> {
+    use crate::model::render_eval::{evaluate_and_measure, PortState};
+    let model = crate::model::characters::build(ch);
+    let mut facings = Vec::new();
+    for facing in [1.0f32, -1.0] {
+        let ticks = run_case_facing(ch, id, variant, facing)?;
+        // A fresh render history per case and facing, replayed tick by
+        // tick in order: the same reconstruction the capture tool does, so
+        // the measured pose is the drawn one (eased facing included).
+        let mut port = PortState::default();
+        let mut samples = Vec::new();
+        for t in &ticks {
+            let f = &t.state.fighters[0];
+            let hb = t.row.center.map(|c| {
+                (
+                    t.row.hitbox_id.as_str(),
+                    [c.0, c.1],
+                    t.row.radius.unwrap_or(0.0),
+                )
+            });
+            let (ev, m) = evaluate_and_measure(&model, &mut port, f, t.state.frame, true, id, hb);
+            samples.push(serde_json::json!({
+                "eased_facing": ev.eased_facing,
+                "render_history": if ev.fresh { "fresh" } else { "continued" },
+                "sample_phase": t.row.sample_phase,
+                "tick_index": t.tick_index,
+                "state_frame": t.row.state_frame,
+                "label": t.label,
+                "state": format!("{:?}", f.state),
+                "root": [f.pos.x, f.pos.y],
+                "facing": f.facing,
+                "grounded": f.grounded,
+                "hitlag_remaining": f.hitlag,
+                "contact_marker": t.row.contact_marker,
+                "hitbox": t.row.center.map(|c| serde_json::json!({
+                    "id": t.row.hitbox_id, "center": [c.0, c.1], "radius": t.row.radius
+                })),
+                "projectile": t.projectile.as_ref().and_then(|p| p.center.map(|c| serde_json::json!({
+                    "center": [c.0, c.1], "radius": p.radius
+                }))),
+                "capsule": crate::model::contact::capsule(f),
+                "contact_piece": m,
+            }));
+        }
+        facings.push(serde_json::json!({ "facing": facing, "samples": samples }));
+    }
+    Ok(serde_json::json!({
+        "schema_version": 1,
+        "character_id": character_id(ch),
+        "action_id": action_id(id),
+        "variant_id": variant,
+        "units": "game_units",
+        "method": "contact_piece = the strike limb's designated piece, evaluated on the pose and root the renderer draws (model::render_eval: eased facing, extras lag, hitlag rattle) after replaying the case from a fresh render history; its triangles are projected onto the XY fighting plane; mesh_distance = minimum distance from the hitbox centre to that projected surface (0 inside a triangle, else nearest edge); signed_separation = mesh_distance - radius (negative = penetrating); vertex_distance is diagnostic only. Exceptions: throws have no fighter hitbox (null separation); special_n's projectile is emitted, not struck (not measured against a piece); body-centred hitboxes measured on the chest read 0/-radius when the centre is inside the silhouette. Nothing here changes the simulation.",
+        "facings": facings,
+    }))
+}
+
+/// Write `runtime/frame-data.csv`, `runtime/characters.json`,
+/// `runtime/stages.json`, `runtime/frame-data-report.json` and, for
+/// `contact_characters`, `runtime/contact/<character>/<action>-<variant>.json`.
+pub fn write_runtime_for(
+    dir: &std::path::Path,
+    source_sha: &str,
+    contact_characters: &[CharacterId],
+) -> std::io::Result<Vec<CaseReport>> {
     let rt = dir.join("runtime");
     std::fs::create_dir_all(&rt)?;
     let (csv, reports) = frame_data_csv(source_sha);
     std::fs::write(rt.join("frame-data.csv"), csv)?;
+    let mut contact_report = Vec::new();
+    for ch in contact_characters {
+        for (ch, id, variant) in cases_for(*ch) {
+            let rel = format!(
+                "runtime/contact/{}/{}-{}.json",
+                character_id(ch),
+                action_id(id),
+                variant
+            );
+            match contact_json(ch, id, variant) {
+                Ok(j) => {
+                    let d = rt.join("contact").join(character_id(ch));
+                    std::fs::create_dir_all(&d)?;
+                    // Compact: these files are read by tools, not people.
+                    std::fs::write(
+                        d.join(format!("{}-{}.json", action_id(id), variant)),
+                        serde_json::to_string(&j).unwrap_or_default(),
+                    )?;
+                    contact_report.push(serde_json::json!({
+                        "character_id": character_id(ch), "action_id": action_id(id),
+                        "variant_id": variant, "path": rel, "status": "written",
+                    }));
+                }
+                Err(e) => contact_report.push(serde_json::json!({
+                    "character_id": character_id(ch), "action_id": action_id(id),
+                    "variant_id": variant, "path": rel, "status": format!("error: {e}"),
+                })),
+            }
+        }
+    }
+    std::fs::write(
+        rt.join("contact-report.json"),
+        serde_json::to_string_pretty(&contact_report).unwrap_or_default(),
+    )?;
     std::fs::write(
         rt.join("frame-data-report.json"),
         serde_json::to_string_pretty(&reports).unwrap_or_default(),
@@ -928,6 +1167,11 @@ pub fn write_runtime(dir: &std::path::Path, source_sha: &str) -> std::io::Result
         serde_json::to_string_pretty(&stages_json()).unwrap_or_default(),
     )?;
     Ok(reports)
+}
+
+/// [`write_runtime_for`] with contact measurements for every character.
+pub fn write_runtime(dir: &std::path::Path, source_sha: &str) -> std::io::Result<Vec<CaseReport>> {
+    write_runtime_for(dir, source_sha, &CharacterId::ALL)
 }
 
 #[cfg(test)]
@@ -1036,11 +1280,102 @@ mod tests {
             );
         }
         let _ = csv_ref;
-        // Column count of every row matches the header.
+        // Column count of every row matches the header, and the phase
+        // column only carries the two agreed values.
         let cols = CSV_HEADER.split(',').count();
         for line in csv.lines().skip(1) {
             assert_eq!(line.split(',').count(), cols, "{line}");
+            let phase = line.split(',').nth(4).unwrap();
+            assert!(phase == "after_step" || phase == "pre_step", "{line}");
         }
+    }
+
+    #[test]
+    fn context_row_provenance_is_explicit() {
+        // Kestrel's jab starts on its first input tick: the context row is
+        // the pre_step state of tick 0, never a fabricated "tick -1".
+        let jab = run_case(CharacterId::Kestrel, MoveId::Jab, "ground").unwrap();
+        assert_eq!(jab[0].row.sample_phase, "pre_step");
+        assert_eq!(jab[0].tick_index, 0);
+        assert_eq!(jab[0].label, "pre_step");
+        assert_eq!(jab[1].row.sample_phase, "after_step");
+        assert_eq!(jab[1].tick_index, 0);
+        assert!(jab.iter().all(|t| t.tick_index >= 0));
+        // An aerial starts after the hop: its context row is a real
+        // after_step sample of the previous tick.
+        let nair = run_case(CharacterId::Kestrel, MoveId::Nair, "fullhop").unwrap();
+        assert_eq!(nair[0].row.sample_phase, "after_step");
+        assert_eq!(nair[0].tick_index + 1, nair[1].tick_index);
+    }
+
+    #[test]
+    fn projectile_and_throw_cases_carry_real_runtime_evidence() {
+        let sn = run_case(CharacterId::Kestrel, MoveId::SpecialN, "ground").unwrap();
+        let with_proj: Vec<&CaseTick> = sn.iter().filter(|t| t.projectile.is_some()).collect();
+        assert!(
+            !with_proj.is_empty(),
+            "special_n never shows its projectile"
+        );
+        let p = with_proj[0].projectile.as_ref().unwrap();
+        assert_eq!(p.hitbox_id, "projectile");
+        assert_eq!(p.radius, Some(attacks::PROJECTILE_RADIUS));
+        assert!(p.center.unwrap().0 > 0.0, "projectile travels forward");
+        // Throws: no fighter hitbox, but a measured release tick.
+        for id in [
+            MoveId::ThrowF,
+            MoveId::ThrowB,
+            MoveId::ThrowU,
+            MoveId::ThrowD,
+        ] {
+            let t = run_case(CharacterId::Kestrel, id, "from_grab").unwrap();
+            assert!(
+                t.iter().all(|x| !x.row.hitbox_active),
+                "{:?} has no hitbox",
+                id
+            );
+            assert!(
+                t.iter()
+                    .any(|x| x.label == "release" && x.row.contact_marker),
+                "{:?} never releases the victim",
+                id
+            );
+        }
+        assert!(!action_has_hitbox(MoveId::ThrowU));
+        assert!(action_spawns_projectile(MoveId::SpecialN));
+    }
+
+    #[test]
+    fn kestrel_has_twenty_three_cases_covering_all_twenty_two_actions() {
+        let cases = cases_for(CharacterId::Kestrel);
+        assert_eq!(cases.len(), 23);
+        for id in attacks::ALL_MOVES {
+            assert!(cases.iter().any(|c| c.1 == id), "{:?} has no recipe", id);
+        }
+        assert!(cases
+            .iter()
+            .any(|c| c.1 == MoveId::Fsmash && c.2 == "charged_max"));
+        assert!(cases
+            .iter()
+            .any(|c| c.1 == MoveId::Jab2 && c.2 == "after_jab1_hit"));
+    }
+
+    #[test]
+    fn contact_json_has_both_facings_and_measures() {
+        let j = contact_json(CharacterId::Kestrel, MoveId::Ftilt, "ground").unwrap();
+        let facings = j["facings"].as_array().unwrap();
+        assert_eq!(facings.len(), 2);
+        let active = facings[0]["samples"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["label"] == "active")
+            .expect("an active sample");
+        assert!(active["contact_piece"]["signed_separation"].is_number());
+        assert!(active["contact_piece"]["mesh_distance"].is_number());
+        assert_eq!(active["contact_piece"]["bone"], "foot_r");
+        assert_eq!(active["eased_facing"], 1.0);
+        assert_eq!(facings[1]["samples"][0]["render_history"], "fresh");
+        assert!(active["capsule"]["radius"].as_f64().unwrap() > 0.0);
     }
 
     #[test]
