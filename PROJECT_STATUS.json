@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "status": "pending",
+  "source_sha": "904644d91b0bc2d1f7b6a2fa789068dcad7b24b5",
+  "version": "0.6.0",
+  "latest_attempt": {
+    "run_id": "34424933627",
+    "run_attempt": "1",
+    "status": "pending",
+    "path": "builds/904644d91b0bc2d1f7b6a2fa789068dcad7b24b5/attempt-34424933627-1/",
+    "utc": "2026-09-10T01:18:29Z"
+  },
+  "latest_pass": null,
+  "checks": {
+    "fmt": "not_run",
+    "clippy": "not_run",
+    "tests": "not_run",
+    "tests_passed": null
+  },
+  "capabilities": {},
+  "note": "pending: the attempt is running; images of this path do not exist yet"
+}
