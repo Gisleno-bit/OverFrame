@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "stages": [
+    {
+      "blast": {
+        "bottom": -236.0,
+        "left": -486.0,
+        "right": 486.0,
+        "top": 434.0
+      },
+      "ledges": [
+        {
+          "side": -1.0,
+          "x": -155.0,
+          "y": 0.0
+        },
+        {
+          "side": 1.0,
+          "x": 155.0,
+          "y": 0.0
+        }
+      ],
+      "name": "The Lattice",
+      "platforms": [
+        {
+          "left": -155.0,
+          "right": 155.0,
+          "solid": true,
+          "y": 0.0
+        },
+        {
+          "left": -125.0,
+          "right": -43.0,
+          "solid": false,
+          "y": 59.0
+        },
+        {
+          "left": 43.0,
+          "right": 125.0,
+          "solid": false,
+          "y": 59.0
+        },
+        {
+          "left": -41.0,
+          "right": 41.0,
+          "solid": false,
+          "y": 117.0
+        }
+      ],
+      "spawns": [
+        [
+          -70.0,
+          1.0
+        ],
+        [
+          70.0,
+          1.0
+        ]
+      ],
+      "stage_id": "lattice"
+    },
+    {
+      "blast": {
+        "bottom": -304.0,
+        "left": -534.0,
+        "right": 534.0,
+        "top": 408.0
+      },
+      "ledges": [
+        {
+          "side": -1.0,
+          "x": -190.0,
+          "y": 0.0
+        },
+        {
+          "side": 1.0,
+          "x": 190.0,
+          "y": 0.0
+        }
+      ],
+      "name": "Meridian",
+      "platforms": [
+        {
+          "left": -190.0,
+          "right": 190.0,
+          "solid": true,
+          "y": 0.0
+        }
+      ],
+      "spawns": [
+        [
+          -80.0,
+          1.0
+        ],
+        [
+          80.0,
+          1.0
+        ]
+      ],
+      "stage_id": "meridian"
+    },
+    {
+      "blast": {
+        "bottom": -250.0,
+        "left": -440.0,
+        "right": 470.0,
+        "top": 420.0
+      },
+      "ledges": [
+        {
+          "side": -1.0,
+          "x": -135.0,
+          "y": 0.0
+        },
+        {
+          "side": 1.0,
+          "x": 135.0,
+          "y": 0.0
+        }
+      ],
+      "name": "Tidegate",
+      "platforms": [
+        {
+          "left": -135.0,
+          "right": 135.0,
+          "solid": true,
+          "y": 0.0
+        },
+        {
+          "left": -120.0,
+          "right": -48.0,
+          "solid": false,
+          "y": 46.0
+        },
+        {
+          "left": 28.0,
+          "right": 104.0,
+          "solid": false,
+          "y": 96.0
+        }
+      ],
+      "spawns": [
+        [
+          -60.0,
+          1.0
+        ],
+        [
+          60.0,
+          1.0
+        ]
+      ],
+      "stage_id": "tidegate"
+    }
+  ],
+  "units": "game_units"
+}
