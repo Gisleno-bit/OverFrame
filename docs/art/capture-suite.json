@@ -274,12 +274,12 @@
     ],
     "eye": [
       "root.x@anchor + 10*facing",
-      "root.y@anchor + 22",
+      "root.y@anchor + 24",
       120
     ],
     "target": [
       "root.x@anchor + 10*facing",
-      "root.y@anchor + 22",
+      "root.y@anchor + 24",
       0
     ],
     "up": [
@@ -287,7 +287,7 @@
       1,
       0
     ],
-    "orthographic_height": 88,
+    "orthographic_height": 176,
     "rows_facing": [
       1,
       -1
