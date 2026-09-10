@@ -1,22 +1,44 @@
 {
   "schema_version": 1,
-  "status": "pending",
+  "status": "pass",
   "source_sha": "904644d91b0bc2d1f7b6a2fa789068dcad7b24b5",
   "version": "0.6.0",
   "latest_attempt": {
     "run_id": "34424933627",
     "run_attempt": "1",
-    "status": "pending",
+    "status": "pass",
     "path": "builds/904644d91b0bc2d1f7b6a2fa789068dcad7b24b5/attempt-34424933627-1/",
-    "utc": "2026-09-10T01:18:29Z"
+    "utc": "2026-09-10T01:23:39Z"
   },
-  "latest_pass": null,
+  "latest_pass": {
+    "run_id": "34424933627",
+    "run_attempt": "1",
+    "status": "pass",
+    "path": "builds/904644d91b0bc2d1f7b6a2fa789068dcad7b24b5/attempt-34424933627-1/",
+    "utc": "2026-09-10T01:23:39Z",
+    "source_sha": "904644d91b0bc2d1f7b6a2fa789068dcad7b24b5"
+  },
   "checks": {
-    "fmt": "not_run",
-    "clippy": "not_run",
-    "tests": "not_run",
-    "tests_passed": null
+    "fmt": "pass",
+    "clippy": "pass",
+    "tests": "pass",
+    "tests_passed": 110
   },
-  "capabilities": {},
-  "note": "pending: the attempt is running; images of this path do not exist yet"
+  "capabilities": {
+    "procedural_v1_kestrel": "verified",
+    "palettes_json_kestrel": "verified",
+    "extras_lag": "verified",
+    "capture_game3d": "verified",
+    "frame_data_export": "verified",
+    "procedural_v1_boulder": "specified_not_implemented",
+    "procedural_v1_viper": "specified_not_implemented",
+    "trama": "specified_not_implemented",
+    "lattice_dressing": "specified_not_implemented",
+    "hud_identity": "specified_not_implemented",
+    "rollback_checksum_full_coverage": "verified",
+    "windows_gamepad_performance": "not_verified",
+    "tests_passed_total": 110
+  },
+  "note": "evidence_commit is filled by the publish step after this file is committed; read images from that commit, not from the branch tip",
+  "evidence_commit": null
 }
