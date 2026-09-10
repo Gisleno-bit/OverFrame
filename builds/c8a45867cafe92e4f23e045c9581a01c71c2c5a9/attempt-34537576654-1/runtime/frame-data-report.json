@@ -1,0 +1,554 @@
+[
+  {
+    "character_id": "kestrel",
+    "action_id": "jab",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 19,
+    "recipe": "t0: attack"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "jab2",
+    "variant_id": "after_jab1_hit",
+    "status": "exported",
+    "rows": 29,
+    "recipe": "target at +11; t0: attack (jab 1 hits); attack re-pressed every 2 ticks from t4"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "ftilt",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 27,
+    "recipe": "t0: stick (0.55,0) + attack"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "utilt",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 25,
+    "recipe": "t0: stick (0,0.55) + attack"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "dtilt",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 29,
+    "recipe": "t0: stick (0,-0.55) + attack"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "fsmash",
+    "variant_id": "cstick",
+    "status": "exported",
+    "rows": 42,
+    "recipe": "t0: c-stick (1,0)"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "fsmash",
+    "variant_id": "charged_max",
+    "status": "exported",
+    "rows": 102,
+    "recipe": "t0..70: stick flick (1,0) + attack held (full charge)"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "usmash",
+    "variant_id": "cstick",
+    "status": "exported",
+    "rows": 42,
+    "recipe": "t0: c-stick (0,1)"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "dsmash",
+    "variant_id": "cstick",
+    "status": "exported",
+    "rows": 41,
+    "recipe": "t0: c-stick (0,-1)"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "dash_attack",
+    "variant_id": "from_dash",
+    "status": "exported",
+    "rows": 38,
+    "recipe": "t0..4: stick (1,0) dash; t4: + attack"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "nair",
+    "variant_id": "fullhop",
+    "status": "exported",
+    "rows": 27,
+    "recipe": "t0..6: jump held (full hop); t8, t10: attack"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "fair",
+    "variant_id": "fullhop",
+    "status": "exported",
+    "rows": 27,
+    "recipe": "t0..6: jump held; t8, t10: stick (0.6,0) + attack"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "bair",
+    "variant_id": "fullhop",
+    "status": "exported",
+    "rows": 27,
+    "recipe": "t0..6: jump held; t8, t10: stick (-0.6,0) + attack"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "uair",
+    "variant_id": "fullhop",
+    "status": "exported",
+    "rows": 27,
+    "recipe": "t0..6: jump held; t8, t10: stick (0,1) + attack"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "dair",
+    "variant_id": "fullhop",
+    "status": "exported",
+    "rows": 27,
+    "recipe": "t0..6: jump held; t8, t10: stick (0,-1) + attack"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "special_n",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 34,
+    "recipe": "t0: special"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "special_up",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 39,
+    "recipe": "t0: stick (0,1) + special"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "special_side",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 42,
+    "recipe": "t0: stick (1,0) + special"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "special_down",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 33,
+    "recipe": "t0: stick (0,-1) + special"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "throw_f",
+    "variant_id": "from_grab",
+    "status": "exported",
+    "rows": 36,
+    "recipe": "target at +10; t0: grab; t12+: stick (1,0)"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "throw_b",
+    "variant_id": "from_grab",
+    "status": "exported",
+    "rows": 41,
+    "recipe": "target at +10; t0: grab; t12+: stick (-1,0)"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "throw_u",
+    "variant_id": "from_grab",
+    "status": "exported",
+    "rows": 36,
+    "recipe": "target at +10; t0: grab; t12+: stick (0,1)"
+  },
+  {
+    "character_id": "kestrel",
+    "action_id": "throw_d",
+    "variant_id": "from_grab",
+    "status": "exported",
+    "rows": 39,
+    "recipe": "target at +10; t0: grab; t12+: stick (0,-1)"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "jab",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 24,
+    "recipe": "t0: attack"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "jab2",
+    "variant_id": "after_jab1_hit",
+    "status": "exported",
+    "rows": 37,
+    "recipe": "target at +11; t0: attack (jab 1 hits); attack re-pressed every 2 ticks from t4"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "ftilt",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 38,
+    "recipe": "t0: stick (0.55,0) + attack"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "utilt",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 37,
+    "recipe": "t0: stick (0,0.55) + attack"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "dtilt",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 36,
+    "recipe": "t0: stick (0,-0.55) + attack"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "fsmash",
+    "variant_id": "cstick",
+    "status": "exported",
+    "rows": 57,
+    "recipe": "t0: c-stick (1,0)"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "fsmash",
+    "variant_id": "charged_max",
+    "status": "exported",
+    "rows": 117,
+    "recipe": "t0..70: stick flick (1,0) + attack held (full charge)"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "usmash",
+    "variant_id": "cstick",
+    "status": "exported",
+    "rows": 57,
+    "recipe": "t0: c-stick (0,1)"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "dsmash",
+    "variant_id": "cstick",
+    "status": "exported",
+    "rows": 51,
+    "recipe": "t0: c-stick (0,-1)"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "dash_attack",
+    "variant_id": "from_dash",
+    "status": "exported",
+    "rows": 50,
+    "recipe": "t0..4: stick (1,0) dash; t4: + attack"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "nair",
+    "variant_id": "fullhop",
+    "status": "exported",
+    "rows": 39,
+    "recipe": "t0..6: jump held (full hop); t8, t10: attack"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "fair",
+    "variant_id": "fullhop",
+    "status": "exported",
+    "rows": 39,
+    "recipe": "t0..6: jump held; t8, t10: stick (0.6,0) + attack"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "bair",
+    "variant_id": "fullhop",
+    "status": "exported",
+    "rows": 39,
+    "recipe": "t0..6: jump held; t8, t10: stick (-0.6,0) + attack"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "uair",
+    "variant_id": "fullhop",
+    "status": "exported",
+    "rows": 39,
+    "recipe": "t0..6: jump held; t8, t10: stick (0,1) + attack"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "dair",
+    "variant_id": "fullhop",
+    "status": "exported",
+    "rows": 39,
+    "recipe": "t0..6: jump held; t8, t10: stick (0,-1) + attack"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "special_n",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 45,
+    "recipe": "t0: special"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "special_up",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 49,
+    "recipe": "t0: stick (0,1) + special"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "special_side",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 54,
+    "recipe": "t0: stick (1,0) + special"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "special_down",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 52,
+    "recipe": "t0: stick (0,-1) + special"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "throw_f",
+    "variant_id": "from_grab",
+    "status": "exported",
+    "rows": 43,
+    "recipe": "target at +10; t0: grab; t12+: stick (1,0)"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "throw_b",
+    "variant_id": "from_grab",
+    "status": "exported",
+    "rows": 48,
+    "recipe": "target at +10; t0: grab; t12+: stick (-1,0)"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "throw_u",
+    "variant_id": "from_grab",
+    "status": "exported",
+    "rows": 43,
+    "recipe": "target at +10; t0: grab; t12+: stick (0,1)"
+  },
+  {
+    "character_id": "boulder",
+    "action_id": "throw_d",
+    "variant_id": "from_grab",
+    "status": "exported",
+    "rows": 46,
+    "recipe": "target at +10; t0: grab; t12+: stick (0,-1)"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "jab",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 16,
+    "recipe": "t0: attack"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "jab2",
+    "variant_id": "after_jab1_hit",
+    "status": "exported",
+    "rows": 26,
+    "recipe": "target at +11; t0: attack (jab 1 hits); attack re-pressed every 2 ticks from t4"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "ftilt",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 23,
+    "recipe": "t0: stick (0.55,0) + attack"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "utilt",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 22,
+    "recipe": "t0: stick (0,0.55) + attack"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "dtilt",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 23,
+    "recipe": "t0: stick (0,-0.55) + attack"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "fsmash",
+    "variant_id": "cstick",
+    "status": "exported",
+    "rows": 39,
+    "recipe": "t0: c-stick (1,0)"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "fsmash",
+    "variant_id": "charged_max",
+    "status": "exported",
+    "rows": 99,
+    "recipe": "t0..70: stick flick (1,0) + attack held (full charge)"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "usmash",
+    "variant_id": "cstick",
+    "status": "exported",
+    "rows": 40,
+    "recipe": "t0: c-stick (0,1)"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "dsmash",
+    "variant_id": "cstick",
+    "status": "exported",
+    "rows": 36,
+    "recipe": "t0: c-stick (0,-1)"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "dash_attack",
+    "variant_id": "from_dash",
+    "status": "exported",
+    "rows": 35,
+    "recipe": "t0..4: stick (1,0) dash; t4: + attack"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "nair",
+    "variant_id": "fullhop",
+    "status": "exported",
+    "rows": 36,
+    "recipe": "t0..6: jump held (full hop); t8, t10: attack"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "fair",
+    "variant_id": "fullhop",
+    "status": "exported",
+    "rows": 33,
+    "recipe": "t0..6: jump held; t8, t10: stick (0.6,0) + attack"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "bair",
+    "variant_id": "fullhop",
+    "status": "exported",
+    "rows": 36,
+    "recipe": "t0..6: jump held; t8, t10: stick (-0.6,0) + attack"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "uair",
+    "variant_id": "fullhop",
+    "status": "exported",
+    "rows": 30,
+    "recipe": "t0..6: jump held; t8, t10: stick (0,1) + attack"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "dair",
+    "variant_id": "fullhop",
+    "status": "exported",
+    "rows": 37,
+    "recipe": "t0..6: jump held; t8, t10: stick (0,-1) + attack"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "special_n",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 29,
+    "recipe": "t0: special"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "special_up",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 36,
+    "recipe": "t0: stick (0,1) + special"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "special_side",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 36,
+    "recipe": "t0: stick (1,0) + special"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "special_down",
+    "variant_id": "ground",
+    "status": "exported",
+    "rows": 29,
+    "recipe": "t0: stick (0,-1) + special"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "throw_f",
+    "variant_id": "from_grab",
+    "status": "exported",
+    "rows": 33,
+    "recipe": "target at +10; t0: grab; t12+: stick (1,0)"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "throw_b",
+    "variant_id": "from_grab",
+    "status": "exported",
+    "rows": 37,
+    "recipe": "target at +10; t0: grab; t12+: stick (-1,0)"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "throw_u",
+    "variant_id": "from_grab",
+    "status": "exported",
+    "rows": 33,
+    "recipe": "target at +10; t0: grab; t12+: stick (0,1)"
+  },
+  {
+    "character_id": "viper",
+    "action_id": "throw_d",
+    "variant_id": "from_grab",
+    "status": "exported",
+    "rows": 35,
+    "recipe": "target at +10; t0: grab; t12+: stick (0,-1)"
+  }
+]
