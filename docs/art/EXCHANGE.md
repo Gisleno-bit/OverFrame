@@ -1,5 +1,14 @@
 # 6. Contrato de intercambio — OVERFRAME procedural v1
 
+> Coordinación actual: [repositorio y trabajo conservado](REPOSITORY_MAP.md),
+> [flujo de entrega](WORKFLOW.md) y [roles](ROLES.md). Los párrafos de estado
+> de la entrega inicial que siguen son históricos; el acceso y los resultados
+> actuales se verifican en Git y en el estado CI enlazado desde
+> [PROJECT_STATUS.md](../../PROJECT_STATUS.md). Las cámaras y fixtures vigentes
+> están en [capture-suite.json](capture-suite.json), y la animación se valida
+> con su [contrato específico](procedural/anim/FORMAT.md). No reutilizar un
+> antiguo número de tests, error de acceso o tabla de cámaras como estado actual.
+
 Estado de esta entrega: especificación propuesta; no implementación ni aprobación visual de una build. El acceso GitHub al repositorio y a PROJECT_STATUS.md devolvió 404. No determina si el repositorio es privado, aún no está publicado o falta acceso. Referencia consultada: copia adjunta del proyecto, identificada por el usuario como v0.5.0/db251b0. No se han ejecutado sus tests en esta entrega. El número 92 es el baseline comunicado, no un resultado nuevo.
 
 ## Autoridad y orden de lectura

@@ -1,7 +1,15 @@
 # Roles y recursos de referencia
 
 Quién decide qué en OVERFRAME, y qué material se estudia para animaciones
-y movimientos. Este documento manda sobre cualquier prompt anterior.
+y movimientos. Las instrucciones explícitas actuales del usuario tienen prioridad;
+este documento conserva el reparto de trabajo acordado para el juego.
+
+## Inicio de cada entrega
+
+Confirmar repositorio, rama, SHA y cambios existentes siguiendo [WORKFLOW.md](WORKFLOW.md).
+El juego vive en `Gisleno-bit/OverFrame`; `Gisleno-bit/Overframe-1` es otro
+producto, un navegador overlay. Leer [REPOSITORY_MAP.md](REPOSITORY_MAP.md) para
+conservar el trabajo de ambos y evitar mezclar sus carpetas, comandos o políticas.
 
 ## Roles
 
@@ -50,6 +58,7 @@ Espartaco lo pegan en el hilo o en la spec; Claude no lo rellena de memoria.
 3. ChatGPT revisa que la extremidad de contacto coincide con la hitbox en
    "primer activo" y que la silueta lee; corrige por `piece_id` o por pose.
 
-Formato propuesto para esas poses (se fijará en la primera vuelta de
-animación): `docs/art/procedural/anim/<personaje>.json`, una entrada por
-`action_id` de `frame-data.csv`.
+Formato vigente: [contrato de animación](procedural/anim/FORMAT.md) y
+`docs/art/procedural/anim/<personaje>.json`, una entrada por `action_id` real
+y evidencia de todas sus variantes. Kestrel ya tiene su dirección de 22 acciones;
+la existencia del JSON no equivale a implementación ni aprobación visual.
