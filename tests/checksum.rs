@@ -87,6 +87,17 @@ fn checksum_sees_every_causal_field() {
     fighter("support", &base, |f| f.support = Some(3));
     fighter("prev_pos", &base, |f| f.prev_pos.x += 1.0);
     fighter("state", &base, |f| f.state = State::Crouch);
+    // A shield break and the ordinary stun of a survived block share
+    // `State::ShieldStun`, so this flag is the only thing that tells a
+    // future tick which one it is serving (see `Fighter::shield_covers`).
+    fighter("shield_broken", &base, |f| {
+        f.shield_broken = !f.shield_broken
+    });
+    // Whether this shield's first frames are a real powershield window (a
+    // new press) or the frame counter a served shieldstun happens to reset.
+    fighter("shield_parry_armed", &base, |f| {
+        f.shield_parry_armed = !f.shield_parry_armed
+    });
     fighter("state payload", &base, |f| {
         f.state = State::Attack {
             id: MoveId::Jab,

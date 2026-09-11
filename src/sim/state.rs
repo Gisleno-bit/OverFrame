@@ -183,6 +183,8 @@ impl GameState {
             h.u32(f.stick_flick);
             // --- defence ---
             h.f32(f.shield_health);
+            h.bool(f.shield_broken);
+            h.bool(f.shield_parry_armed);
             h.u32(f.intangible);
             h.u32(f.hitlag);
             h.u32(f.hitstun_timer);
@@ -573,7 +575,7 @@ impl GameState {
 
                 // Shielding blocks if the attack comes from the front.
                 let from_front = (hb_world.x - victim.pos.x) * victim.facing >= -2.0;
-                if victim.is_shielding() && from_front {
+                if victim.shield_covers() && from_front {
                     let ps = self.fighters[j].shield_hit(hitbox.damage);
                     let vp = self.fighters[j].body_center();
                     if ps {
@@ -860,7 +862,7 @@ impl GameState {
             let blocked = {
                 let v = &self.fighters[j];
                 let from_front = (approach_x - v.pos.x) * v.facing >= -2.0;
-                v.is_shielding() && from_front
+                v.shield_covers() && from_front
             };
             if blocked {
                 let powershielded = self.fighters[j].shield_hit(hb.damage);

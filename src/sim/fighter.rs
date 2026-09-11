@@ -227,6 +227,25 @@ pub struct Fighter {
     /// Hitstun taken while staying on the ground (weak grounded hits): no
     /// gravity, slide with friction.
     pub ground_stun: bool,
+    /// The current `ShieldStun` is a **shield break**, not the ordinary
+    /// stun of a block the shield survived.
+    ///
+    /// Both use `State::ShieldStun`, and shield health cannot tell them
+    /// apart even one tick later: the regen that runs for any non-`Shield`
+    /// state puts `SHIELD_REGEN` straight back on top of the zero a break
+    /// leaves behind. So the distinction is recorded when it happens.
+    /// Read by [`Fighter::shield_covers`]; a broken shield covers nothing.
+    pub shield_broken: bool,
+    /// This `Shield` was raised by a **new shield press**, so its first
+    /// frames are a real powershield window.
+    ///
+    /// A shieldstun ends by entering `State::Shield` with `state_frame`
+    /// reset to 0, which on its own reads exactly like a shield that was
+    /// just raised -- and would hand a free parry to a defender that never
+    /// pressed anything, on the one tick the stun is served. The window is
+    /// something a new press earns, so it is recorded at the press and
+    /// cleared when the stun hands the shield back.
+    pub shield_parry_armed: bool,
     /// Stick as of the previous frame (for SDI pulse detection).
     pub prev_stick: Vec2,
     /// A launch waiting for the end of hitlag: (knockback, base angle in
@@ -297,6 +316,8 @@ impl Fighter {
             prev_cstick_len: 0.0,
             stick_last: Vec2::ZERO,
             shield_health: k::SHIELD_MAX,
+            shield_broken: false,
+            shield_parry_armed: false,
             intangible: 0,
             hitlag: 0,
             hitstun_timer: 0,
@@ -391,6 +412,28 @@ impl Fighter {
     #[inline]
     pub fn is_shielding(&self) -> bool {
         matches!(self.state, State::Shield)
+    }
+
+    /// Does a raised shield still stand between this fighter and a frontal
+    /// attack?
+    ///
+    /// True while holding it, and while serving the shieldstun of a block
+    /// the shield *survived* -- the shield is still up during those frames,
+    /// the fighter simply cannot act. False during a shield break, which
+    /// uses the same `State::ShieldStun` but has no shield left to hide
+    /// behind.
+    ///
+    /// Deliberately separate from [`Fighter::is_shielding`], which answers
+    /// "is this fighter actively holding shield" and drives unrelated
+    /// rules (shield regen, out-of-shield options). Only the two block
+    /// sites ask this one.
+    #[inline]
+    pub fn shield_covers(&self) -> bool {
+        match self.state {
+            State::Shield => true,
+            State::ShieldStun { .. } => !self.shield_broken,
+            _ => false,
+        }
     }
 
     /// Current active hitbox in world space, if any — `None` once it has
@@ -596,6 +639,12 @@ impl Fighter {
             State::Throw { id } => self.tick_throw(id),
             State::Shield => out.spawn_projectile = self.tick_shield(input),
             State::ShieldStun { total } if self.state_frame >= total => {
+                // The stun is served; whatever it was, the fighter is
+                // holding a shield again from here. `set_state` resets the
+                // frame counter, but holding through a stun is not a new
+                // press, so the powershield window is not re-armed.
+                self.shield_broken = false;
+                self.shield_parry_armed = false;
                 self.set_state(State::Shield);
             }
             State::Roll { dir } => self.tick_roll(dir, stage),
@@ -761,6 +810,8 @@ impl Fighter {
         self.kb_vel = Vec2::ZERO;
         self.kb_fall = 0.0;
         self.ground_stun = false;
+        self.shield_broken = false;
+        self.shield_parry_armed = false;
         self.pending_launch = None;
         self.stale = [None; k::STALE_QUEUE];
         self.meteor = false;
@@ -813,6 +864,10 @@ impl Fighter {
                     self.set_state(State::Spotdodge);
                     return false;
                 } else {
+                    self.shield_broken = false;
+                    // A real raise, from a state that could act: this one
+                    // earns its powershield window.
+                    self.shield_parry_armed = true;
                     self.set_state(State::Shield);
                     return false;
                 }
@@ -1193,11 +1248,19 @@ impl Fighter {
         let sx = input.stick.x;
         let sy = input.stick.y;
 
+        // Once the window has gone by, the arming bit has no more work to
+        // do; clearing it keeps two shields that behave identically from
+        // carrying different state into the rollback checksum.
+        if self.state_frame >= k::POWERSHIELD_WINDOW {
+            self.shield_parry_armed = false;
+        }
+
         // Shield shrinks while held, and breaks if depleted.
         self.shield_health -= k::SHIELD_DECAY;
         if self.shield_health <= 0.0 {
             self.shield_health = 0.0;
             // shield break -> long stun
+            self.shield_broken = true;
             self.set_state(State::ShieldStun { total: 120 });
             return false;
         }
@@ -1862,7 +1925,10 @@ impl Fighter {
     /// Block a hit. Returns `true` if it was a powershield (raised within
     /// [`k::POWERSHIELD_WINDOW`] frames): no damage, stun or pushback.
     pub fn shield_hit(&mut self, damage: f32) -> bool {
-        if matches!(self.state, State::Shield) && self.state_frame < k::POWERSHIELD_WINDOW {
+        if self.shield_parry_armed
+            && matches!(self.state, State::Shield)
+            && self.state_frame < k::POWERSHIELD_WINDOW
+        {
             self.anim_flash = 4;
             return true;
         }
@@ -1871,10 +1937,125 @@ impl Fighter {
         self.vel.x = -self.facing * super::knockback::shield_push(damage);
         if self.shield_health <= 0.0 {
             self.shield_health = 0.0;
+            self.shield_broken = true;
             self.set_state(State::ShieldStun { total: 120 });
         } else {
             self.set_state(State::ShieldStun { total: stun });
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sim::roster::CharacterId;
+    use crate::sim::stage::StageId;
+
+    fn grounded_kestrel() -> (Fighter, Stage) {
+        let stage = StageId::Lattice.build();
+        let mut f = Fighter::new(CharacterId::Kestrel.data(), 0, Vec2::new(0.0, 0.0));
+        f.grounded = true;
+        f.set_state(State::Stand);
+        (f, stage)
+    }
+
+    fn hold_shield() -> PlayerInput {
+        PlayerInput {
+            buttons: buttons::SHIELD,
+            ..Default::default()
+        }
+    }
+
+    /// The declaration side of the powershield window: it is armed by a real
+    /// shield press and by nothing else. The *behaviour* this causes is
+    /// demonstrated with real impacts in `tests/shield_stun_boundary.rs`,
+    /// which is deliberately written to compile against the pre-fix
+    /// simulation as well.
+    #[test]
+    fn a_new_shield_press_arms_the_powershield_window() {
+        let (mut f, stage) = grounded_kestrel();
+        assert!(!f.shield_parry_armed, "standing still arms nothing");
+        f.tick(&hold_shield(), &stage);
+        assert!(matches!(f.state, State::Shield));
+        assert!(
+            f.shield_parry_armed,
+            "a shield raised from an actionable state earns its window"
+        );
+        assert!(
+            f.shield_hit(5.0),
+            "and that window really does parry inside it"
+        );
+    }
+
+    /// Serving a shieldstun ends in `State::Shield` with `state_frame` back
+    /// at 0, which looks exactly like a fresh raise. Holding through a stun
+    /// is not a press, so the window stays closed.
+    #[test]
+    fn serving_a_shieldstun_does_not_arm_the_powershield_window() {
+        let (mut f, stage) = grounded_kestrel();
+        // Raise it and let it settle well past the window.
+        for _ in 0..(k::POWERSHIELD_WINDOW + 3) {
+            f.tick(&hold_shield(), &stage);
+        }
+        assert!(f.state_frame >= k::POWERSHIELD_WINDOW);
+        // Take a block: the hit lands after the fighter's own tick, exactly
+        // as the match resolves it.
+        assert!(!f.shield_hit(15.0), "a settled shield does not parry");
+        let total = match f.state {
+            State::ShieldStun { total } => total,
+            other => panic!("a survived block is a shieldstun, got {other:?}"),
+        };
+        assert!(!f.shield_parry_armed, "a stun never arms the window");
+        // Hold SHIELD, without ever releasing it, until the stun is served.
+        for _ in 0..=total {
+            f.tick(&hold_shield(), &stage);
+        }
+        assert!(
+            matches!(f.state, State::Shield),
+            "the stun hands the shield back, got {:?}",
+            f.state
+        );
+        assert!(
+            f.state_frame < k::POWERSHIELD_WINDOW,
+            "and it does so with the frame counter reset -- that is the trap"
+        );
+        assert!(
+            !f.shield_parry_armed,
+            "but no press happened, so the window is not open"
+        );
+        assert!(
+            !f.shield_hit(5.0),
+            "an impact on that tick is an ordinary block, not a free parry"
+        );
+    }
+
+    /// Letting go and pressing again is a real new raise, and arms it again.
+    #[test]
+    fn releasing_and_pressing_again_arms_the_window_again() {
+        let (mut f, stage) = grounded_kestrel();
+        for _ in 0..(k::POWERSHIELD_WINDOW + 3) {
+            f.tick(&hold_shield(), &stage);
+        }
+        assert!(!f.shield_hit(15.0));
+        let total = match f.state {
+            State::ShieldStun { total } => total,
+            other => panic!("expected a shieldstun, got {other:?}"),
+        };
+        for _ in 0..=total {
+            f.tick(&hold_shield(), &stage);
+        }
+        assert!(!f.shield_parry_armed);
+        // Release, wait out the shield drop, then press again.
+        for _ in 0..(k::SHIELD_DROP + 4) {
+            f.tick(&PlayerInput::default(), &stage);
+        }
+        f.tick(&hold_shield(), &stage);
+        assert!(
+            matches!(f.state, State::Shield) && f.shield_parry_armed,
+            "a genuine new press arms the window again, state {:?}",
+            f.state
+        );
+        assert!(f.shield_hit(5.0), "and it parries");
     }
 }
