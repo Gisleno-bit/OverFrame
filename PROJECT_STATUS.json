@@ -1,28 +1,28 @@
 {
   "schema_version": 1,
-  "status": "pending",
+  "status": "pass",
   "source_sha": "461232709f69cb94d5729fb64a3e004487c3f55d",
   "version": "0.6.0",
   "latest_attempt": {
     "run_id": "34588485575",
     "run_attempt": "1",
-    "status": "pending",
+    "status": "pass",
     "path": "builds/461232709f69cb94d5729fb64a3e004487c3f55d/attempt-34588485575-1/",
-    "utc": "2026-09-11T10:17:37Z"
+    "utc": "2026-09-11T10:19:27Z"
   },
   "latest_pass": {
-    "run_id": "34569399869",
+    "run_id": "34588485575",
     "run_attempt": "1",
     "status": "pass",
-    "path": "builds/8a5bee927f30fb2633faca84508d7658a1f430f3/attempt-34569399869-1/",
-    "utc": "2026-09-11T06:21:38Z",
-    "source_sha": "8a5bee927f30fb2633faca84508d7658a1f430f3"
+    "path": "builds/461232709f69cb94d5729fb64a3e004487c3f55d/attempt-34588485575-1/",
+    "utc": "2026-09-11T10:19:27Z",
+    "source_sha": "461232709f69cb94d5729fb64a3e004487c3f55d"
   },
   "checks": {
-    "fmt": "not_run",
-    "clippy": "not_run",
-    "tests": "not_run",
-    "tests_passed": null
+    "fmt": "pass",
+    "clippy": "pass",
+    "tests": "pass",
+    "tests_passed": 161
   },
   "capabilities": {
     "procedural_v1_kestrel": "verified",
@@ -46,8 +46,8 @@
     "windows_gamepad_performance": "not_verified",
     "tests_passed_total": 161
   },
-  "note": "pending: the attempt is running; images of this path do not exist yet",
-  "evidence_commit": "40acf43c690be580f75ae2b2dd3e1958433ef877",
+  "note": "evidence_commit is filled by the publish step after this file is committed; read images from that commit, not from the branch tip",
+  "evidence_commit": null,
   "coverage": {
     "kestrel": {
       "complete": true,
