@@ -38,3 +38,10 @@ Inspected every displayed frame of dtilt, utilt, ftilt, uair and dair in both fa
 The complete generated inventory still contains 45 sequences / 1,619 frames and is not the count of inspected or approved frames. The separate throw-down retry adds its missing facing. Remaining review concerns the source-changed low/up-smash and future SpecialN/charge/throw presentation, with final matching-source evidence required. This historical frame inspection does not establish real-time playback or interactive quality.
 
 Direction: [charged release](../procedural/anim/kestrel-charge-release-presentation.md) and [four throws](../procedural/anim/kestrel-throw-presentation.md). Both are pending implementation; [compact discharge](../procedural/anim/kestrel-special-n-presentation.md) remains the next visual pass.
+
+
+## Defense boundary checkpoint before compact discharge
+
+Claude's shield correction `888fc01395f5bd2bc965228299f862039224b6a0` has passed the independent Windows regression (identical portable test: 7 pass / 5 fail before, 12 pass after), full 212-test suite, 205-test headless suite, 26 Python evidence tests, format/lint and release build. The matching 58-file production capture completed without skips; numerical contact/support audits passed. See the [implementation review](888fc01395f5bd2bc965228299f862039224b6a0.md) for provenance, behavior, measurement limits and pending remote CI.
+
+This preserves surviving shield coverage during normal shieldstun and removes the free recovery powershield, while keeping broken shields vulnerable and genuine new raises able to parry. It changes no presentation. The current SpecialN wide and ThrowB primary captures were inspected again; compact discharge, charged-release continuity and physical throw presentation remain pending. The complete SpecialN implementation instruction has now been sent to the existing Claude Opus 5 Extra task as a separate visual delivery, with the four defense files frozen.
