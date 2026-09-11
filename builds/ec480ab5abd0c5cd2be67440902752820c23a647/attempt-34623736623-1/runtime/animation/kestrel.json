@@ -1,0 +1,1519 @@
+{
+  "actions": [
+    {
+      "action_id": "jab",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.0,
+      "centroid_gap": 1.9080299139022827,
+      "contact_piece_id": "k_hand_r",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 1.9080299139022827,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 7.5,
+          "intersection_required": true,
+          "lean_assist_deg": 0.0,
+          "max_reach": 10.120051383972168,
+          "note": "limb cannot reach the hitbox centre (needs 12.027u, chain reaches 10.120u): it extends fully along the line and the piece still intersects, centroid 1.908u from the centre (radius 7.500u)",
+          "required_reach": 12.027082443237305,
+          "state_frame": 1,
+          "target_local": [
+            13.0,
+            21.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 7.5,
+      "intersection_required": true,
+      "lean_assist_deg": 0.0,
+      "max_reach": 10.120051383972168,
+      "note": "limb cannot reach the hitbox centre (needs 12.027u, chain reaches 10.120u): it extends fully along the line and the piece still intersects, centroid 1.908u from the centre (radius 7.500u)",
+      "pose_family": "punch",
+      "required_reach": 12.027082443237305,
+      "target_local": [
+        13.0,
+        21.0
+      ]
+    },
+    {
+      "action_id": "jab2",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.5,
+      "centroid_gap": 2.747741460800171,
+      "contact_piece_id": "k_hand_l",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 2.747741460800171,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 7.5,
+          "intersection_required": true,
+          "lean_assist_deg": 0.0,
+          "max_reach": 10.120051383972168,
+          "note": "limb cannot reach the hitbox centre (needs 12.867u, chain reaches 10.120u): it extends fully along the line and the piece still intersects, centroid 2.748u from the centre (radius 7.500u)",
+          "required_reach": 12.866792678833008,
+          "state_frame": 2,
+          "target_local": [
+            14.0,
+            22.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 7.5,
+      "intersection_required": true,
+      "lean_assist_deg": 0.0,
+      "max_reach": 10.120051383972168,
+      "note": "limb cannot reach the hitbox centre (needs 12.867u, chain reaches 10.120u): it extends fully along the line and the piece still intersects, centroid 2.748u from the centre (radius 7.500u)",
+      "pose_family": "punch",
+      "required_reach": 12.866792678833008,
+      "target_local": [
+        14.0,
+        22.0
+      ]
+    },
+    {
+      "action_id": "ftilt",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.6000000238418579,
+      "centroid_gap": 5.990715980529785,
+      "contact_piece_id": "k_foot_r",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 5.990715980529785,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 8.5,
+          "intersection_required": true,
+          "lean_assist_deg": 0.0,
+          "max_reach": 13.080373764038086,
+          "note": "limb cannot reach the hitbox centre (needs 19.067u, chain reaches 13.080u): it extends fully along the line and the piece still intersects, centroid 5.991u from the centre (radius 8.500u)",
+          "required_reach": 19.066768646240234,
+          "state_frame": 4,
+          "target_local": [
+            18.0,
+            19.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 8.5,
+      "intersection_required": true,
+      "lean_assist_deg": 0.0,
+      "max_reach": 13.080373764038086,
+      "note": "limb cannot reach the hitbox centre (needs 19.067u, chain reaches 13.080u): it extends fully along the line and the piece still intersects, centroid 5.991u from the centre (radius 8.500u)",
+      "pose_family": "kick",
+      "required_reach": 19.066768646240234,
+      "target_local": [
+        18.0,
+        19.0
+      ]
+    },
+    {
+      "action_id": "utilt",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.6000000238418579,
+      "centroid_gap": 0.179080069065094,
+      "contact_piece_id": "k_hand_r",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 0.179080069065094,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 9.5,
+          "intersection_required": true,
+          "lean_assist_deg": 0.0,
+          "max_reach": 10.196320533752441,
+          "note": "limb cannot reach the hitbox centre (needs 10.374u, chain reaches 10.196u): it extends fully along the line and the piece still intersects, centroid 0.179u from the centre (radius 9.500u)",
+          "required_reach": 10.374399185180664,
+          "state_frame": 4,
+          "target_local": [
+            4.0,
+            33.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 9.5,
+      "intersection_required": true,
+      "lean_assist_deg": 0.0,
+      "max_reach": 10.196320533752441,
+      "note": "limb cannot reach the hitbox centre (needs 10.374u, chain reaches 10.196u): it extends fully along the line and the piece still intersects, centroid 0.179u from the centre (radius 9.500u)",
+      "pose_family": "uppercut",
+      "required_reach": 10.374399185180664,
+      "target_local": [
+        4.0,
+        33.0
+      ]
+    },
+    {
+      "action_id": "dtilt",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.6000000238418579,
+      "centroid_gap": 2.8704943656921387,
+      "contact_piece_id": "k_foot_r",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 2.8704943656921387,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 8.0,
+          "intersection_required": true,
+          "lean_assist_deg": 0.0,
+          "max_reach": 13.133970260620117,
+          "note": "limb cannot reach the hitbox centre (needs 16.002u, chain reaches 13.134u): it extends fully along the line and the piece still intersects, centroid 2.870u from the centre (radius 8.000u)",
+          "required_reach": 16.001760482788086,
+          "state_frame": 6,
+          "target_local": [
+            16.0,
+            11.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 8.0,
+      "intersection_required": true,
+      "lean_assist_deg": 0.0,
+      "max_reach": 13.133970260620117,
+      "note": "limb cannot reach the hitbox centre (needs 16.002u, chain reaches 13.134u): it extends fully along the line and the piece still intersects, centroid 2.870u from the centre (radius 8.000u)",
+      "pose_family": "low_kick",
+      "required_reach": 16.001760482788086,
+      "target_local": [
+        16.0,
+        11.0
+      ]
+    },
+    {
+      "action_id": "fsmash",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.699999988079071,
+      "centroid_gap": 8.840216636657715,
+      "contact_piece_id": "k_hand_r",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 8.840216636657715,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 10.5,
+          "intersection_required": true,
+          "lean_assist_deg": 12.0,
+          "max_reach": 10.156064987182617,
+          "note": "limb cannot reach the hitbox centre (needs 18.995u, chain reaches 10.156u): it extends fully along the line and the piece still intersects, centroid 8.840u from the centre (radius 10.500u)",
+          "required_reach": 18.995283126831055,
+          "state_frame": 11,
+          "target_local": [
+            22.0,
+            19.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 10.5,
+      "intersection_required": true,
+      "lean_assist_deg": 12.0,
+      "max_reach": 10.156064987182617,
+      "note": "limb cannot reach the hitbox centre (needs 18.995u, chain reaches 10.156u): it extends fully along the line and the piece still intersects, centroid 8.840u from the centre (radius 10.500u)",
+      "pose_family": "palm_drive",
+      "required_reach": 18.995283126831055,
+      "target_local": [
+        22.0,
+        19.0
+      ]
+    },
+    {
+      "action_id": "usmash",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.699999988079071,
+      "centroid_gap": 3.5357367992401123,
+      "contact_piece_id": "k_hand_r",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 3.5357367992401123,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 11.5,
+          "intersection_required": true,
+          "lean_assist_deg": 0.0,
+          "max_reach": 10.193073272705078,
+          "note": "limb cannot reach the hitbox centre (needs 13.728u, chain reaches 10.193u): it extends fully along the line and the piece still intersects, centroid 3.536u from the centre (radius 11.500u)",
+          "required_reach": 13.727810859680176,
+          "state_frame": 7,
+          "target_local": [
+            2.0,
+            37.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 11.5,
+      "intersection_required": true,
+      "lean_assist_deg": 0.0,
+      "max_reach": 10.193073272705078,
+      "note": "limb cannot reach the hitbox centre (needs 13.728u, chain reaches 10.193u): it extends fully along the line and the piece still intersects, centroid 3.536u from the centre (radius 11.500u)",
+      "pose_family": "overhead_drive",
+      "required_reach": 13.727810859680176,
+      "target_local": [
+        2.0,
+        37.0
+      ]
+    },
+    {
+      "action_id": "dsmash",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.6499999761581421,
+      "centroid_gap": 8.948978424072266,
+      "contact_piece_id": "k_foot_r",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 8.948978424072266,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 10.0,
+          "intersection_required": true,
+          "lean_assist_deg": 0.0,
+          "max_reach": 13.127241134643555,
+          "note": "limb cannot reach the hitbox centre (needs 16.194u, chain reaches 13.127u): it extends fully along the line and the piece still intersects, centroid 8.949u from the centre (radius 10.000u)",
+          "required_reach": 16.193553924560547,
+          "state_frame": 6,
+          "target_local": [
+            20.0,
+            13.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 10.0,
+      "intersection_required": true,
+      "lean_assist_deg": 0.0,
+      "max_reach": 13.127241134643555,
+      "note": "limb cannot reach the hitbox centre (needs 16.194u, chain reaches 13.127u): it extends fully along the line and the piece still intersects, centroid 8.949u from the centre (radius 10.000u)",
+      "pose_family": "low_sweep",
+      "required_reach": 16.193553924560547,
+      "target_local": [
+        20.0,
+        13.0
+      ]
+    },
+    {
+      "action_id": "dash_attack",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.550000011920929,
+      "centroid_gap": 5.608988285064697,
+      "contact_piece_id": "k_hand_r",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 5.608988285064697,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 10.0,
+          "intersection_required": true,
+          "lean_assist_deg": 0.0,
+          "max_reach": 10.008593559265137,
+          "note": null,
+          "required_reach": 7.745745658874512,
+          "state_frame": 4,
+          "target_local": [
+            16.0,
+            21.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 10.0,
+      "intersection_required": true,
+      "lean_assist_deg": 0.0,
+      "max_reach": 10.008593559265137,
+      "note": null,
+      "pose_family": "running_forearm",
+      "required_reach": 7.745745658874512,
+      "target_local": [
+        16.0,
+        21.0
+      ]
+    },
+    {
+      "action_id": "nair",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.5,
+      "centroid_gap": 0.04030267894268036,
+      "contact_piece_id": "k_foot_r",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 0.04030267894268036,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 10.5,
+          "intersection_required": true,
+          "lean_assist_deg": 0.0,
+          "max_reach": 13.082763671875,
+          "note": "limb cannot reach the hitbox centre (needs 13.118u, chain reaches 13.083u): it extends fully along the line and the piece still intersects, centroid 0.040u from the centre (radius 10.500u)",
+          "required_reach": 13.118308067321777,
+          "state_frame": 3,
+          "target_local": [
+            12.0,
+            19.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 10.5,
+      "intersection_required": true,
+      "lean_assist_deg": 0.0,
+      "max_reach": 13.082763671875,
+      "note": "limb cannot reach the hitbox centre (needs 13.118u, chain reaches 13.083u): it extends fully along the line and the piece still intersects, centroid 0.040u from the centre (radius 10.500u)",
+      "pose_family": "split_kick",
+      "required_reach": 13.118308067321777,
+      "target_local": [
+        12.0,
+        19.0
+      ]
+    },
+    {
+      "action_id": "fair",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.6499999761581421,
+      "centroid_gap": 6.311553001403809,
+      "contact_piece_id": "k_foot_r",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 6.311553001403809,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 9.0,
+          "intersection_required": true,
+          "lean_assist_deg": 0.0,
+          "max_reach": 13.115754127502441,
+          "note": "limb cannot reach the hitbox centre (needs 19.424u, chain reaches 13.116u): it extends fully along the line and the piece still intersects, centroid 6.312u from the centre (radius 9.000u)",
+          "required_reach": 19.423954010009766,
+          "state_frame": 7,
+          "target_local": [
+            18.0,
+            21.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 9.0,
+      "intersection_required": true,
+      "lean_assist_deg": 0.0,
+      "max_reach": 13.115754127502441,
+      "note": "limb cannot reach the hitbox centre (needs 19.424u, chain reaches 13.116u): it extends fully along the line and the piece still intersects, centroid 6.312u from the centre (radius 9.000u)",
+      "pose_family": "rising_kick",
+      "required_reach": 19.423954010009766,
+      "target_local": [
+        18.0,
+        21.0
+      ]
+    },
+    {
+      "action_id": "bair",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.550000011920929,
+      "centroid_gap": 5.615270614624023,
+      "contact_piece_id": "k_foot_l",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 5.615270614624023,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 9.0,
+          "intersection_required": true,
+          "lean_assist_deg": 0.0,
+          "max_reach": 13.14927864074707,
+          "note": "limb cannot reach the hitbox centre (needs 18.764u, chain reaches 13.149u): it extends fully along the line and the piece still intersects, centroid 5.615u from the centre (radius 9.000u)",
+          "required_reach": 18.764060974121094,
+          "state_frame": 4,
+          "target_local": [
+            -18.0,
+            19.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 9.0,
+      "intersection_required": true,
+      "lean_assist_deg": 0.0,
+      "max_reach": 13.14927864074707,
+      "note": "limb cannot reach the hitbox centre (needs 18.764u, chain reaches 13.149u): it extends fully along the line and the piece still intersects, centroid 5.615u from the centre (radius 9.000u)",
+      "pose_family": "back_kick",
+      "required_reach": 18.764060974121094,
+      "target_local": [
+        -18.0,
+        19.0
+      ]
+    },
+    {
+      "action_id": "uair",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.6000000238418579,
+      "centroid_gap": 6.357303142547607,
+      "contact_piece_id": "k_foot_r",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 6.357303142547607,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 10.0,
+          "intersection_required": true,
+          "lean_assist_deg": 0.0,
+          "max_reach": 13.050990104675293,
+          "note": "limb cannot reach the hitbox centre (needs 19.403u, chain reaches 13.051u): it extends fully along the line and the piece still intersects, centroid 6.357u from the centre (radius 10.000u)",
+          "required_reach": 19.403348922729492,
+          "state_frame": 7,
+          "target_local": [
+            2.0,
+            33.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 10.0,
+      "intersection_required": true,
+      "lean_assist_deg": 0.0,
+      "max_reach": 13.050990104675293,
+      "note": "limb cannot reach the hitbox centre (needs 19.403u, chain reaches 13.051u): it extends fully along the line and the piece still intersects, centroid 6.357u from the centre (radius 10.000u)",
+      "pose_family": "overhead_kick",
+      "required_reach": 19.403348922729492,
+      "target_local": [
+        2.0,
+        33.0
+      ]
+    },
+    {
+      "action_id": "dair",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.6499999761581421,
+      "centroid_gap": 3.6111316680908203,
+      "contact_piece_id": "k_foot_r",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 3.6111316680908203,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 9.0,
+          "intersection_required": true,
+          "lean_assist_deg": 0.0,
+          "max_reach": 13.12450122833252,
+          "note": "limb cannot reach the hitbox centre (needs 16.736u, chain reaches 13.125u): it extends fully along the line and the piece still intersects, centroid 3.611u from the centre (radius 9.000u)",
+          "required_reach": 16.735889434814453,
+          "state_frame": 7,
+          "target_local": [
+            8.0,
+            -1.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 9.0,
+      "intersection_required": true,
+      "lean_assist_deg": 0.0,
+      "max_reach": 13.12450122833252,
+      "note": "limb cannot reach the hitbox centre (needs 16.736u, chain reaches 13.125u): it extends fully along the line and the piece still intersects, centroid 3.611u from the centre (radius 9.000u)",
+      "pose_family": "heel_drop",
+      "required_reach": 16.735889434814453,
+      "target_local": [
+        8.0,
+        -1.0
+      ]
+    },
+    {
+      "action_id": "special_n",
+      "aim_kind": "projectile_spawn",
+      "anticipation_fraction": 0.6499999761581421,
+      "centroid_gap": 3.07741117477417,
+      "contact_piece_id": "k_hand_r",
+      "events": [
+        {
+          "aim_kind": "projectile_spawn",
+          "centroid_gap": 3.07741117477417,
+          "event": "projectile_release",
+          "guaranteed_intersection": true,
+          "hit_radius": 4.0,
+          "intersection_required": false,
+          "lean_assist_deg": 21.25,
+          "max_reach": 10.172895431518555,
+          "note": "the simulation releases the projectile on the move's first frame, so the authored anticipation fraction (0.65) has no inactive sample to peak in and the palm leads the emission line from frame 0; the piece centroid ends 3.077u from the spawn point (projectile radius 4.000u). This event never replaces the move's own hitbox, measured separately below",
+          "required_reach": 13.24930477142334,
+          "state_frame": 0,
+          "target_local": [
+            14.0,
+            15.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 4.0,
+      "intersection_required": false,
+      "lean_assist_deg": 21.25,
+      "max_reach": 10.172895431518555,
+      "note": "the simulation releases the projectile on the move's first frame, so the authored anticipation fraction (0.65) has no inactive sample to peak in and the palm leads the emission line from frame 0; the piece centroid ends 3.077u from the spawn point (projectile radius 4.000u). This event never replaces the move's own hitbox, measured separately below",
+      "pose_family": "projectile_release",
+      "required_reach": 13.24930477142334,
+      "target_local": [
+        14.0,
+        15.0
+      ]
+    },
+    {
+      "action_id": "special_up",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.6000000238418579,
+      "centroid_gap": 2.8709398520732066e-6,
+      "contact_piece_id": "k_hand_r",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 2.8709398520732066e-6,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 12.0,
+          "intersection_required": true,
+          "lean_assist_deg": 0.0,
+          "max_reach": 10.196320533752441,
+          "note": null,
+          "required_reach": 6.869449615478516,
+          "state_frame": 6,
+          "target_local": [
+            4.0,
+            29.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 12.0,
+      "intersection_required": true,
+      "lean_assist_deg": 0.0,
+      "max_reach": 10.196320533752441,
+      "note": null,
+      "pose_family": "rising_drive",
+      "required_reach": 6.869449615478516,
+      "target_local": [
+        4.0,
+        29.0
+      ]
+    },
+    {
+      "action_id": "special_side",
+      "aim_kind": "hitbox",
+      "anticipation_fraction": 0.6499999761581421,
+      "centroid_gap": 5.367888450622559,
+      "contact_piece_id": "k_hand_r",
+      "events": [
+        {
+          "aim_kind": "hitbox",
+          "centroid_gap": 5.367888450622559,
+          "event": "hitbox",
+          "guaranteed_intersection": true,
+          "hit_radius": 10.0,
+          "intersection_required": true,
+          "lean_assist_deg": 0.0,
+          "max_reach": 10.156064987182617,
+          "note": "limb cannot reach the hitbox centre (needs 15.523u, chain reaches 10.156u): it extends fully along the line and the piece still intersects, centroid 5.368u from the centre (radius 10.000u)",
+          "required_reach": 15.522953987121582,
+          "state_frame": 10,
+          "target_local": [
+            18.0,
+            19.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": true,
+      "hit_radius": 10.0,
+      "intersection_required": true,
+      "lean_assist_deg": 0.0,
+      "max_reach": 10.156064987182617,
+      "note": "limb cannot reach the hitbox centre (needs 15.523u, chain reaches 10.156u): it extends fully along the line and the piece still intersects, centroid 5.368u from the centre (radius 10.000u)",
+      "pose_family": "lateral_drive",
+      "required_reach": 15.522953987121582,
+      "target_local": [
+        18.0,
+        19.0
+      ]
+    },
+    {
+      "action_id": "special_down",
+      "aim_kind": "radial_effect",
+      "anticipation_fraction": 0.0,
+      "centroid_gap": 0.0,
+      "contact_piece_id": "k_chest",
+      "events": [
+        {
+          "aim_kind": "radial_effect",
+          "centroid_gap": 0.0,
+          "event": "hitbox",
+          "guaranteed_intersection": false,
+          "hit_radius": 0.0,
+          "intersection_required": false,
+          "lean_assist_deg": 0.0,
+          "max_reach": 0.0,
+          "note": "radial effect: the body is centred in the runtime effect; no limb defines its radius",
+          "required_reach": 0.0,
+          "state_frame": 0,
+          "target_local": [
+            0.0,
+            0.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": false,
+      "hit_radius": 0.0,
+      "intersection_required": false,
+      "lean_assist_deg": 0.0,
+      "max_reach": 0.0,
+      "note": "radial effect: the body is centred in the runtime effect; no limb defines its radius",
+      "pose_family": "radial_pulse",
+      "required_reach": 0.0,
+      "target_local": [
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "action_id": "throw_f",
+      "aim_kind": "throw_release",
+      "anticipation_fraction": 0.6499999761581421,
+      "centroid_gap": 3.619319438934326,
+      "contact_piece_id": "k_hand_r",
+      "events": [
+        {
+          "aim_kind": "throw_release",
+          "centroid_gap": 3.619319438934326,
+          "event": "hitbox",
+          "guaranteed_intersection": false,
+          "hit_radius": 0.0,
+          "intersection_required": false,
+          "lean_assist_deg": 0.0,
+          "max_reach": 10.185251235961914,
+          "note": "no fighter hitbox to intersect (throw_release); measured against the real runtime event",
+          "required_reach": 13.803571701049805,
+          "state_frame": 8,
+          "target_local": [
+            16.0,
+            23.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": false,
+      "hit_radius": 0.0,
+      "intersection_required": false,
+      "lean_assist_deg": 0.0,
+      "max_reach": 10.185251235961914,
+      "note": "no fighter hitbox to intersect (throw_release); measured against the real runtime event",
+      "pose_family": "throw_forward",
+      "required_reach": 13.803571701049805,
+      "target_local": [
+        16.0,
+        23.0
+      ]
+    },
+    {
+      "action_id": "throw_b",
+      "aim_kind": "throw_release",
+      "anticipation_fraction": 0.6499999761581421,
+      "centroid_gap": 6.683332920074463,
+      "contact_piece_id": "k_hand_l",
+      "events": [
+        {
+          "aim_kind": "throw_release",
+          "centroid_gap": 6.683332920074463,
+          "event": "hitbox",
+          "guaranteed_intersection": false,
+          "hit_radius": 0.0,
+          "intersection_required": false,
+          "lean_assist_deg": 0.0,
+          "max_reach": 10.185251235961914,
+          "note": "no fighter hitbox to intersect (throw_release); measured against the real runtime event",
+          "required_reach": 16.867584228515625,
+          "state_frame": 10,
+          "target_local": [
+            -16.0,
+            23.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": false,
+      "hit_radius": 0.0,
+      "intersection_required": false,
+      "lean_assist_deg": 0.0,
+      "max_reach": 10.185251235961914,
+      "note": "no fighter hitbox to intersect (throw_release); measured against the real runtime event",
+      "pose_family": "throw_backward",
+      "required_reach": 16.867584228515625,
+      "target_local": [
+        -16.0,
+        23.0
+      ]
+    },
+    {
+      "action_id": "throw_u",
+      "aim_kind": "throw_release",
+      "anticipation_fraction": 0.6499999761581421,
+      "centroid_gap": 5.990859790472314e-6,
+      "contact_piece_id": "k_hand_r",
+      "events": [
+        {
+          "aim_kind": "throw_release",
+          "centroid_gap": 5.990859790472314e-6,
+          "event": "hitbox",
+          "guaranteed_intersection": false,
+          "hit_radius": 0.0,
+          "intersection_required": false,
+          "lean_assist_deg": 0.0,
+          "max_reach": 10.194976806640625,
+          "note": "no fighter hitbox to intersect (throw_release); measured against the real runtime event",
+          "required_reach": 9.539039611816406,
+          "state_frame": 8,
+          "target_local": [
+            0.0,
+            33.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": false,
+      "hit_radius": 0.0,
+      "intersection_required": false,
+      "lean_assist_deg": 0.0,
+      "max_reach": 10.194976806640625,
+      "note": "no fighter hitbox to intersect (throw_release); measured against the real runtime event",
+      "pose_family": "throw_upward",
+      "required_reach": 9.539039611816406,
+      "target_local": [
+        0.0,
+        33.0
+      ]
+    },
+    {
+      "action_id": "throw_d",
+      "aim_kind": "throw_release",
+      "anticipation_fraction": 0.6499999761581421,
+      "centroid_gap": 9.5367431640625e-7,
+      "contact_piece_id": "k_hand_r",
+      "events": [
+        {
+          "aim_kind": "throw_release",
+          "centroid_gap": 9.5367431640625e-7,
+          "event": "hitbox",
+          "guaranteed_intersection": false,
+          "hit_radius": 0.0,
+          "intersection_required": false,
+          "lean_assist_deg": 0.0,
+          "max_reach": 10.109346389770508,
+          "note": "no fighter hitbox to intersect (throw_release); measured against the real runtime event",
+          "required_reach": 5.37669563293457,
+          "state_frame": 9,
+          "target_local": [
+            6.0,
+            17.0
+          ]
+        }
+      ],
+      "guaranteed_intersection": false,
+      "hit_radius": 0.0,
+      "intersection_required": false,
+      "lean_assist_deg": 0.0,
+      "max_reach": 10.109346389770508,
+      "note": "no fighter hitbox to intersect (throw_release); measured against the real runtime event",
+      "pose_family": "throw_downward",
+      "required_reach": 5.37669563293457,
+      "target_local": [
+        6.0,
+        17.0
+      ]
+    }
+  ],
+  "character_id": "kestrel",
+  "direction_evidence_commit": "aa06eec465099404a1782c2988feea16350b0a71",
+  "direction_file": "docs/art/procedural/anim/kestrel.json",
+  "direction_sha256": "eedbcc35d1dd52b13dc29eb8cfda7efdf004873970122524349e8c9918fdd491",
+  "direction_source_sha": "904644d91b0bc2d1f7b6a2fa789068dcad7b24b5",
+  "direction_status": "direction_ready_implementation_and_visual_review_pending",
+  "method": "SYNTHETIC PROBE, not the real per-frame measurement: poses here are solved once, in the fighter's root-local frame, on a bare one-shot Fighter with no replayed render history, no eased facing, no hitlag rattle and no support_lift -- none of what model::render_eval::evaluate + model::contact::measure_posed apply for the real capture/contact_json pipeline. The contact piece named by the direction is placed on the runtime hit region by two-link inverse kinematics through the real joint chain, with the hitbox offset used signed (a rearward move aims rearward). `centroid_gap` is the distance from the achieved piece centroid to the aim point; the projected piece is convex, so a gap no larger than the radius proves intersection (a convex body's surface can only be nearer to an outside point than its centroid) -- a conservative, sufficient-but-not-necessary condition, always stricter than the real mesh-surface signed_separation reported by contact_json. `guaranteed_intersection: true` here is not proof the real per-frame contact passes; only contact_json's signed_separation is that proof. Anticipation peaks at the authored fraction of the available inactive startup, contact holds through startup+active+late_active, recovery starts after the real last active tick. Support distances are the lowest foot-piece vertex minus the plane the fighter stands on. No simulation value is written.",
+  "probe_kind": "synthetic",
+  "schema_version": 1,
+  "support": [
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            4.216865539550781,
+            2.2923338413238525,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            -0.19210267066955566,
+            0.46515095233917236,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 0.46515095233917236
+        },
+        {
+          "aabb_max": [
+            -0.4925568103790283,
+            2.7195682525634766,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -4.979323863983154,
+            0.625669002532959,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 0.625669002532959
+        }
+      ],
+      "lowest_support_distance": 0.46515095233917236,
+      "state": "idle",
+      "state_frame": 6
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            4.574375152587891,
+            2.332883596420288,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            0.17437517642974854,
+            0.5328836441040039,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 0.5328836441040039
+        },
+        {
+          "aabb_max": [
+            2.9523768424987793,
+            1.8000001907348633,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -1.4476231336593628,
+            2.384185791015625e-7,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 2.384185791015625e-7
+        }
+      ],
+      "lowest_support_distance": 2.384185791015625e-7,
+      "state": "crouch",
+      "state_frame": 6
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            3.7798588275909424,
+            2.50152850151062,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            -0.6673648357391357,
+            0.551234245300293,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 0.551234245300293
+        },
+        {
+          "aabb_max": [
+            -2.3923017978668213,
+            3.595874547958374,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -6.9234490394592285,
+            1.306750774383545,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 1.306750774383545
+        }
+      ],
+      "lowest_support_distance": 0.551234245300293,
+      "state": "hitstun",
+      "state_frame": 6
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            5.1974310874938965,
+            1.9944117069244385,
+            4.079381942749023
+          ],
+          "aabb_min": [
+            0.27664899826049805,
+            0.3986271619796753,
+            1.0617568492889404
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 0.3986271619796753
+        },
+        {
+          "aabb_max": [
+            2.2717461585998535,
+            1.6707009077072144,
+            -1.0617568492889404
+          ],
+          "aabb_min": [
+            -2.679443120956421,
+            5.960464477539062e-7,
+            -4.079381942749023
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 5.960464477539062e-7
+        }
+      ],
+      "lowest_support_distance": 5.960464477539062e-7,
+      "state": "land_lag",
+      "state_frame": 1
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            3.5563573837280273,
+            2.2469828128814697,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            -0.9236078262329102,
+            0.17931747436523438,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 0.17931747436523438
+        },
+        {
+          "aabb_max": [
+            0.06009340286254883,
+            2.261873722076416,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -4.465539455413818,
+            2.384185791015625e-7,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 2.384185791015625e-7
+        }
+      ],
+      "lowest_support_distance": 2.384185791015625e-7,
+      "state": "shield_stun",
+      "state_frame": 2
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            3.820849895477295,
+            2.4327216148376465,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            -0.6137329936027527,
+            0.524528980255127,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 0.524528980255127
+        },
+        {
+          "aabb_max": [
+            -1.4595482349395752,
+            3.1639368534088135,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -5.971331596374512,
+            0.9661365747451782,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 0.9661365747451782
+        }
+      ],
+      "lowest_support_distance": 0.524528980255127,
+      "state": "recovery:jab",
+      "state_frame": 3
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            3.820849895477295,
+            2.4327216148376465,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            -0.6137329936027527,
+            0.524528980255127,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 0.524528980255127
+        },
+        {
+          "aabb_max": [
+            -1.4595482349395752,
+            3.1639368534088135,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -5.971331596374512,
+            0.9661365747451782,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 0.9661365747451782
+        }
+      ],
+      "lowest_support_distance": 0.524528980255127,
+      "state": "recovery:jab2",
+      "state_frame": 4
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            14.636640548706055,
+            18.122655868530273,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            10.140081405639648,
+            15.98959732055664,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 15.98959732055664
+        },
+        {
+          "aabb_max": [
+            -1.3647091388702393,
+            2.3238749504089355,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -5.8876824378967285,
+            0.07476162910461426,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 0.07476162910461426
+        }
+      ],
+      "lowest_support_distance": 0.07476162910461426,
+      "state": "recovery:ftilt",
+      "state_frame": 7
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            3.820849895477295,
+            2.4327216148376465,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            -0.6137329936027527,
+            0.524528980255127,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 0.524528980255127
+        },
+        {
+          "aabb_max": [
+            -1.4595482349395752,
+            3.1639368534088135,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -5.971331596374512,
+            0.9661365747451782,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 0.9661365747451782
+        }
+      ],
+      "lowest_support_distance": 0.524528980255127,
+      "state": "recovery:utilt",
+      "state_frame": 8
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            15.374638557434082,
+            12.037357330322266,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            10.91263198852539,
+            10.035714149475098,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 10.035714149475098
+        },
+        {
+          "aabb_max": [
+            1.7695181369781494,
+            2.400381565093994,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -2.781726837158203,
+            1.1920928955078125e-7,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 1.1920928955078125e-7
+        }
+      ],
+      "lowest_support_distance": 1.1920928955078125e-7,
+      "state": "recovery:dtilt",
+      "state_frame": 9
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            3.820849895477295,
+            1.9081931114196777,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            -0.6137329936027527,
+            4.76837158203125e-7,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 4.76837158203125e-7
+        },
+        {
+          "aabb_max": [
+            -1.4595482349395752,
+            2.6394083499908447,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -5.971331596374512,
+            0.4416080713272095,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 0.4416080713272095
+        }
+      ],
+      "lowest_support_distance": 4.76837158203125e-7,
+      "state": "recovery:fsmash",
+      "state_frame": 14
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            3.820849895477295,
+            2.4327216148376465,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            -0.6137329936027527,
+            0.524528980255127,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 0.524528980255127
+        },
+        {
+          "aabb_max": [
+            -1.4595482349395752,
+            3.1639368534088135,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -5.971331596374512,
+            0.9661365747451782,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 0.9661365747451782
+        }
+      ],
+      "lowest_support_distance": 0.524528980255127,
+      "state": "recovery:usmash",
+      "state_frame": 18
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            15.272151947021484,
+            8.780327796936035,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            10.692487716674805,
+            6.1491522789001465,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 6.1491522789001465
+        },
+        {
+          "aabb_max": [
+            3.0048413276672363,
+            2.4744532108306885,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -1.5575482845306396,
+            0.0,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 0.0
+        }
+      ],
+      "lowest_support_distance": 0.0,
+      "state": "recovery:dsmash",
+      "state_frame": 9
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            8.054218292236328,
+            1.9081932306289673,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            3.619635581970215,
+            2.384185791015625e-7,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 2.384185791015625e-7
+        },
+        {
+          "aabb_max": [
+            -5.772128105163574,
+            4.052061557769775,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -10.337787628173828,
+            1.5531573295593262,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 1.5531573295593262
+        }
+      ],
+      "lowest_support_distance": 2.384185791015625e-7,
+      "state": "recovery:dash_attack",
+      "state_frame": 14
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            3.820849895477295,
+            2.4327216148376465,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            -0.6137329936027527,
+            0.524528980255127,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 0.524528980255127
+        },
+        {
+          "aabb_max": [
+            -1.4595482349395752,
+            3.1639368534088135,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -5.971331596374512,
+            0.9661365747451782,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 0.9661365747451782
+        }
+      ],
+      "lowest_support_distance": 0.524528980255127,
+      "state": "recovery:special_n",
+      "state_frame": 10
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            4.489044189453125,
+            4.440122127532959,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            0.06873774528503418,
+            0.8469505310058594,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 0.8469505310058594
+        },
+        {
+          "aabb_max": [
+            2.2719340324401855,
+            3.4202444553375244,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -2.223348617553711,
+            -2.384185791015625e-7,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": -2.384185791015625e-7
+        }
+      ],
+      "lowest_support_distance": -2.384185791015625e-7,
+      "state": "recovery:special_up",
+      "state_frame": 14
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            6.913486003875732,
+            1.8542771339416504,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            2.4957640171051025,
+            2.384185791015625e-7,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 2.384185791015625e-7
+        },
+        {
+          "aabb_max": [
+            -4.664765357971191,
+            3.5926215648651123,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -9.216011047363281,
+            1.19223952293396,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 1.19223952293396
+        }
+      ],
+      "lowest_support_distance": 2.384185791015625e-7,
+      "state": "recovery:special_side",
+      "state_frame": 16
+    },
+    {
+      "feet": [
+        {
+          "aabb_max": [
+            3.820849895477295,
+            1.9081931114196777,
+            3.6500000953674316
+          ],
+          "aabb_min": [
+            -0.6137329936027527,
+            4.76837158203125e-7,
+            0.9499999284744263
+          ],
+          "bone": "foot_r",
+          "piece_id": "k_foot_r",
+          "support_distance": 4.76837158203125e-7
+        },
+        {
+          "aabb_max": [
+            -1.4595482349395752,
+            2.6394083499908447,
+            -0.9499999284744263
+          ],
+          "aabb_min": [
+            -5.971331596374512,
+            0.4416080713272095,
+            -3.6500000953674316
+          ],
+          "bone": "foot_l",
+          "piece_id": "k_foot_l",
+          "support_distance": 0.4416080713272095
+        }
+      ],
+      "lowest_support_distance": 4.76837158203125e-7,
+      "state": "recovery:special_down",
+      "state_frame": 3
+    }
+  ],
+  "units": "game_units",
+  "unreachable_actions": []
+}
