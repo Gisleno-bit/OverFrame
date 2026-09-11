@@ -44,3 +44,7 @@ Use FightCore, Dragdown/Rivals 2 and SSBWiki as references for move function and
 Inspect → diagnose → specify → Claude implements → execute → observe → correct → test → commit. Each instruction names files, action, observed failure, desired pose/behavior, relation to runtime data, checks and required captures. Inspect implementation personally; a Claude success claim does not close an observation.
 
 Preserve original assets and deterministic simulation. Do not rewrite a solid system without a concrete defect. Gameplay changes require an explicit design decision, baseline and regression evidence; they must not be disguised as a fix for artwork that fails to reach an existing hitbox. Preserve fixed diagnostic cameras while evaluating the separate gameplay camera. Keep unrun or unavailable QA pending, and preserve dated checkpoints and exact-source handoffs through [WORKFLOW.md](WORKFLOW.md).
+
+## Windows iteration checkpoint
+
+The [checkpoint-2 Windows review](reviews/69917fb3a501bf9ad8d3fd465e71c2235709b271.md) records actual images, preserved simulation data, rejected test exceptions and the next concrete pose corrections. Its implementation SHA is an isolated unpublished WIP, not main or an approved delivery. The [gameplay review direction](procedural/anim/kestrel-gameplay-direction.md) records original move roles and follow-up reproduction cases.
