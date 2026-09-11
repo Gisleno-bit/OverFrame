@@ -594,7 +594,7 @@ impl Fighter {
                 }
             }
             State::Throw { id } => self.tick_throw(id),
-            State::Shield => self.tick_shield(input),
+            State::Shield => out.spawn_projectile = self.tick_shield(input),
             State::ShieldStun { total } if self.state_frame >= total => {
                 self.set_state(State::Shield);
             }
@@ -1182,7 +1182,13 @@ impl Fighter {
         }
     }
 
-    fn tick_shield(&mut self, input: &PlayerInput) {
+    /// Returns `true` when this tick's out-of-shield option is the
+    /// projectile action and the shot must actually be requested — the
+    /// shield entry emits exactly like the free-state entry does. The edge
+    /// comes from `pressed`, so holding SPECIAL afterwards repeats nothing,
+    /// and no new cancel option is opened here.
+    #[must_use]
+    fn tick_shield(&mut self, input: &PlayerInput) -> bool {
         let cur = input.buttons;
         let sx = input.stick.x;
         let sy = input.stick.y;
@@ -1193,38 +1199,43 @@ impl Fighter {
             self.shield_health = 0.0;
             // shield break -> long stun
             self.set_state(State::ShieldStun { total: 120 });
-            return;
+            return false;
         }
 
         // Out-of-shield options.
         if self.pressed(cur, buttons::JUMP) {
             self.set_state(State::JumpSquat);
             self.jump_held_at_squat_start = true;
-            return;
+            return false;
         }
         if self.pressed(cur, buttons::GRAB) || self.pressed(cur, buttons::ATTACK) {
             self.grab_dash = false;
             self.set_state(State::Grab);
-            return;
+            return false;
         }
         if self.pressed(cur, buttons::SPECIAL) {
             self.set_state(State::Attack {
                 id: MoveId::SpecialN,
                 aerial: false,
             });
-            return;
+            // This entry is already allowed; it just never asked for the
+            // shot. Every supported entry into the projectile action emits
+            // once, so request it here exactly as `handle_free_intent` does
+            // from an actionable state.
+            return true;
         }
         if sx.abs() > HARD {
             self.set_state(State::Roll { dir: sx.signum() });
-            return;
+            return false;
         }
         if sy < -HARD {
             self.set_state(State::Spotdodge);
-            return;
+            return false;
         }
         if cur & buttons::SHIELD == 0 {
             self.set_state(State::ShieldDrop);
         }
+        false
     }
 
     // ---------------------- stage collision ----------------------

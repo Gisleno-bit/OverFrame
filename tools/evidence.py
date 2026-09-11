@@ -231,29 +231,87 @@ def contact_coverage(index, present, problems, capture_dir):
 
 
 def special_n_hitbox_supplement_coverage(index, present, problems):
-    """`special_n` has two real runtime events (the projectile release,
-    covered by its ordinary declared contact sheets, and the move's own
-    fighter hitbox 8 frames later) -- per review
-    91f9c5a2834353bbb7207dcc4d866a4e513fd48f / art commit
-    343def9c8c45ec69dba36b2b7ce863255ee9b0e4, the emission exception must
-    never let the second event's evidence go missing without failing
-    coverage. These supplemental sheets are additional files (not a second
-    `contact_expected` row -- see contact_coverage), so this is the only
-    check that makes their presence mandatory: whenever a character's
-    `contact_expected` names a `special_n` case, both
+    """A `special_n` that ALSO carries a fighter hitbox some frames after
+    the release has two real runtime events, and the emission exception
+    must never let the second one's evidence go missing without failing
+    coverage -- per review 91f9c5a2834353bbb7207dcc4d866a4e513fd48f / art
+    commit 343def9c8c45ec69dba36b2b7ce863255ee9b0e4. These supplemental
+    sheets are additional files (not a second `contact_expected` row -- see
+    contact_coverage), so this is the only check that makes their presence
+    mandatory: whenever a character's `contact_expected` names a
+    `special_n` case that really has a fighter hitbox, both
     `characters/<ch>/contact-special_n-hitbox.png` and
     `characters/<ch>/contact-special_n-hitbox-wide.png` must be present, or
-    it is a problem (publish fails), not a silently-missing supplement."""
+    it is a problem (publish fails), not a silently-missing supplement.
+
+    A case whose `fighter_hitbox` is false has no such event at all
+    (Kestrel's `special_n` releases a shot and never swings -- see
+    `no_melee` in the simulation's move tables and
+    docs/art/procedural/anim/kestrel-gameplay-fixes.md). Demanding the
+    supplement there would demand a picture of a contact the simulation
+    does not make, so it is not demanded -- and, just as importantly, if
+    one is nonetheless present it is reported, because that would mean the
+    sheet and the simulation disagree.
+
+    The fact is read from the index, never assumed: an older index that
+    predates the `fighter_hitbox` field is treated as "has one", so this
+    check cannot be weakened by a missing field."""
     expected = (index or {}).get("contact_expected", [])
-    chars_with_special_n = sorted({e["character_id"] for e in expected if e.get("action_id") == "special_n"})
     per_char = {}
-    for ch in chars_with_special_n:
+    for e in sorted(expected, key=lambda x: x.get("character_id", "")):
+        if e.get("action_id") != "special_n":
+            continue
+        ch = e["character_id"]
+        if ch in per_char:
+            continue
         primary = f"characters/{ch}/contact-special_n-hitbox.png"
         wide = f"characters/{ch}/contact-special_n-hitbox-wide.png"
+        # Only an explicit boolean `false` exempts a case. A missing field
+        # is an older index and keeps demanding the supplement
+        # (backwards-compatible, never weaker); anything else -- null, 0,
+        # "", "false", a list -- is a malformed index and is a problem in
+        # its own right, never a quiet exemption.
+        raw = e.get("fighter_hitbox", True)
+        if not isinstance(raw, bool):
+            problems.append(
+                f"contact_expected[{ch}/special_n].fighter_hitbox must be true or false, "
+                f"got {raw!r} ({type(raw).__name__})"
+            )
+            per_char[ch] = {
+                "primary": primary,
+                "wide": wide,
+                "present": all(p in present for p in (primary, wide)),
+                "required": True,
+                "reason": "malformed fighter_hitbox; the supplement stays required",
+            }
+            missing = [p for p in (primary, wide) if p not in present]
+            for p in missing:
+                problems.append(f"special_n fighter-hitbox supplement missing: {p}")
+            continue
+        if raw is False:
+            unexpected = [p for p in (primary, wide) if p in present]
+            for p in unexpected:
+                problems.append(
+                    "special_n fighter-hitbox supplement present for a case that "
+                    f"declares no fighter hitbox: {p}"
+                )
+            per_char[ch] = {
+                "primary": primary,
+                "wide": wide,
+                "present": False,
+                "required": False,
+                "reason": "the action declares no fighter hitbox (no_melee)",
+            }
+            continue
         missing = [p for p in (primary, wide) if p not in present]
         for p in missing:
             problems.append(f"special_n fighter-hitbox supplement missing: {p}")
-        per_char[ch] = {"primary": primary, "wide": wide, "present": not missing}
+        per_char[ch] = {
+            "primary": primary,
+            "wide": wide,
+            "present": not missing,
+            "required": True,
+        }
     return per_char
 
 

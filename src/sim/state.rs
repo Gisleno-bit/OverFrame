@@ -532,7 +532,7 @@ impl GameState {
                     let already = self.fighters[i].already_hit;
                     if !already {
                         if let Some(j) = grabbing_i {
-                            self.apply_hit(i, j, &md.hitbox, inputs, true, false);
+                            self.apply_hit(i, j, &md.hitbox, inputs, true, false, md.rearward);
                             self.fighters[i].already_hit = true;
                             self.fighters[i].grabbing = None;
                             self.fighters[j].grabbed_by = None;
@@ -549,11 +549,12 @@ impl GameState {
             };
             let (hitbox, hb_world) = hb;
             let hb_prev = self.fighters[i].active_hitbox_prev().unwrap_or(hb_world);
-            let electric = match state_i {
+            let (electric, rearward) = match state_i {
                 State::Attack { id, .. } => {
-                    attacks::data(self.fighters[i].character.id, id).electric
+                    let md = attacks::data(self.fighters[i].character.id, id);
+                    (md.electric, md.rearward)
                 }
-                _ => false,
+                _ => (false, false),
             };
             for j in 0..n {
                 if j == i {
@@ -608,7 +609,7 @@ impl GameState {
                     State::Attack { id, .. } => Some(id),
                     _ => None,
                 };
-                self.apply_hit_staled(i, j, &hitbox, inputs, false, electric, stale_id);
+                self.apply_hit_staled(i, j, &hitbox, inputs, false, electric, stale_id, rearward);
                 self.fighters[i].already_hit = true;
                 break;
             }
@@ -626,17 +627,19 @@ impl GameState {
         is_throw: bool,
         electric: bool,
         stale_id: Option<MoveId>,
+        rearward: bool,
     ) {
         let mult = stale_id
             .map(|id| self.fighters[i].stale_multiplier(id))
             .unwrap_or(1.0);
-        self.apply_hit_with(i, j, hitbox, inputs, is_throw, electric, mult);
+        self.apply_hit_with(i, j, hitbox, inputs, is_throw, electric, mult, rearward);
         if let Some(id) = stale_id {
             self.fighters[i].stale_push(id);
         }
     }
 
     /// Apply a clean hit from attacker `i` onto victim `j`.
+    #[allow(clippy::too_many_arguments)]
     fn apply_hit(
         &mut self,
         i: usize,
@@ -645,8 +648,9 @@ impl GameState {
         inputs: &[PlayerInput],
         is_throw: bool,
         electric: bool,
+        rearward: bool,
     ) {
-        self.apply_hit_with(i, j, hitbox, inputs, is_throw, electric, 1.0);
+        self.apply_hit_with(i, j, hitbox, inputs, is_throw, electric, 1.0, rearward);
     }
 
     /// Apply a hit whose *damage* is scaled by `stale` (knockback still uses
@@ -661,6 +665,7 @@ impl GameState {
         is_throw: bool,
         electric: bool,
         stale: f32,
+        rearward: bool,
     ) {
         let attacker_facing = self.fighters[i].facing;
 
@@ -691,12 +696,26 @@ impl GameState {
             kb *= k::CROUCH_CANCEL;
         }
 
-        // World launch angle (Sakurai angle resolved here; mirror by facing).
-        // DI is applied by the victim on the last hitlag frame (see
+        // World launch angle (Sakurai angle resolved here; mirror by the
+        // direction the move actually sends the victim). DI is applied by
+        // the victim on the last hitlag frame (see
         // `Fighter::pending_launch`), not here.
+        //
+        // `rearward` moves (back throw, back air — declared per move in
+        // `attacks`, never inferred from a hitbox offset) send the victim
+        // behind the attacker, so the horizontal direction is the attacker's
+        // back. Mirroring an angle about the vertical leaves `sin` alone, so
+        // knockback magnitude and the whole vertical component are untouched
+        // — and so is the attacker's own `facing`, which is read here but
+        // never written.
+        let launch_dir = if rearward {
+            -attacker_facing
+        } else {
+            attacker_facing
+        };
         let angle_deg = knockback::resolve_angle(hitbox.angle_deg, kb, victim_grounded);
         let mut angle = angle_deg.to_radians();
-        if attacker_facing < 0.0 {
+        if launch_dir < 0.0 {
             angle = std::f32::consts::PI - angle;
         }
         let _ = inputs;
@@ -791,8 +810,12 @@ impl GameState {
             }
         }
 
-        // Collide projectiles with fighters.
-        let mut hits: Vec<(usize, usize)> = Vec::new(); // (proj idx, victim)
+        // Collide projectiles with fighters. `approach` is the start of this
+        // tick's swept travel — where the shot genuinely came from — and is
+        // carried to the block test below so the defence is decided by the
+        // projectile's own approach, never by where its owner happens to
+        // stand or face by the time it lands.
+        let mut hits: Vec<(usize, usize, f32)> = Vec::new(); // (proj, victim, approach x)
         for (pi, p) in self.projectiles.iter().enumerate() {
             if !p.active {
                 continue;
@@ -810,12 +833,12 @@ impl GameState {
                 if super::math::segment_distance(prev, p.pos, h0, h1)
                     < attacks::PROJECTILE_RADIUS + v.hurt_radius()
                 {
-                    hits.push((pi, j));
+                    hits.push((pi, j, prev.x));
                     break;
                 }
             }
         }
-        for (pi, j) in hits {
+        for (pi, j, approach_x) in hits {
             let owner_facing = self.projectiles[pi].facing;
             let hb = attacks::Hitbox {
                 offset: Vec2::ZERO,
@@ -825,13 +848,43 @@ impl GameState {
                 kbg: attacks::PROJECTILE_KBG,
                 bkb: attacks::PROJECTILE_BKB,
             };
-            // Reuse apply_hit with a synthetic attacker facing via the owner.
             let owner = self.projectiles[pi].owner;
+
+            // A shot into a raised frontal shield is blocked by exactly the
+            // rules a melee hit meets (`resolve_combat`): `shield_hit` takes
+            // the shield health, the shieldstun and the defender's pushback,
+            // or reports a powershield inside its window and takes neither.
+            // The shot is spent on the shield — consumed once, no body
+            // damage and no body launch — and the owner is not touched at
+            // all: a thrown object neither freezes nor shoves its thrower.
+            let blocked = {
+                let v = &self.fighters[j];
+                let from_front = (approach_x - v.pos.x) * v.facing >= -2.0;
+                v.is_shielding() && from_front
+            };
+            if blocked {
+                let powershielded = self.fighters[j].shield_hit(hb.damage);
+                let vp = self.fighters[j].body_center();
+                let kind = if powershielded {
+                    FxKind::Powershield
+                } else {
+                    FxKind::Shield
+                };
+                self.push_fx_who(vp, kind, hb.damage, Vec2::new(owner_facing, 0.0), j as u8);
+                self.projectiles[pi].active = false;
+                continue;
+            }
+
+            // Reuse apply_hit with a synthetic attacker facing via the owner.
             let saved_facing = self.fighters[owner].facing;
+            let saved_hitlag = self.fighters[owner].hitlag;
             self.fighters[owner].facing = owner_facing;
-            self.apply_hit(owner, j, &hb, inputs, false, false);
+            self.apply_hit(owner, j, &hb, inputs, false, false, false);
             self.fighters[owner].facing = saved_facing;
-            self.fighters[owner].hitlag = 0; // projectile owner doesn't freeze
+            // A projectile never freezes its owner — and never *thaws* one
+            // either: unrelated hitlag the owner was already in (someone
+            // else's hit, a pummel) survives its shot connecting downrange.
+            self.fighters[owner].hitlag = saved_hitlag;
             self.projectiles[pi].active = false;
         }
         self.projectiles.retain(|p| p.active);

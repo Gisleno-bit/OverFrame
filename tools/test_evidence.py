@@ -400,6 +400,100 @@ class Coverage(unittest.TestCase):
         self.assertTrue(m["special_n_hitbox_supplement"]["kestrel"]["present"])
         self.assertFalse(any("special_n fighter-hitbox supplement" in p for p in m["problems"]))
 
+    def test_a_case_declaring_no_fighter_hitbox_does_not_owe_the_supplement(self):
+        # Kestrel's special_n releases a shot and never swings (`no_melee`
+        # in the simulation's move tables, see
+        # docs/art/procedural/anim/kestrel-gameplay-fixes.md). Demanding a
+        # picture of a contact the simulation does not make would demand a
+        # sheet with nothing in it, so the index says so and the check
+        # believes the index.
+        make_capture(self.cap, special_n_hitbox="missing")
+        with open(os.path.join(self.cap, "capture-index.json"), encoding="utf-8") as f:
+            idx = json.load(f)
+        for e in idx["contact_expected"]:
+            if e["action_id"] == "special_n":
+                e["fighter_hitbox"] = False
+        with open(os.path.join(self.cap, "capture-index.json"), "w", encoding="utf-8") as f:
+            json.dump(idx, f, ensure_ascii=False)
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 0, log)
+        self.assertFalse(any("special_n fighter-hitbox supplement" in p for p in m["problems"]), log)
+        self.assertFalse(m["special_n_hitbox_supplement"]["kestrel"]["required"])
+
+    def test_a_supplement_present_for_a_no_hitbox_case_is_reported(self):
+        # The opposite mistake: a sheet claiming a fighter hitbox for an
+        # action that declares none means the evidence and the simulation
+        # disagree, and that is a problem too.
+        make_capture(self.cap, special_n_hitbox="clean")
+        with open(os.path.join(self.cap, "capture-index.json"), encoding="utf-8") as f:
+            idx = json.load(f)
+        for e in idx["contact_expected"]:
+            if e["action_id"] == "special_n":
+                e["fighter_hitbox"] = False
+        with open(os.path.join(self.cap, "capture-index.json"), "w", encoding="utf-8") as f:
+            json.dump(idx, f, ensure_ascii=False)
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 3, log)
+        self.assertTrue(any("declares no fighter hitbox" in p for p in m["problems"]), log)
+
+    def test_an_index_without_the_field_still_demands_the_supplement(self):
+        # An older capture index has no `fighter_hitbox` field at all; the
+        # check must not be weakened by its absence.
+        make_capture(self.cap, special_n_hitbox="missing")
+        with open(os.path.join(self.cap, "capture-index.json"), encoding="utf-8") as f:
+            idx = json.load(f)
+        for e in idx["contact_expected"]:
+            e.pop("fighter_hitbox", None)
+        with open(os.path.join(self.cap, "capture-index.json"), "w", encoding="utf-8") as f:
+            json.dump(idx, f, ensure_ascii=False)
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 3, log)
+        self.assertTrue(any("special_n fighter-hitbox supplement missing" in p for p in m["problems"]), log)
+
+    def test_a_malformed_fighter_hitbox_value_never_exempts_the_supplement(self):
+        # Only an explicit boolean false may exempt. Every falsy look-alike
+        # is a malformed index: it must fail loudly and keep demanding the
+        # supplement, never exempt it quietly.
+        for bad in (None, 0, "", "false", "no", [], {}):
+            with self.subTest(bad=bad):
+                shutil.rmtree(self.cap, ignore_errors=True)
+                shutil.rmtree(self.out, ignore_errors=True)
+                os.makedirs(self.cap, exist_ok=True)
+                os.makedirs(self.out, exist_ok=True)
+                make_capture(self.cap, special_n_hitbox="missing")
+                with open(os.path.join(self.cap, "capture-index.json"), encoding="utf-8") as f:
+                    idx = json.load(f)
+                for e in idx["contact_expected"]:
+                    if e["action_id"] == "special_n":
+                        e["fighter_hitbox"] = bad
+                with open(os.path.join(self.cap, "capture-index.json"), "w", encoding="utf-8") as f:
+                    json.dump(idx, f, ensure_ascii=False)
+                code, m, log = run_manifest(self.cap, self.out)
+                self.assertEqual(code, 3, log)
+                self.assertTrue(
+                    any("fighter_hitbox must be true or false" in p for p in m["problems"]),
+                    f"{bad!r}: {m['problems']}",
+                )
+                self.assertTrue(
+                    any("special_n fighter-hitbox supplement missing" in p for p in m["problems"]),
+                    f"{bad!r}: a malformed value must not exempt the supplement",
+                )
+                self.assertTrue(m["special_n_hitbox_supplement"]["kestrel"]["required"])
+
+    def test_only_an_explicit_true_keeps_the_supplement_demanded_without_complaint(self):
+        make_capture(self.cap, special_n_hitbox="clean")
+        with open(os.path.join(self.cap, "capture-index.json"), encoding="utf-8") as f:
+            idx = json.load(f)
+        for e in idx["contact_expected"]:
+            if e["action_id"] == "special_n":
+                e["fighter_hitbox"] = True
+        with open(os.path.join(self.cap, "capture-index.json"), "w", encoding="utf-8") as f:
+            json.dump(idx, f, ensure_ascii=False)
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 0, log)
+        self.assertTrue(m["special_n_hitbox_supplement"]["kestrel"]["present"])
+        self.assertFalse(any("fighter_hitbox" in p for p in m["problems"]))
+
     def test_without_the_animation_export_the_round_reads_as_unimplemented(self):
         make_capture(self.cap, animation=None)
         code, m, log = run_manifest(self.cap, self.out)

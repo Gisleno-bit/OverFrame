@@ -86,6 +86,13 @@ pub struct ContactExpected {
     pub wide: String,
     /// `hitbox`, `projectile` or `throw_no_hitbox` — what the cells show.
     pub evidence_kind: &'static str,
+    /// Does this action define a fighter hitbox of its own at all? False
+    /// for throws and for actions declared `no_melee` in the move tables
+    /// (Kestrel's `special_n`, whose only causal event is the shot it
+    /// releases). The evidence validator reads this instead of assuming
+    /// every projectile action also swings, so a supplement is demanded
+    /// only where the simulation really has something to show.
+    pub fighter_hitbox: bool,
 }
 
 // ----------------------------------------------------------------- helpers
@@ -1179,6 +1186,8 @@ pub(super) async fn run(app: &mut App, opts: &CaptureOpts) -> Result<CaptureInde
                 } else {
                     "throw_no_hitbox"
                 },
+                fighter_hitbox: export::action_has_hitbox(*mid)
+                    && !crate::sim::attacks::data(id, *mid).no_melee,
             });
             // The optional motion gif (below) has its own name and its own
             // gate (only ever produced when `--only` is explicitly given),
@@ -1239,19 +1248,27 @@ pub(super) async fn run(app: &mut App, opts: &CaptureOpts) -> Result<CaptureInde
                 index.files.push(entry);
             }
 
-            // special_n has two real runtime events 8 frames apart: the
-            // projectile release (the sheets above, event = Declared) and
-            // the move's own ordinary fighter hitbox on `md.startup`
-            // (centre [16,21], radius 2 at facing +1, baseline gap
-            // +2.400044u) — per art commit 343def9c8c45ec69dba36b2b7ce863255ee9b0e4
-            // and review 91f9c5a2834353bbb7207dcc4d866a4e513fd48f. The
-            // emission exception in wide_picks/primary_picks must never
-            // hide that positive-gap hitbox, so it gets its own clearly
-            // labelled supplemental sheet pair, both facings, on the same
-            // declared cameras. Not part of contact_expected (that stays
-            // one declared case per action/variant) — these are additional
-            // files, not a second required coverage row.
-            if *mid == crate::sim::attacks::MoveId::SpecialN {
+            // A projectile action can *also* carry an ordinary fighter
+            // hitbox some frames after the release (Boulder's and Viper's
+            // special_n still do, on `md.startup`) — per art commit
+            // 343def9c8c45ec69dba36b2b7ce863255ee9b0e4 and review
+            // 91f9c5a2834353bbb7207dcc4d866a4e513fd48f. The emission
+            // exception in wide_picks/primary_picks must never hide such a
+            // hitbox, so it gets its own clearly labelled supplemental
+            // sheet pair, both facings, on the same declared cameras. Not
+            // part of contact_expected (that stays one declared case per
+            // action/variant) — these are additional files, not a second
+            // required coverage row.
+            //
+            // Kestrel's special_n no longer has one at all (`no_melee`, see
+            // `sim::attacks`), so the supplement is not produced for it and
+            // is not demanded of it: the sheet would have nothing to show,
+            // and demanding it would keep asking for a contact the
+            // simulation no longer makes. This is gated on the real move
+            // data, not on the character, so it follows whatever the tables
+            // actually say.
+            let has_fighter_hitbox = !crate::sim::attacks::data(id, *mid).no_melee;
+            if *mid == crate::sim::attacks::MoveId::SpecialN && has_fighter_hitbox {
                 let hb_stem = format!("{stem}-hitbox");
                 let hb_rel = format!("{hb_stem}.png");
                 let hb_rel_wide = format!("{hb_stem}-wide.png");

@@ -73,6 +73,23 @@ pub struct MoveData {
     pub is_aerial: bool,
     /// A short reach value the renderer uses to draw the strike pose.
     pub reach: f32,
+    /// The action has **no fighter hitbox at all**: it is causal only
+    /// through what it spawns. Kestrel's `SpecialN` releases a projectile
+    /// and never swings, so it must not interrupt, clank, freeze or stale
+    /// anything by itself.
+    ///
+    /// This is an explicit, per-move property, deliberately *not* "damage
+    /// == 0 means noncolliding": a zero-damage hitbox is still a hitbox
+    /// everywhere else in the cast, and no other character's move role
+    /// changes without its own evidence.
+    pub no_melee: bool,
+    /// The launch direction is the attacker's **back**, not their front
+    /// (back throw, back air). Only the horizontal direction is mirrored:
+    /// knockback magnitude, the vertical component, Sakurai-angle
+    /// resolution and DI are all untouched, and the attacker's own facing
+    /// is not changed. Set per move on purpose — launch direction is never
+    /// inferred from the sign of a hitbox offset.
+    pub rearward: bool,
 }
 
 impl MoveData {
@@ -93,7 +110,11 @@ impl MoveData {
         frame >= self.startup && frame < self.startup + self.active
     }
     /// The hitbox in effect on `frame`, if any (late hits are scaled down).
+    /// A `no_melee` action never has one, on any frame.
     pub fn hitbox_at(&self, frame: u32) -> Option<Hitbox> {
+        if self.no_melee {
+            return None;
+        }
         if self.is_clean(frame) {
             Some(self.hitbox)
         } else if self.is_active(frame) {
@@ -123,6 +144,20 @@ impl MoveData {
     /// Mark the move electric (longer hitlag).
     pub const fn electric(mut self) -> Self {
         self.electric = true;
+        self
+    }
+    /// Declare that this action has no fighter hitbox of its own (see
+    /// [`MoveData::no_melee`]). The frame data still describes the real
+    /// commitment: startup, active and endlag are the action's timeline
+    /// whether or not it swings.
+    pub const fn no_melee(mut self) -> Self {
+        self.no_melee = true;
+        self
+    }
+    /// Declare that this move launches toward the attacker's back (see
+    /// [`MoveData::rearward`]).
+    pub const fn rearward(mut self) -> Self {
+        self.rearward = true;
         self
     }
 }
@@ -162,6 +197,8 @@ const fn mv(
         landing_lag,
         is_aerial,
         reach,
+        no_melee: false,
+        rearward: false,
     }
 }
 
@@ -226,11 +263,11 @@ fn kestrel(id: MoveId) -> MoveData {
 
         Nair => mv(3, 4, 10, (12.0, 4.0), 10.5, 11.0, 361.0, 100.0, 10.0, 15, true, 20.0).late(24, 0.75),
         Fair => mv(7, 4, 27, (18.0, 6.0), 9.0, 11.0, 40.0, 75.0, 15.0, 20, true, 24.0),
-        Bair => mv(4, 4, 17, (-18.0, 4.0), 9.0, 13.0, 361.0, 80.0, 18.0, 20, true, 24.0).late(12, 0.6),
+        Bair => mv(4, 4, 17, (-18.0, 4.0), 9.0, 13.0, 361.0, 80.0, 18.0, 20, true, 24.0).late(12, 0.6).rearward(),
         Uair => mv(7, 4, 25, (2.0, 18.0), 10.0, 12.0, 85.0, 70.0, 20.0, 18, true, 22.0),
         Dair => mv(7, 5, 29, (8.0, -16.0), 9.0, 12.0, 270.0, 45.0, 40.0, 20, true, 22.0),
 
-        SpecialN => mv(9, 1, 22, (16.0, 6.0), 2.0, 0.0, 0.0, 0.0, 0.0, 0, false, 20.0),
+        SpecialN => mv(9, 1, 22, (16.0, 6.0), 2.0, 0.0, 0.0, 0.0, 0.0, 0, false, 20.0).no_melee(),
         SpecialUp => mv(6, 8, 26, (4.0, 14.0), 12.0, 6.0, 80.0, 60.0, 30.0, 0, false, 22.0),
         SpecialSide => mv(10, 6, 24, (18.0, 4.0), 10.0, 9.0, 30.0, 55.0, 45.0, 0, false, 24.0),
         SpecialDown => mv(0, 3, 28, (0.0, 0.0), 22.0, 5.0, 70.0, 45.0, 35.0, 0, false, 24.0).electric(),
@@ -238,7 +275,7 @@ fn kestrel(id: MoveId) -> MoveData {
         // Throws: the "hitbox" carries the throw's launch parameters. Startup is
         // the release frame; active/endlag frame the release + throw endlag.
         ThrowF => mv(8, 1, 20, (16.0, 8.0), 6.0, 8.0, 42.0, 60.0, 45.0, 0, false, 0.0),
-        ThrowB => mv(10, 1, 22, (-16.0, 8.0), 6.0, 9.0, 45.0, 62.0, 50.0, 0, false, 0.0),
+        ThrowB => mv(10, 1, 22, (-16.0, 8.0), 6.0, 9.0, 45.0, 62.0, 50.0, 0, false, 0.0).rearward(),
         ThrowU => mv(8, 1, 20, (0.0, 18.0), 6.0, 7.0, 88.0, 65.0, 55.0, 0, false, 0.0),
         ThrowD => mv(9, 1, 22, (6.0, 2.0), 6.0, 6.0, 80.0, 50.0, 45.0, 0, false, 0.0),
     }
@@ -263,7 +300,7 @@ fn boulder(id: MoveId) -> MoveData {
 
         Nair => mv(5, 6, 14, (14.0, 5.0), 13.5, 14.0, 361.0, 100.0, 12.0, 20, true, 24.0).late(22, 0.7),
         Fair => mv(11, 5, 30, (22.0, 6.0), 12.0, 16.0, 42.0, 85.0, 22.0, 24, true, 28.0),
-        Bair => mv(8, 5, 25, (-22.0, 5.0), 12.0, 16.0, 361.0, 88.0, 24.0, 22, true, 28.0).late(10, 0.6),
+        Bair => mv(8, 5, 25, (-22.0, 5.0), 12.0, 16.0, 361.0, 88.0, 24.0, 22, true, 28.0).late(10, 0.6).rearward(),
         Uair => mv(9, 5, 26, (2.0, 22.0), 12.5, 14.0, 85.0, 78.0, 26.0, 20, true, 26.0),
         Dair => mv(13, 6, 30, (9.0, -19.0), 12.0, 17.0, 270.0, 55.0, 45.0, 26, true, 26.0),
 
@@ -273,7 +310,7 @@ fn boulder(id: MoveId) -> MoveData {
         SpecialDown => mv(12, 4, 34, (0.0, 0.0), 30.0, 9.0, 75.0, 50.0, 48.0, 0, false, 30.0),
 
         ThrowF => mv(10, 1, 24, (18.0, 9.0), 6.0, 11.0, 42.0, 68.0, 55.0, 0, false, 0.0),
-        ThrowB => mv(12, 1, 26, (-18.0, 9.0), 6.0, 12.0, 45.0, 70.0, 60.0, 0, false, 0.0),
+        ThrowB => mv(12, 1, 26, (-18.0, 9.0), 6.0, 12.0, 45.0, 70.0, 60.0, 0, false, 0.0).rearward(),
         ThrowU => mv(10, 1, 24, (0.0, 20.0), 6.0, 10.0, 88.0, 75.0, 62.0, 0, false, 0.0),
         ThrowD => mv(11, 1, 26, (7.0, 2.0), 6.0, 9.0, 78.0, 55.0, 52.0, 0, false, 0.0),
     }
@@ -299,7 +336,7 @@ fn viper(id: MoveId) -> MoveData {
 
         Nair => mv(2, 4, 10, (11.0, 4.0), 9.5, 9.0, 361.0, 100.0, 8.0, 12, true, 18.0).late(18, 0.7),
         Fair => mv(5, 4, 22, (17.0, 6.0), 8.0, 9.0, 38.0, 68.0, 12.0, 15, true, 22.0),
-        Bair => mv(4, 4, 16, (-17.0, 4.0), 8.0, 11.0, 361.0, 74.0, 15.0, 16, true, 22.0).late(10, 0.6),
+        Bair => mv(4, 4, 16, (-17.0, 4.0), 8.0, 11.0, 361.0, 74.0, 15.0, 16, true, 22.0).late(10, 0.6).rearward(),
         Uair => mv(4, 4, 20, (2.0, 17.0), 9.0, 8.0, 85.0, 64.0, 16.0, 14, true, 20.0),
         Dair => mv(6, 5, 24, (7.0, -15.0), 8.0, 10.0, 270.0, 40.0, 32.0, 18, true, 20.0),
 
@@ -309,7 +346,7 @@ fn viper(id: MoveId) -> MoveData {
         SpecialDown => mv(0, 3, 24, (0.0, 0.0), 20.0, 5.0, 70.0, 42.0, 30.0, 0, false, 22.0).electric(),
 
         ThrowF => mv(7, 1, 18, (15.0, 8.0), 6.0, 6.0, 42.0, 55.0, 40.0, 0, false, 0.0),
-        ThrowB => mv(9, 1, 20, (-15.0, 8.0), 6.0, 7.0, 45.0, 58.0, 44.0, 0, false, 0.0),
+        ThrowB => mv(9, 1, 20, (-15.0, 8.0), 6.0, 7.0, 45.0, 58.0, 44.0, 0, false, 0.0).rearward(),
         ThrowU => mv(7, 1, 18, (0.0, 17.0), 6.0, 6.0, 88.0, 62.0, 48.0, 0, false, 0.0),
         ThrowD => mv(8, 1, 20, (6.0, 2.0), 6.0, 5.0, 80.0, 48.0, 40.0, 0, false, 0.0),
     }
@@ -333,3 +370,71 @@ pub const PROJECTILE_DAMAGE: f32 = 5.0;
 pub const PROJECTILE_KBG: f32 = 30.0;
 pub const PROJECTILE_BKB: f32 = 30.0;
 pub const PROJECTILE_ANGLE: f32 = 25.0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The two deliberate per-move declarations added for the gameplay
+    /// corrections (docs/art/procedural/anim/kestrel-gameplay-fixes.md).
+    /// These check the *declarations*, so they can only exist after the
+    /// fix; the behaviour they cause is checked by
+    /// `tests/gameplay_fixes.rs`, which is deliberately written to compile
+    /// and run against the pre-fix simulation too.
+    #[test]
+    fn no_melee_is_declared_only_where_it_was_decided() {
+        for ch in CharacterId::ALL {
+            for id in ALL_MOVES {
+                let md = data(ch, id);
+                let expected = ch == CharacterId::Kestrel && id == MoveId::SpecialN;
+                assert_eq!(
+                    md.no_melee, expected,
+                    "{ch:?}/{id:?}: no_melee must be declared only for Kestrel's SpecialN"
+                );
+                // And it is never inferred from zero damage: the other
+                // owners' zero-damage special_n keeps its hitbox.
+                if md.no_melee {
+                    assert!(md.hitbox_at(md.startup).is_none());
+                } else if md.hitbox.radius > 0.0 {
+                    assert!(
+                        md.hitbox_at(md.startup).is_some(),
+                        "{ch:?}/{id:?}: a declared hitbox must still come out"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rearward_is_declared_on_the_back_moves_of_every_character() {
+        for ch in CharacterId::ALL {
+            for id in ALL_MOVES {
+                let md = data(ch, id);
+                let expected = matches!(id, MoveId::ThrowB | MoveId::Bair);
+                assert_eq!(
+                    md.rearward, expected,
+                    "{ch:?}/{id:?}: rearward must be declared exactly on ThrowB and Bair"
+                );
+            }
+        }
+        // Declared per move, never inferred from the sign of an offset:
+        // Dair's offset is forward and Bair's is rearward, yet it is the
+        // declaration that decides, and other rearward-offset moves (none
+        // today) would still need their own.
+        for ch in CharacterId::ALL {
+            let bair = data(ch, MoveId::Bair);
+            assert!(bair.hitbox.offset.x < 0.0 && bair.rearward);
+            let throw_b = data(ch, MoveId::ThrowB);
+            assert!(throw_b.hitbox.offset.x < 0.0 && throw_b.rearward);
+            let throw_f = data(ch, MoveId::ThrowF);
+            assert!(throw_f.hitbox.offset.x > 0.0 && !throw_f.rearward);
+        }
+    }
+
+    #[test]
+    fn the_commitment_of_the_projectile_action_is_unchanged_by_the_removal() {
+        let k = data(CharacterId::Kestrel, MoveId::SpecialN);
+        assert_eq!((k.startup, k.active, k.endlag), (9, 1, 22));
+        assert_eq!(k.total(), 32);
+    }
+}

@@ -1045,6 +1045,28 @@ pub fn stages_json() -> serde_json::Value {
 
 /// Write `runtime/frame-data.csv`, `runtime/characters.json`,
 /// `runtime/stages.json` and `runtime/frame-data-report.json` under `dir`.
+/// The measurement note emitted with every contact export, split so the
+/// projectile-action sentence can state what is true **for this case**
+/// instead of asserting one character's geometry for the whole cast.
+const METHOD_HEAD: &str = "contact_piece = the strike limb's designated piece, evaluated on the pose and root the renderer draws (model::render_eval: eased facing, extras lag, hitlag rattle) after replaying the case from a fresh render history; its triangles are projected onto the XY fighting plane; mesh_distance = minimum distance from the hitbox centre to that projected surface (0 inside a triangle, else nearest edge); signed_separation = mesh_distance - radius (negative = penetrating); vertex_distance is diagnostic only. Exceptions: throws have no fighter hitbox (null separation); body-centred hitboxes measured on the chest read 0/-radius when the centre is inside the silhouette.";
+const METHOD_TAIL: &str = " foot_support/support_reference: `support_reference` is `\"floor\"` when the sample is grounded (the sim keeps a grounded root at floor height, so `support_distance` is real ground clearance) or `\"root_relative_airborne_no_floor\"` when it is not (there is no floor under an airborne root; the same arithmetic then reports the foot's position relative to the root, not clearance from anything). Nothing here changes the simulation.";
+
+/// The per-case measurement note. A projectile action that also carries a
+/// fighter hitbox says so with its own real numbers; one declared
+/// `no_melee` says plainly that it has none, so nobody reads a null
+/// `signed_separation` as a missing measurement. Every other action is
+/// unaffected, and mixed rosters stay honest case by case.
+fn method_note(md: &attacks::MoveData) -> String {
+    let clause = if md.no_melee {
+        " This action has no fighter hitbox at all (declared `no_melee` in the move tables): its only causal geometry is the projectile it releases, reported tick by tick as `projectile` and measured against the piece as `projectile_separation`. `hitbox` and `signed_separation` are therefore null on every tick -- an absence the simulation really has, not a measurement that went missing.".to_string()
+    } else if md.hitbox.damage == 0.0 && md.hitbox.radius > 0.0 {
+        format!(" This action's fighter hitbox deals no damage but still exists and still collides (r={:.0} at [{:.0},{:.0}], active on startup..startup+active+late_active): zero damage is never treated as noncolliding.", md.hitbox.radius, md.hitbox.offset.x, md.hitbox.offset.y)
+    } else {
+        String::new()
+    };
+    format!("{METHOD_HEAD}{clause}{METHOD_TAIL}")
+}
+
 /// Per-tick contact measurements of one case (both facings), for
 /// `runtime/contact/<character>/<action>-<variant>.json`.
 pub fn contact_json(
@@ -1054,6 +1076,7 @@ pub fn contact_json(
 ) -> Result<serde_json::Value, String> {
     use crate::model::render_eval::{evaluate_and_measure, PortState};
     let model = crate::model::characters::build(ch);
+    let md = attacks::data(ch, id);
     let mut facings = Vec::new();
     for facing in [1.0f32, -1.0] {
         let ticks = run_case_facing(ch, id, variant, facing)?;
@@ -1073,8 +1096,8 @@ pub fn contact_json(
             });
             let (ev, m) = evaluate_and_measure(&model, &mut port, f, t.state.frame, true, id, hb);
             // `m` above already measures the contact piece against `hb` —
-            // special_n's own fighter hitbox (a real melee hitbox, r=2 at
-            // [16,21], active on md.startup..startup+active+late_active),
+            // A projectile owner's own fighter hitbox, when it still has
+            // one (Boulder, Viper; Kestrel's is removed -- `no_melee`),
             // exactly like every other action. That is not the projectile:
             // the projectile is a second, separate runtime object (spawned
             // on the move's first frame, tracked in its own row), so it
@@ -1143,7 +1166,7 @@ pub fn contact_json(
         "action_id": action_id(id),
         "variant_id": variant,
         "units": "game_units",
-        "method": "contact_piece = the strike limb's designated piece, evaluated on the pose and root the renderer draws (model::render_eval: eased facing, extras lag, hitlag rattle) after replaying the case from a fresh render history; its triangles are projected onto the XY fighting plane; mesh_distance = minimum distance from the hitbox centre to that projected surface (0 inside a triangle, else nearest edge); signed_separation = mesh_distance - radius (negative = penetrating); vertex_distance is diagnostic only. Exceptions: throws have no fighter hitbox (null separation); body-centred hitboxes measured on the chest read 0/-radius when the centre is inside the silhouette. special_n is not an exception to contact_piece/signed_separation: it has a real fighter hitbox (r=2 at [16,21], active on startup..startup+active+late_active) measured against the piece exactly like every other action, plus one addition, `projectile_separation`, which measures the same piece against the projectile actually in flight (a second, separate runtime object spawned on the move's first frame) -- an extra check, never a substitute for the hitbox measurement. foot_support/support_reference: `support_reference` is `\"floor\"` when the sample is grounded (the sim keeps a grounded root at floor height, so `support_distance` is real ground clearance) or `\"root_relative_airborne_no_floor\"` when it is not (there is no floor under an airborne root; the same arithmetic then reports the foot's position relative to the root, not clearance from anything). Nothing here changes the simulation.",
+        "method": method_note(&md),
         "facings": facings,
     }))
 }
@@ -1402,8 +1425,11 @@ mod tests {
             })
             .collect();
         assert!(failed.is_empty(), "{}", failed.join("\n"));
-        // Every case has at least one active hitbox tick, except throws
-        // (no hitbox by design).
+        // Every case shows the causal geometry it really has: an active
+        // fighter hitbox, or -- for an action whose whole effect is what it
+        // spawns -- a real projectile row. Throws have neither by design.
+        // An action declared `no_melee` must show no fighter hitbox at all,
+        // on any tick: that is the point of the declaration.
         let (csv_ref, _) = (&csv, ());
         for (ch, id, variant) in all_cases() {
             if matches!(
@@ -1412,9 +1438,29 @@ mod tests {
             ) {
                 continue;
             }
+            let md = attacks::data(ch, id);
             let ticks = run_case(ch, id, variant).unwrap();
+            let melee = ticks.iter().any(|t| t.row.hitbox_active);
+            let projectile = ticks.iter().any(|t| t.projectile.is_some());
+            if md.no_melee {
+                assert!(
+                    !melee,
+                    "{}/{}/{} declares no_melee but still exports an active fighter hitbox",
+                    character_id(ch),
+                    action_id(id),
+                    variant
+                );
+                assert!(
+                    projectile,
+                    "{}/{}/{} declares no_melee, so its projectile must be the real event",
+                    character_id(ch),
+                    action_id(id),
+                    variant
+                );
+                continue;
+            }
             assert!(
-                ticks.iter().any(|t| t.row.hitbox_active),
+                melee,
                 "{}/{}/{} never shows an active hitbox",
                 character_id(ch),
                 action_id(id),
@@ -1556,9 +1602,11 @@ mod tests {
         assert_eq!(actions.len(), 22, "one entry per runtime action");
         // Every action that has a fighter hitbox intersects it with the
         // piece the direction names; the declared exceptions say why not.
-        // special_n is not an exception: its own fighter hitbox (separate
-        // from its projectile release) is measured and required to
-        // intersect exactly like every other action's.
+        // An action that has one is never excused from it -- including a
+        // projectile owner that also swings (Boulder's and Viper's
+        // special_n). Kestrel's special_n has none at all any more
+        // (`no_melee`), so it has nothing to intersect and says so: the
+        // exemption comes from the simulation, not from an exception list.
         for a in actions {
             let id = a["action_id"].as_str().unwrap();
             if a["intersection_required"].as_bool().unwrap() {
@@ -1603,13 +1651,13 @@ mod tests {
         // a render history, applied eased facing/hitlag rattle, or ran
         // support_lift. Every active (clean and late) sample of every one
         // of Kestrel's 23 exported variants, both facings, must show its
-        // named contact piece intersecting the real fighter hitbox --
-        // special_n's own fighter hitbox (separate from its projectile
-        // release) included, with no exception: per review
-        // 91f9c5a2834353bbb7207dcc4d866a4e513fd48f / art commit
-        // 343def9c8c45ec69dba36b2b7ce863255ee9b0e4, that event is measured
-        // and corrected like any other, never left as a permanent
-        // restriction. `signed_separation` itself must be present and
+        // named contact piece intersecting the real fighter hitbox, with
+        // no exception: per review 91f9c5a2834353bbb7207dcc4d866a4e513fd48f
+        // / art commit 343def9c8c45ec69dba36b2b7ce863255ee9b0e4, an event
+        // that exists is measured and corrected like any other, never left
+        // as a permanent restriction. An action with no fighter hitbox at
+        // all (Kestrel's special_n, `no_melee`) has no active sample to
+        // check -- the absence is in the simulation, not in this test. `signed_separation` itself must be present and
         // finite for every active sample -- a missing/NaN value is a
         // defect in the measurement, never something to silently skip
         // past. This also catches a regression like the review's original
@@ -1883,5 +1931,43 @@ mod diag_anim {
                 s["lowest_support_distance"].as_f64().unwrap()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod method_note_tests {
+    use super::*;
+
+    #[test]
+    fn the_emitted_method_note_states_each_case_truthfully() {
+        // Kestrel's projectile action has no fighter hitbox at all; the
+        // note must say so rather than assert a hitbox that is gone.
+        let k = contact_json(CharacterId::Kestrel, MoveId::SpecialN, "ground").unwrap();
+        let note = k["method"].as_str().unwrap();
+        assert!(
+            note.contains("no fighter hitbox at all"),
+            "kestrel special_n note: {note}"
+        );
+        assert!(
+            !note.contains("[16,21]"),
+            "the old hard-coded claim is gone"
+        );
+        // …and the other owners keep theirs, with their own real numbers,
+        // including the fact that zero damage still collides.
+        for (ch, off) in [
+            (CharacterId::Boulder, "[18,7]"),
+            (CharacterId::Viper, "[15,6]"),
+        ] {
+            let j = contact_json(ch, MoveId::SpecialN, "ground").unwrap();
+            let n = j["method"].as_str().unwrap();
+            assert!(
+                n.contains("still exists and still collides") && n.contains(off),
+                "{ch:?} special_n note: {n}"
+            );
+        }
+        // An ordinary action says nothing extra either way.
+        let f = contact_json(CharacterId::Kestrel, MoveId::Ftilt, "ground").unwrap();
+        let n = f["method"].as_str().unwrap();
+        assert!(!n.contains("no fighter hitbox at all") && !n.contains("still collides"));
     }
 }

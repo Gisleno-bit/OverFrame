@@ -491,9 +491,16 @@ pub fn aim_for_event(f: &Fighter, d: &Resolved, md: &MoveData, event: Event) -> 
         return None;
     }
     if crate::export::action_spawns_projectile(d.id) {
-        if event == Event::Release {
-            // The palm leads the emission line and stays there — it never
-            // chases the projectile downrange.
+        // The palm leads the emission line and stays there — it never
+        // chases the projectile downrange.
+        //
+        // `md.no_melee` actions (Kestrel's special_n) have no fighter
+        // hitbox on any frame, so the release is not merely the *first*
+        // real event, it is the only one: the hitbox event resolves to the
+        // same spawn origin instead of to a contact the simulation no
+        // longer makes. Actions that still carry a fighter hitbox after
+        // the release keep aiming at it, and it stays required.
+        if event == Event::Release || md.no_melee {
             return Some(Aim {
                 contact: [PROJECTILE_SPAWN_LOCAL_X, mid],
                 coil_abs: None,
@@ -1846,7 +1853,14 @@ mod tests {
     }
 
     #[test]
-    fn the_projectile_action_serves_both_of_its_real_events() {
+    fn the_projectile_action_serves_its_one_real_event_the_release() {
+        // Kestrel's special_n used to carry a second "event" eight frames
+        // after the release: a zero-damage fighter hitbox that the Windows
+        // baseline showed interrupting, freezing and staling on contact.
+        // That placeholder was removed from the simulation deliberately
+        // (`MoveData::no_melee`), so the action's animation/evidence
+        // contract now has exactly one real event to serve -- the release,
+        // and its recoil. See docs/art/procedural/anim/kestrel-gameplay-fixes.md.
         let m = build(CharacterId::Kestrel);
         let d = m
             .directions
@@ -1855,11 +1869,18 @@ mod tests {
             .get(MoveId::SpecialN)
             .unwrap();
         let md = attacks::data(CharacterId::Kestrel, MoveId::SpecialN);
-        // Two events, eight frames apart, both from the simulation.
-        let evs = events_of(d, &md);
-        assert_eq!(evs, vec![(Event::Release, 0), (Event::Hitbox, md.startup)]);
+        assert!(
+            md.no_melee,
+            "Kestrel's special_n declares no fighter hitbox"
+        );
 
-        // 1) The release: the palm leads the emission line on frame 0.
+        // One event, from the simulation: the shot leaves on frame 0.
+        let evs = events_of(d, &md);
+        assert_eq!(evs, vec![(Event::Release, 0)]);
+        assert_eq!(contact_frame(d, &md), 0);
+
+        // The palm leads the emission line on frame 0 -- the real spawn
+        // origin, not the projectile's later flight.
         let f0 = fighter(MoveId::SpecialN, &md, 0);
         let rel = aim_for_event(&f0, d, &md, Event::Release).unwrap();
         assert_eq!(rel.kind, "projectile_spawn");
@@ -1871,36 +1892,28 @@ mod tests {
             "palm on the emission point at the spawn: {gap0}"
         );
 
-        // 2) The move's own fighter hitbox is real and is not excused by
-        // the emission: the same hand has to be inside it on its clean
-        // frames. Per review 91f9c5a2834353bbb7207dcc4d866a4e513fd48f and
-        // art commit 343def9c8c45ec69dba36b2b7ce863255ee9b0e4, the
-        // emission exception must never hide or turn this hitbox green --
-        // it is measured and required to intersect just like any other
-        // action's, with its own corrected pose (extra forward lean; see
-        // `shape(PoseFamily::ProjectileRelease)`).
+        // There is no fighter-hitbox aim left to serve, on any frame: the
+        // hitbox event resolves to the same spawn origin, and it is not a
+        // required contact, because no contact exists to require.
         let hit = aim_for(&f0, d, &md).unwrap();
-        assert_eq!(hit.kind, "hitbox");
-        assert!(hit.required, "the clean hitbox must be intersected");
-        assert_eq!(hit.contact, [md.hitbox.offset.x, md.hitbox.offset.y + 15.0]);
-        for sf in md.startup..md.startup + md.active + md.late_active {
-            let f = fighter(MoveId::SpecialN, &md, sf);
-            let c = centroid(&m, d, &fighter_pose(&m, &f, 0));
-            let gap = ((c[0] - hit.contact[0]).powi(2) + (c[1] - hit.contact[1]).powi(2)).sqrt();
+        assert_eq!(hit.kind, "projectile_spawn");
+        assert!(!hit.required);
+        for sf in 0..md.total() {
             assert!(
-                gap <= md.hitbox.radius,
-                "sf {sf}: the hand is {gap:.3}u from the clean hitbox centre (radius {})",
-                md.hitbox.radius
+                md.hitbox_at(sf).is_none(),
+                "sf {sf}: special_n must define no fighter hitbox at all"
             );
         }
-        // Both events are reported, neither hidden.
+
+        // The single event is reported, and the report no longer claims a
+        // required intersection that does not exist.
         let fz = feasibility(&m)
             .into_iter()
             .find(|x| x.action_id == "special_n")
             .unwrap();
-        assert_eq!(fz.events.len(), 2);
-        assert!(fz.intersection_required && fz.guaranteed_intersection);
-        assert_eq!(fz.aim_kind, "hitbox", "the flat fields describe the hitbox");
+        assert_eq!(fz.events.len(), 1);
+        assert_eq!(fz.aim_kind, "projectile_spawn");
+        assert!(!fz.intersection_required);
         assert!(fz.events.iter().any(|e| e.event == "projectile_release"));
 
         // The hand still never chases the projectile downrange: by the end
@@ -1908,7 +1921,19 @@ mod tests {
         let mut g = f0.clone();
         g.state_frame = md.total() - 1;
         let b = centroid(&m, d, &fighter_pose(&m, &g, 0));
-        assert!(b[0] < hit.contact[0], "the palm does not follow the shot");
+        assert!(
+            b[0] < rel.contact[0],
+            "the palm does not follow the shot: {b:?}"
+        );
+
+        // Kestrel only. This is not a global "zero damage does not collide"
+        // rule: the other projectile owners keep their own fighter hitbox
+        // until they have their own evidence.
+        for ch in [CharacterId::Boulder, CharacterId::Viper] {
+            let other = attacks::data(ch, MoveId::SpecialN);
+            assert!(!other.no_melee, "{ch:?} special_n keeps its own hitbox");
+            assert!(other.hitbox_at(other.startup).is_some());
+        }
     }
 
     #[test]
