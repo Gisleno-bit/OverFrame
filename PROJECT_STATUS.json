@@ -8,14 +8,14 @@
     "run_attempt": "1",
     "status": "pass",
     "path": "builds/9cf312b0d76a11d9b79e6b4100f848d1878ed0b9/attempt-34614010401-1/",
-    "utc": "2026-09-11T15:07:16Z"
+    "utc": "2026-09-11T15:07:18Z"
   },
   "latest_pass": {
     "run_id": "34614010401",
     "run_attempt": "1",
     "status": "pass",
     "path": "builds/9cf312b0d76a11d9b79e6b4100f848d1878ed0b9/attempt-34614010401-1/",
-    "utc": "2026-09-11T15:07:16Z",
+    "utc": "2026-09-11T15:07:18Z",
     "source_sha": "9cf312b0d76a11d9b79e6b4100f848d1878ed0b9"
   },
   "checks": {
@@ -47,7 +47,7 @@
     "tests_passed_total": 197
   },
   "note": "evidence_commit is filled by the publish step after this file is committed; read images from that commit, not from the branch tip",
-  "evidence_commit": null,
+  "evidence_commit": "dc2414f1b207cd0304c855370dbcb832fe449fa7",
   "coverage": {
     "kestrel": {
       "complete": true,
