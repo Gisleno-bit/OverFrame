@@ -34,6 +34,11 @@ pub struct CharacterModel {
     pub pieces: Vec<PieceRange>,
     /// Which art specification built this model, if any.
     pub spec_id: Option<&'static str>,
+    /// The authored animation directions of this fighter, resolved against
+    /// the model above (`docs/art/procedural/anim/<id>.json`). `None` until
+    /// a character's direction round starts; those fighters keep the
+    /// generic aimed strike of [`super::anim`].
+    pub directions: Option<super::anim_dir::Directions>,
 }
 
 impl CharacterModel {
@@ -133,7 +138,7 @@ fn from_spec(
         _ => CharacterId::Viper,
     })
     .to_vec();
-    CharacterModel {
+    let mut m = CharacterModel {
         rig: built.rig,
         style,
         palettes,
@@ -141,7 +146,19 @@ fn from_spec(
         extras: built.extras,
         pieces: built.pieces,
         spec_id: Some(id),
+        directions: None,
+    };
+    // The direction file is validated against the model it directs, so an
+    // authoring error there is a build-time failure like the spec's own.
+    if let Some((_, json)) = super::anim_dir::ALL_DIRECTIONS
+        .iter()
+        .find(|(k, _)| *k == id)
+    {
+        let d =
+            super::anim_dir::resolve(json, &m).unwrap_or_else(|e| panic!("anim/{id}.json: {e}"));
+        m.directions = Some(d);
     }
+    m
 }
 
 // ----------------------------------------------------------------- Boulder
@@ -289,6 +306,7 @@ fn boulder() -> CharacterModel {
         extras: Vec::new(),
         pieces: Vec::new(),
         spec_id: None,
+        directions: None,
     }
 }
 
@@ -495,6 +513,7 @@ fn viper() -> CharacterModel {
         extras: Vec::new(),
         pieces: Vec::new(),
         spec_id: None,
+        directions: None,
     }
 }
 

@@ -10,10 +10,10 @@
 //! `contact_render_contract`).
 
 use super::characters::CharacterModel;
+use super::contact;
 use super::math3::{v3, Xf, M3};
 use super::procedural::ExtrasState;
 use super::rig::Pose;
-use super::{anim, contact};
 use crate::sim::attacks::MoveId;
 use crate::sim::fighter::{Fighter, State};
 
@@ -96,7 +96,9 @@ pub fn evaluate(
 ) -> Evaluated {
     let (eased, fresh) = port.advance(f, frame);
     let rig = &model.rig;
-    let mut pose = anim::fighter_pose(rig, f, &model.style, frame);
+    // The authored direction when this fighter has one, the generic
+    // evaluator otherwise (`model::anim_directed`).
+    let mut pose = super::anim_directed::fighter_pose(model, f, frame);
     (model.secondary)(rig, &mut pose, f, frame);
     let mut root = root_for(f, eased);
     if !model.extras.is_empty() && lag_enabled {

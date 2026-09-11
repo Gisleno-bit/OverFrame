@@ -433,15 +433,17 @@ impl Scene3D {
         f: &Fighter,
         frame: u64,
         query: Option<&ContactQuery>,
-    ) -> Option<crate::model::contact::ContactMeasure> {
+    ) -> DiagOut {
         if matches!(f.state, State::Dead) {
-            return None;
+            return DiagOut::default();
         }
         let ev = self.evaluate_fighter(f, frame);
-        let measured = query.filter(|q| q.port == f.port).and_then(|q| {
-            let model = &self.models[f.character.id.index()];
+        let mut out = DiagOut::default();
+        let model = &self.models[f.character.id.index()];
+        if query.map(|q| q.port == f.port).unwrap_or(false) {
+            let q = query.unwrap();
             let hb = q.hitbox.as_ref().map(|(id, c, r)| (id.as_str(), *c, *r));
-            crate::model::contact::measure_posed(
+            out.contact = crate::model::contact::measure_posed(
                 model,
                 f,
                 &ev.pose,
@@ -449,10 +451,18 @@ impl Scene3D {
                 ev.eased_facing,
                 q.action,
                 hb,
-            )
-        });
+            );
+        }
+        // The feet on the drawn pose, against the plane the fighter stands
+        // on -- independent of whether a contact query was requested for
+        // this port. A fixture with no attack in progress (idle, crouch,
+        // hitstun, land lag...) still needs real foot-support evidence:
+        // gating this behind `query` left it an empty Vec there, which a
+        // fold-to-minimum downstream turned into f32::MAX and drew as if
+        // it were a measurement instead of "no data".
+        out.support = crate::model::contact::foot_support(model, &ev.pose, &ev.root, f.pos.y);
         self.draw_posed(f, frame, &ev.pose, &ev.root);
-        measured
+        out
     }
 
     /// Draw a fighter in an explicit pose under an explicit root transform
@@ -1367,6 +1377,15 @@ pub(crate) struct Diagnostics {
     pub projectile: Option<(f32, f32, f32)>,
     /// Measure the contact piece of one fighter on the pose actually drawn.
     pub contact: Option<ContactQuery>,
+    /// Which fighter's foot-support measurement to report, independent of
+    /// `contact`'s port: `draw_fighter_measured` computes support for every
+    /// drawn fighter (a fixture with no attack in progress still needs real
+    /// foot-support evidence), so this says which one the caller wants
+    /// back. Never inferred from "whichever came back non-empty" -- with
+    /// two live fighters that is now *every* fighter, and picking by
+    /// arrival order silently returns the wrong one (see `select_diag`'s
+    /// doc comment).
+    pub support_port: Option<usize>,
 }
 
 /// What to measure: which port, for which action, against which hitbox.
@@ -1375,6 +1394,48 @@ pub(crate) struct ContactQuery {
     pub port: usize,
     pub action: crate::sim::attacks::MoveId,
     pub hitbox: Option<(String, [f32; 2], f32)>,
+}
+
+/// What a diagnostic draw measured on the pose it actually drew.
+#[derive(Default, Clone, Debug)]
+pub(crate) struct DiagOut {
+    pub contact: Option<crate::model::contact::ContactMeasure>,
+    /// Foot bounds and support-plane distances of the queried fighter.
+    pub support: Vec<crate::model::contact::FootSupport>,
+}
+
+/// Pick the final `DiagOut` from one `(port, DiagOut)` per drawn fighter.
+///
+/// `contact` and `support` are selected **independently**, each by an
+/// explicit port match -- never by "whichever fighter's output happened to
+/// look non-trivial last". That heuristic used to work only by accident:
+/// `draw_fighter_measured` once left `support` empty for every fighter but
+/// the queried one, so a second, live fighter never had anything to
+/// overwrite the real measurement with. Once support became unconditional
+/// (every drawn fighter needs real foot-support evidence, attack or not),
+/// a live second fighter's `{contact: None, support: <its own feet>}` was
+/// picked last and silently wiped out the first fighter's real contact
+/// measurement on every capture with two living fighters -- which is
+/// effectively all of them. This function is the fix and its own
+/// regression guard: pure data selection, no drawing, so it is tested
+/// directly against a synthetic two-fighter scene without a GPU context.
+fn select_diag(
+    per_port: &[(usize, DiagOut)],
+    query: Option<&ContactQuery>,
+    support_port: Option<usize>,
+) -> DiagOut {
+    let mut out = DiagOut::default();
+    if let Some(q) = query {
+        if let Some((_, m)) = per_port.iter().find(|(p, _)| *p == q.port) {
+            out.contact = m.contact.clone();
+        }
+    }
+    if let Some(sp) = support_port {
+        if let Some((_, m)) = per_port.iter().find(|(p, _)| *p == sp) {
+            out.support = m.support.clone();
+        }
+    }
+    out
 }
 
 impl Scene3D {
@@ -1398,7 +1459,7 @@ impl Scene3D {
         rt: &RenderTarget,
         opts: SceneOpts,
         diag: Option<&Diagnostics>,
-    ) -> Option<crate::model::contact::ContactMeasure> {
+    ) -> DiagOut {
         self.ensure_stage(gs);
         let (w, h) = (rt.texture.width(), rt.texture.height());
         self.viewport = Some((w, h));
@@ -1422,12 +1483,14 @@ impl Scene3D {
             self.draw_shadow(f, gs);
         }
         let query = diag.and_then(|d| d.contact.as_ref());
-        let mut measured = None;
+        let support_port = diag.and_then(|d| d.support_port);
+        let mut per_port: Vec<(usize, DiagOut)> = Vec::new();
         for f in &gs.fighters {
-            if let Some(m) = self.draw_fighter_measured(f, gs.frame, query) {
-                measured = Some(m);
-            }
+            let m = self.draw_fighter_measured(f, gs.frame, query);
+            per_port.push((f.port, m));
         }
+        let out = select_diag(&per_port, query, support_port);
+        let measured = out.contact.clone();
         self.draw_projectiles(gs);
         for f in &gs.fighters {
             self.draw_overlays(f, opts);
@@ -1451,7 +1514,7 @@ impl Scene3D {
         self.viewport = None;
         self.outline_width = None;
         super::set_painter_dims(None);
-        measured
+        out
     }
 
     /// Measured overlays drawn as flat strokes in the fighting plane (in
@@ -1771,4 +1834,141 @@ fn radial_texture(size: u16, f: impl Fn(f32) -> f32, additive_core: bool) -> Tex
     let t = Texture2D::from_rgba8(size, size, &bytes);
     t.set_filter(FilterMode::Linear);
     t
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::contact::{ContactMeasure, FootSupport};
+
+    fn fake_contact(action_id: &'static str) -> ContactMeasure {
+        ContactMeasure {
+            action_id,
+            bone: "hand_r".into(),
+            piece_ids: vec!["hand_r".into()],
+            root: [0.0, 0.0],
+            facing: 1.0,
+            eased_facing: 1.0,
+            joint: [0.0, 0.0, 0.0],
+            centroid: [0.0, 0.0, 0.0],
+            aabb_min: [0.0, 0.0, 0.0],
+            aabb_max: [0.0, 0.0, 0.0],
+            hitbox: None,
+            mesh_distance: Some(0.0),
+            nearest_point: None,
+            signed_separation: Some(-1.0),
+            nearest_vertex: None,
+            vertex_distance: None,
+            triangle_count: 0,
+            tip: [0.0, 0.0, 0.0],
+            tip_reach_x: 0.0,
+        }
+    }
+
+    fn fake_support(piece_id: &str) -> FootSupport {
+        FootSupport {
+            piece_id: piece_id.into(),
+            bone: "foot_r".into(),
+            aabb_min: [0.0, 0.0, 0.0],
+            aabb_max: [1.0, 1.0, 1.0],
+            support_distance: 0.0,
+        }
+    }
+
+    /// Regression test for the P1/P2 overwrite bug Codex's Windows review
+    /// caught: with two live fighters, `draw_fighter_measured` now always
+    /// returns non-empty `support` for both, so the old "whichever came
+    /// back non-trivial last" heuristic in `draw_fixed_diag` would pick
+    /// port 1's `{contact: None, support: <its own feet>}` and silently
+    /// wipe out port 0's real contact measurement. `select_diag` must
+    /// return port 0's contact untouched and port 0's support (the
+    /// queried/support_port fighter), never falling back to port 1's data
+    /// just because it was measured after port 0's.
+    #[test]
+    fn select_diag_does_not_let_a_second_live_fighter_overwrite_the_first() {
+        let p0 = DiagOut {
+            contact: Some(fake_contact("jab2")),
+            support: vec![fake_support("foot_r"), fake_support("foot_l")],
+        };
+        let p1 = DiagOut {
+            contact: None,
+            support: vec![fake_support("foot_r"), fake_support("foot_l")],
+        };
+        let per_port = vec![(0usize, p0), (1usize, p1)];
+        let query = ContactQuery {
+            port: 0,
+            action: crate::sim::attacks::MoveId::Jab2,
+            hitbox: None,
+        };
+        let out = select_diag(&per_port, Some(&query), Some(0));
+        assert!(
+            out.contact.is_some(),
+            "port 0's real contact measurement must survive a live port 1"
+        );
+        assert_eq!(out.contact.unwrap().action_id, "jab2");
+        assert_eq!(
+            out.support.len(),
+            2,
+            "support_port=0 must report port 0's feet"
+        );
+    }
+
+    /// `support_port` and `contact`'s port are independent: a caller can ask
+    /// for port 0's contact while wanting port 1's foot-support evidence (or
+    /// vice-versa) -- neither selection should leak into the other.
+    #[test]
+    fn select_diag_picks_contact_and_support_from_different_ports_independently() {
+        let p0 = DiagOut {
+            contact: Some(fake_contact("dash_attack")),
+            support: vec![fake_support("p0_foot")],
+        };
+        let p1 = DiagOut {
+            contact: None,
+            support: vec![fake_support("p1_foot")],
+        };
+        let per_port = vec![(0usize, p0), (1usize, p1)];
+        let query = ContactQuery {
+            port: 0,
+            action: crate::sim::attacks::MoveId::DashAttack,
+            hitbox: None,
+        };
+        let out = select_diag(&per_port, Some(&query), Some(1));
+        assert_eq!(out.contact.unwrap().action_id, "dash_attack");
+        assert_eq!(out.support[0].piece_id, "p1_foot");
+    }
+
+    /// No `support_port` set (e.g. the capsules.png-style call, which only
+    /// wants hurt-capsule overlays): support stays empty rather than
+    /// guessing a fighter to report.
+    #[test]
+    fn select_diag_leaves_support_empty_when_no_support_port_is_asked_for() {
+        let p0 = DiagOut {
+            contact: Some(fake_contact("jab")),
+            support: vec![fake_support("foot_r")],
+        };
+        let per_port = vec![(0usize, p0)];
+        let query = ContactQuery {
+            port: 0,
+            action: crate::sim::attacks::MoveId::Jab,
+            hitbox: None,
+        };
+        let out = select_diag(&per_port, Some(&query), None);
+        assert!(out.contact.is_some());
+        assert!(out.support.is_empty());
+    }
+
+    /// No live query at all (e.g. a plain fixture draw with no diagnostics)
+    /// still lets `support_port` alone pull that fighter's feet, since
+    /// `support.png` needs foot evidence without faking an attack query.
+    #[test]
+    fn select_diag_reports_support_with_no_contact_query() {
+        let p0 = DiagOut {
+            contact: None,
+            support: vec![fake_support("foot_r"), fake_support("foot_l")],
+        };
+        let per_port = vec![(0usize, p0)];
+        let out = select_diag(&per_port, None, Some(0));
+        assert!(out.contact.is_none());
+        assert_eq!(out.support.len(), 2);
+    }
 }

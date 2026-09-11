@@ -205,3 +205,69 @@ pub fn draw_text<P: super::Painter>(
 pub fn text_width(text: &str, scale: f32) -> f32 {
     text.chars().count() as f32 * GLYPH_W * scale
 }
+
+/// Fit `text` into `width` pixels: keep `base_scale` when it already fits,
+/// otherwise shrink to the largest scale that does, down to `min_scale`, and
+/// only then drop the characters that still cannot fit.
+///
+/// The evidence captions are laid out with this instead of a guessed
+/// character budget, so a caption row can never run out of its cell (the
+/// measured overflow of the review: 67 characters at 6 px × 1.4 need
+/// 562.8 px inside a 512 px cell).
+pub fn fit_line(text: &str, width: f32, base_scale: f32, min_scale: f32) -> (String, f32) {
+    let n = text.chars().count() as f32;
+    if n == 0.0 || width <= 0.0 {
+        return (String::new(), base_scale);
+    }
+    let scale = if text_width(text, base_scale) <= width {
+        base_scale
+    } else {
+        (width / (n * GLYPH_W)).max(min_scale)
+    };
+    let fits = (width / (GLYPH_W * scale)).floor().max(0.0) as usize;
+    if text.chars().count() <= fits {
+        return (text.to_string(), scale);
+    }
+    (text.chars().take(fits).collect(), scale)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_line_that_fits_keeps_its_scale() {
+        let (t, s) = fit_line("hitbox clean r7.50", 512.0, 1.4, 0.9);
+        assert_eq!(t, "hitbox clean r7.50");
+        assert_eq!(s, 1.4);
+        assert!(text_width(&t, s) <= 512.0);
+    }
+
+    #[test]
+    fn a_long_line_shrinks_and_then_clips_but_never_overflows() {
+        // A row of the shape the review measured: at 6 px × 1.4 it needs
+        // more than the 512 px cell.
+        let long = "first tick after last active  after_step tick 33  sf 1  [after]  x";
+        assert!(text_width(long, 1.4) > 512.0);
+        let (t, s) = fit_line(long, 512.0 - 16.0, 1.4, 0.9);
+        assert!(
+            text_width(&t, s) <= 512.0 - 16.0,
+            "{} px",
+            text_width(&t, s)
+        );
+        assert!((0.9..=1.4).contains(&s));
+        assert_eq!(t, long, "it fits by shrinking, without losing a character");
+        // Past the shrink floor the row is clipped, still inside the cell.
+        let huge: String = "W".repeat(400);
+        let (t, s) = fit_line(&huge, 496.0, 1.4, 0.9);
+        assert_eq!(s, 0.9);
+        assert!(text_width(&t, s) <= 496.0);
+        assert!(t.chars().count() < 400);
+    }
+
+    #[test]
+    fn empty_and_degenerate_widths_are_safe() {
+        assert_eq!(fit_line("", 100.0, 1.4, 0.9).0, "");
+        assert_eq!(fit_line("abc", 0.0, 1.4, 0.9).0, "");
+    }
+}

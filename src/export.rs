@@ -1072,6 +1072,43 @@ pub fn contact_json(
                 )
             });
             let (ev, m) = evaluate_and_measure(&model, &mut port, f, t.state.frame, true, id, hb);
+            // `m` above already measures the contact piece against `hb` —
+            // special_n's own fighter hitbox (a real melee hitbox, r=2 at
+            // [16,21], active on md.startup..startup+active+late_active),
+            // exactly like every other action. That is not the projectile:
+            // the projectile is a second, separate runtime object (spawned
+            // on the move's first frame, tracked in its own row), so it
+            // gets its own, additional measurement here — never a
+            // replacement for the hitbox one above.
+            let projectile_separation = t.projectile.as_ref().and_then(|p| {
+                let c = p.center?;
+                let pm = crate::model::contact::measure_posed(
+                    &model,
+                    f,
+                    &ev.pose,
+                    &ev.root,
+                    ev.eased_facing,
+                    id,
+                    Some(("projectile", [c.0, c.1], p.radius.unwrap_or(0.0))),
+                )?;
+                pm.signed_separation
+            });
+            // The feet against a Y plane, on the same drawn pose. While
+            // grounded, `f.pos.y` really is the floor the fighter stands
+            // on (the sim keeps a grounded root at floor height), so
+            // `support_distance` is real floor clearance -- the
+            // measurement the review asked for. Airborne, there is no
+            // floor under the root to measure against: `f.pos.y` is just
+            // wherever the fighter currently is in the air, so the same
+            // arithmetic only reports the foot's position *relative to
+            // the root*, never ground clearance. `support_reference`
+            // below says which one a reader is looking at, per sample.
+            let support = crate::model::contact::foot_support(&model, &ev.pose, &ev.root, f.pos.y);
+            let support_reference = if f.grounded {
+                "floor"
+            } else {
+                "root_relative_airborne_no_floor"
+            };
             samples.push(serde_json::json!({
                 "eased_facing": ev.eased_facing,
                 "render_history": if ev.fresh { "fresh" } else { "continued" },
@@ -1093,6 +1130,9 @@ pub fn contact_json(
                 }))),
                 "capsule": crate::model::contact::capsule(f),
                 "contact_piece": m,
+                "projectile_separation": projectile_separation,
+                "foot_support": support,
+                "support_reference": support_reference,
             }));
         }
         facings.push(serde_json::json!({ "facing": facing, "samples": samples }));
@@ -1103,9 +1143,102 @@ pub fn contact_json(
         "action_id": action_id(id),
         "variant_id": variant,
         "units": "game_units",
-        "method": "contact_piece = the strike limb's designated piece, evaluated on the pose and root the renderer draws (model::render_eval: eased facing, extras lag, hitlag rattle) after replaying the case from a fresh render history; its triangles are projected onto the XY fighting plane; mesh_distance = minimum distance from the hitbox centre to that projected surface (0 inside a triangle, else nearest edge); signed_separation = mesh_distance - radius (negative = penetrating); vertex_distance is diagnostic only. Exceptions: throws have no fighter hitbox (null separation); special_n's projectile is emitted, not struck (not measured against a piece); body-centred hitboxes measured on the chest read 0/-radius when the centre is inside the silhouette. Nothing here changes the simulation.",
+        "method": "contact_piece = the strike limb's designated piece, evaluated on the pose and root the renderer draws (model::render_eval: eased facing, extras lag, hitlag rattle) after replaying the case from a fresh render history; its triangles are projected onto the XY fighting plane; mesh_distance = minimum distance from the hitbox centre to that projected surface (0 inside a triangle, else nearest edge); signed_separation = mesh_distance - radius (negative = penetrating); vertex_distance is diagnostic only. Exceptions: throws have no fighter hitbox (null separation); body-centred hitboxes measured on the chest read 0/-radius when the centre is inside the silhouette. special_n is not an exception to contact_piece/signed_separation: it has a real fighter hitbox (r=2 at [16,21], active on startup..startup+active+late_active) measured against the piece exactly like every other action, plus one addition, `projectile_separation`, which measures the same piece against the projectile actually in flight (a second, separate runtime object spawned on the move's first frame) -- an extra check, never a substitute for the hitbox measurement. foot_support/support_reference: `support_reference` is `\"floor\"` when the sample is grounded (the sim keeps a grounded root at floor height, so `support_distance` is real ground clearance) or `\"root_relative_airborne_no_floor\"` when it is not (there is no floor under an airborne root; the same arithmetic then reports the foot's position relative to the root, not clearance from anything). Nothing here changes the simulation.",
         "facings": facings,
     }))
+}
+
+/// Everything the animation-direction round has to answer for one
+/// character: which direction file was implemented (by content hash), what
+/// each action's contact solve achieved against the runtime hit region, and
+/// where the drawn feet sit relative to the plane the fighter stands on.
+///
+/// It reports rather than decides: an action the geometry cannot satisfy
+/// comes out with `guaranteed_intersection: false` and a note, never with a
+/// simulation, hitbox, capsule, scale or bone-length change behind it.
+pub fn animation_json(ch: CharacterId) -> serde_json::Value {
+    use crate::model::anim_directed as ad;
+    let model = crate::model::characters::build(ch);
+    let Some(dirs) = model.directions.as_ref() else {
+        return serde_json::json!({
+            "schema_version": 1,
+            "character_id": character_id(ch),
+            "status": "no_direction_file",
+        });
+    };
+    let actions = ad::feasibility(&model);
+    let unreachable: Vec<&str> = actions
+        .iter()
+        .filter(|a| a.intersection_required && !a.guaranteed_intersection)
+        .map(|a| a.action_id)
+        .collect();
+    // The support states the review named: idle, crouch, hitstun and the
+    // grounded recoveries (landing lag, shield stun, and the first recovery
+    // tick of every grounded action).
+    let mut support = Vec::new();
+    let mut push_state = |name: String, st: State, sf: u32| {
+        let mut f = crate::sim::fighter::Fighter::new(ch.data(), 0, Vec2::ZERO);
+        f.grounded = true;
+        f.facing = 1.0;
+        f.set_state_pub(st);
+        f.state_frame = sf;
+        let pose = crate::model::anim_directed::fighter_pose(&model, &f, 90);
+        let feet = crate::model::contact::foot_support(
+            &model,
+            &pose,
+            &crate::model::math3::Xf::IDENTITY,
+            0.0,
+        );
+        let lowest = feet
+            .iter()
+            .map(|x| x.support_distance)
+            .fold(f32::MAX, f32::min);
+        // Two real, finite foot measurements or this is not evidence: an
+        // empty/short list folding to f32::MAX must never be written out
+        // as if it were a measured value.
+        assert!(
+            feet.len() == 2 && lowest.is_finite(),
+            "{name}: expected 2 finite foot measurements, got {feet:?}"
+        );
+        support.push(serde_json::json!({
+            "state": name,
+            "state_frame": sf,
+            "feet": feet,
+            "lowest_support_distance": lowest,
+        }));
+    };
+    push_state("idle".into(), State::Stand, 6);
+    push_state("crouch".into(), State::Crouch, 6);
+    push_state("hitstun".into(), State::Hitstun { tumble: false }, 6);
+    push_state("land_lag".into(), State::LandLag { total: 12 }, 1);
+    push_state("shield_stun".into(), State::ShieldStun { total: 8 }, 2);
+    for id in attacks::ALL_MOVES {
+        let md = attacks::data(ch, id);
+        if md.is_aerial || !action_has_hitbox(id) {
+            continue;
+        }
+        let last = md.startup + md.active + md.late_active;
+        push_state(
+            format!("recovery:{}", action_id(id)),
+            State::Attack { id, aerial: false },
+            last,
+        );
+    }
+    serde_json::json!({
+        "schema_version": 1,
+        "character_id": character_id(ch),
+        "units": "game_units",
+        "direction_file": format!("docs/art/procedural/anim/{}.json", character_id(ch)),
+        "direction_sha256": dirs.sha256,
+        "direction_status": dirs.status,
+        "direction_source_sha": dirs.source_sha,
+        "direction_evidence_commit": dirs.evidence_commit,
+        "probe_kind": "synthetic",
+        "method": "SYNTHETIC PROBE, not the real per-frame measurement: poses here are solved once, in the fighter's root-local frame, on a bare one-shot Fighter with no replayed render history, no eased facing, no hitlag rattle and no support_lift -- none of what model::render_eval::evaluate + model::contact::measure_posed apply for the real capture/contact_json pipeline. The contact piece named by the direction is placed on the runtime hit region by two-link inverse kinematics through the real joint chain, with the hitbox offset used signed (a rearward move aims rearward). `centroid_gap` is the distance from the achieved piece centroid to the aim point; the projected piece is convex, so a gap no larger than the radius proves intersection (a convex body's surface can only be nearer to an outside point than its centroid) -- a conservative, sufficient-but-not-necessary condition, always stricter than the real mesh-surface signed_separation reported by contact_json. `guaranteed_intersection: true` here is not proof the real per-frame contact passes; only contact_json's signed_separation is that proof. Anticipation peaks at the authored fraction of the available inactive startup, contact holds through startup+active+late_active, recovery starts after the real last active tick. Support distances are the lowest foot-piece vertex minus the plane the fighter stands on. No simulation value is written.",
+        "actions": actions,
+        "unreachable_actions": unreachable,
+        "support": support,
+    })
 }
 
 /// Write `runtime/frame-data.csv`, `runtime/characters.json`,
@@ -1154,6 +1287,15 @@ pub fn write_runtime_for(
         rt.join("contact-report.json"),
         serde_json::to_string_pretty(&contact_report).unwrap_or_default(),
     )?;
+    // Animation-direction evidence for the characters this run measures.
+    for ch in contact_characters {
+        let d = rt.join("animation");
+        std::fs::create_dir_all(&d)?;
+        std::fs::write(
+            d.join(format!("{}.json", character_id(*ch))),
+            serde_json::to_string_pretty(&animation_json(*ch)).unwrap_or_default(),
+        )?;
+    }
     std::fs::write(
         rt.join("frame-data-report.json"),
         serde_json::to_string_pretty(&reports).unwrap_or_default(),
@@ -1400,6 +1542,229 @@ mod tests {
     }
 
     #[test]
+    fn the_animation_evidence_reports_every_direction_and_the_support_plane() {
+        let j = animation_json(CharacterId::Kestrel);
+        assert_eq!(j["character_id"], "kestrel");
+        assert_eq!(j["direction_sha256"].as_str().unwrap().len(), 64);
+        // The probe is labelled synthetic in the JSON itself, not only in
+        // Rust doc comments -- a reader of the exported evidence must not
+        // mistake `guaranteed_intersection` here for the real per-frame
+        // contact result.
+        assert_eq!(j["probe_kind"], "synthetic");
+        assert!(j["method"].as_str().unwrap().contains("SYNTHETIC"));
+        let actions = j["actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 22, "one entry per runtime action");
+        // Every action that has a fighter hitbox intersects it with the
+        // piece the direction names; the declared exceptions say why not.
+        // special_n is not an exception: its own fighter hitbox (separate
+        // from its projectile release) is measured and required to
+        // intersect exactly like every other action's.
+        for a in actions {
+            let id = a["action_id"].as_str().unwrap();
+            if a["intersection_required"].as_bool().unwrap() {
+                assert!(
+                    a["guaranteed_intersection"].as_bool().unwrap(),
+                    "{id}: {}",
+                    a["note"]
+                );
+            } else {
+                assert!(a["note"].is_string(), "{id}: an exception must say why");
+            }
+            assert!(!a["contact_piece_id"].as_str().unwrap().is_empty());
+        }
+        assert!(j["unreachable_actions"].as_array().unwrap().is_empty());
+        // The exact pieces the review named.
+        let piece = |id: &str| {
+            actions.iter().find(|a| a["action_id"] == id).unwrap()["contact_piece_id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(piece("utilt"), "k_hand_r");
+        assert_eq!(piece("dash_attack"), "k_hand_r");
+        assert_eq!(piece("special_side"), "k_hand_r");
+        assert_eq!(piece("special_down"), "k_chest");
+        assert_eq!(piece("bair"), "k_foot_l");
+        // No drawn foot goes through the floor in any support state.
+        let support = j["support"].as_array().unwrap();
+        assert!(support.len() > 5);
+        for s in support {
+            let d = s["lowest_support_distance"].as_f64().unwrap();
+            assert!(d > -1e-3, "{}: foot {d} below the floor", s["state"]);
+        }
+    }
+
+    #[test]
+    fn every_active_contact_sample_intersects_its_hitbox() {
+        // A real, per-tick regression guard over the actual measurement
+        // pipeline (model::render_eval::evaluate + model::contact::
+        // measure_posed, via contact_json) -- not the synthetic feasibility
+        // probe in model::anim_directed::feasibility, which never replayed
+        // a render history, applied eased facing/hitlag rattle, or ran
+        // support_lift. Every active (clean and late) sample of every one
+        // of Kestrel's 23 exported variants, both facings, must show its
+        // named contact piece intersecting the real fighter hitbox --
+        // special_n's own fighter hitbox (separate from its projectile
+        // release) included, with no exception: per review
+        // 91f9c5a2834353bbb7207dcc4d866a4e513fd48f / art commit
+        // 343def9c8c45ec69dba36b2b7ce863255ee9b0e4, that event is measured
+        // and corrected like any other, never left as a permanent
+        // restriction. `signed_separation` itself must be present and
+        // finite for every active sample -- a missing/NaN value is a
+        // defect in the measurement, never something to silently skip
+        // past. This also catches a regression like the review's original
+        // bair (+21.010283u) or nair late-window (+8.329576u) defects.
+        const TOL: f32 = 1e-3;
+        let model = crate::model::characters::build(CharacterId::Kestrel);
+        let dirs = model.directions.as_ref().unwrap();
+        let mut offenders: Vec<(&str, &str, f64, i64, f64)> = Vec::new();
+        let mut checked_active = 0usize;
+        for (ch, id, variant) in cases_for(CharacterId::Kestrel) {
+            let j = contact_json(ch, id, variant).unwrap();
+            let expected_piece = dirs.get(id).map(|d| d.piece_id.clone());
+            for fc in j["facings"].as_array().unwrap() {
+                let facing = fc["facing"].as_f64().unwrap();
+                for s in fc["samples"].as_array().unwrap() {
+                    // support_reference must agree with `grounded` on every
+                    // sample, active or not (the review's grounded-foot
+                    // check and the airborne "no floor here" label both
+                    // depend on this).
+                    let grounded = s["grounded"].as_bool().unwrap();
+                    let sref = s["support_reference"].as_str().unwrap();
+                    assert_eq!(
+                        sref,
+                        if grounded {
+                            "floor"
+                        } else {
+                            "root_relative_airborne_no_floor"
+                        },
+                        "{}/{variant} f{facing} sf{}: support_reference disagrees with grounded",
+                        action_id(id),
+                        s["state_frame"]
+                    );
+                    if s["hitbox"].is_null() {
+                        continue;
+                    }
+                    checked_active += 1;
+                    let cp = &s["contact_piece"];
+                    if let Some(exp) = &expected_piece {
+                        let ids: Vec<String> = cp["piece_ids"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|v| v.as_str().unwrap().to_string())
+                            .collect();
+                        assert_eq!(
+                            ids,
+                            vec![exp.clone()],
+                            "{}/{variant} f{facing} sf{}: contact piece should be exactly {exp}",
+                            action_id(id),
+                            s["state_frame"]
+                        );
+                    }
+                    // signed_separation must be present and finite for
+                    // every active sample -- never a silent `continue`
+                    // past a gap in the measurement itself.
+                    let sep = cp["signed_separation"].as_f64().unwrap_or_else(|| {
+                        panic!(
+                            "{}/{variant} f{facing} sf{}: signed_separation missing",
+                            action_id(id),
+                            s["state_frame"]
+                        )
+                    });
+                    assert!(
+                        sep.is_finite(),
+                        "{}/{variant} f{facing} sf{}: signed_separation is not finite ({sep})",
+                        action_id(id),
+                        s["state_frame"]
+                    );
+                    if sep as f32 > TOL {
+                        offenders.push((
+                            action_id(id),
+                            variant,
+                            facing,
+                            s["state_frame"].as_i64().unwrap_or(-1),
+                            sep,
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(
+            checked_active > 100,
+            "sanity: {checked_active} active samples checked"
+        );
+        assert!(
+            offenders.is_empty(),
+            "unexpected non-intersecting active contact: {offenders:?}"
+        );
+        // The exact pieces the review named, on the real measured samples.
+        let piece_used = |id: MoveId, variant: &str| -> String {
+            let j = contact_json(CharacterId::Kestrel, id, variant).unwrap();
+            let s = j["facings"][0]["samples"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| !s["hitbox"].is_null())
+                .expect("an active sample exists");
+            s["contact_piece"]["piece_ids"][0]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(piece_used(MoveId::Utilt, "ground"), "k_hand_r");
+        assert_eq!(piece_used(MoveId::DashAttack, "from_dash"), "k_hand_r");
+        assert_eq!(piece_used(MoveId::SpecialSide, "ground"), "k_hand_r");
+        assert_eq!(piece_used(MoveId::SpecialDown, "ground"), "k_chest");
+        assert_eq!(piece_used(MoveId::Bair, "fullhop"), "k_foot_l");
+    }
+
+    #[test]
+    fn the_contact_export_carries_support_and_the_real_projectile_geometry() {
+        // Every sample knows where the feet are relative to the plane.
+        let j = contact_json(CharacterId::Kestrel, MoveId::Ftilt, "ground").unwrap();
+        let s = &j["facings"][0]["samples"][0];
+        assert!(s["foot_support"].as_array().unwrap().len() == 2);
+        assert!(s["foot_support"][0]["support_distance"].is_number());
+        // The projectile action leads the *emission line* — the palm is on
+        // the runtime spawn point when the shot appears — and then stays
+        // there while the projectile travels (it is never chased). The
+        // exported projectile row is already one integration step
+        // downrange, which is exactly why the pose is judged against the
+        // spawn event and not against that row.
+        let j = contact_json(CharacterId::Kestrel, MoveId::SpecialN, "ground").unwrap();
+        let samples = j["facings"][0]["samples"].as_array().unwrap();
+        let spawn = samples
+            .iter()
+            .position(|s| !s["projectile"].is_null())
+            .expect("the case shows its projectile");
+        let emission = |s: &serde_json::Value| {
+            let c = s["contact_piece"]["centroid"].as_array().unwrap();
+            let root = s["root"].as_array().unwrap();
+            let f = s["facing"].as_f64().unwrap();
+            let ex = root[0].as_f64().unwrap()
+                + f * crate::model::anim_directed::PROJECTILE_SPAWN_LOCAL_X as f64;
+            let ey = root[1].as_f64().unwrap() + 15.0;
+            ((c[0].as_f64().unwrap() - ex).powi(2) + (c[1].as_f64().unwrap() - ey).powi(2)).sqrt()
+        };
+        let at_spawn = emission(&samples[spawn]);
+        assert!(
+            at_spawn < attacks::PROJECTILE_RADIUS as f64,
+            "the palm leads the emission point: {at_spawn}u"
+        );
+        assert!(samples[spawn]["projectile_separation"].is_number());
+        // Two ticks later the projectile is 14 units further on and the
+        // hand has not followed it.
+        if let Some(later) = samples.get(spawn + 2) {
+            assert!(
+                (emission(later) - at_spawn).abs() < 3.0,
+                "the palm stays on the emission line: {} vs {at_spawn}",
+                emission(later)
+            );
+        }
+    }
+
+    #[test]
     fn runtime_tables_reflect_the_sim() {
         let c = characters_json();
         assert_eq!(c["characters"].as_array().unwrap().len(), 3);
@@ -1435,6 +1800,88 @@ mod diag {
                     b.hitlag
                 );
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod diag_contact {
+    use super::*;
+    /// `cargo test --lib diag_contact -- --ignored --nocapture` prints, per
+    /// Kestrel case and facing, the signed separation of every active tick.
+    #[test]
+    #[ignore]
+    fn print_contact_gaps() {
+        for (ch, id, variant) in cases_for(CharacterId::Kestrel) {
+            let j = contact_json(ch, id, variant).unwrap();
+            for fc in j["facings"].as_array().unwrap() {
+                let facing = fc["facing"].as_f64().unwrap();
+                let mut worst = f64::MIN;
+                let mut n_active = 0;
+                let mut n_pos = 0;
+                let mut seps = Vec::new();
+                for s in fc["samples"].as_array().unwrap() {
+                    if s["hitbox"].is_null() {
+                        continue;
+                    }
+                    n_active += 1;
+                    let sep = s["contact_piece"]["signed_separation"].as_f64();
+                    if let Some(v) = sep {
+                        if v > 0.0 {
+                            n_pos += 1;
+                        }
+                        worst = worst.max(v);
+                        seps.push(format!("{}:{:.1}", s["state_frame"], v));
+                    }
+                }
+                println!(
+                    "{:<13}{:<15} f{:+} active={:<3} positive={:<3} worst={:>8.3}  [{}]",
+                    action_id(id),
+                    variant,
+                    facing,
+                    n_active,
+                    n_pos,
+                    if worst == f64::MIN { f64::NAN } else { worst },
+                    seps.join(" ")
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod diag_anim {
+    use super::*;
+    /// `cargo test --lib diag_anim -- --ignored --nocapture` prints the
+    /// animation feasibility and support tables.
+    #[test]
+    #[ignore]
+    fn print_animation_evidence() {
+        let j = animation_json(CharacterId::Kestrel);
+        for a in j["actions"].as_array().unwrap() {
+            println!(
+                "{:<13}{:<18}{:<11} target({:>6.1},{:>5.1}) r{:>5.2} need{:>6.2} reach{:>6.2} gap{:>6.2} ok={} assist{:>5.1}  {}",
+                a["action_id"].as_str().unwrap(),
+                a["pose_family"].as_str().unwrap(),
+                a["contact_piece_id"].as_str().unwrap(),
+                a["target_local"][0].as_f64().unwrap(),
+                a["target_local"][1].as_f64().unwrap(),
+                a["hit_radius"].as_f64().unwrap(),
+                a["required_reach"].as_f64().unwrap(),
+                a["max_reach"].as_f64().unwrap(),
+                a["centroid_gap"].as_f64().unwrap(),
+                a["guaranteed_intersection"],
+                a["lean_assist_deg"].as_f64().unwrap(),
+                a["note"].as_str().unwrap_or(""),
+            );
+        }
+        println!("unreachable: {}", j["unreachable_actions"]);
+        for s in j["support"].as_array().unwrap() {
+            println!(
+                "support {:<22} lowest {:>7.3}",
+                s["state"].as_str().unwrap(),
+                s["lowest_support_distance"].as_f64().unwrap()
+            );
         }
     }
 }

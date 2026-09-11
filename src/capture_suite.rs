@@ -24,6 +24,7 @@ pub struct Suite {
     pub turnaround: TurnaroundSpec,
     pub combat: CombatSpec,
     pub gif: GifSpec,
+    pub action_motion: ActionMotionSpec,
     pub runtime_frame_data: String,
     pub characters: Vec<String>,
     #[serde(default)]
@@ -90,6 +91,19 @@ pub struct GifSpec {
     pub duration_ticks: u32,
     pub sample_stride: u32,
     pub playback_fps: u32,
+}
+
+/// Optional, opt-in per-action motion-cycle GIF (every sim tick of the
+/// move's own run, no skipped frames): a review aid, not a measurement --
+/// see the JSON's own `note`. Reuses `contact_wide_camera`'s anchor and
+/// rule so it needs no camera of its own.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ActionMotionSpec {
+    pub output: [u32; 2],
+    pub playback_fps: u32,
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

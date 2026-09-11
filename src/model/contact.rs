@@ -51,10 +51,14 @@ pub struct ContactMeasure {
     /// `nearest_point` is the point of the projected surface that realises
     /// the distance (z taken from the piece's front, for drawing).
     /// Exceptions: throws have no fighter hitbox (all three are `None`);
-    /// `special_n`'s projectile is not measured against a piece (it is
-    /// emitted, not struck); body-centred hitboxes (chest piece) report
-    /// 0 / −radius when the centre sits inside the chest silhouette, which
-    /// says nothing about the pose's readability.
+    /// body-centred hitboxes (chest piece) report 0 / −radius when the
+    /// centre sits inside the chest silhouette, which says nothing about
+    /// the pose's readability. `special_n` is *not* an exception here: its
+    /// own fighter hitbox (a real melee hitbox, separate from the
+    /// projectile it emits) is measured against the contact piece exactly
+    /// like every other action — the caller may additionally measure the
+    /// same piece against the projectile object itself (a second, later
+    /// runtime event), but that is an addition, never a substitute.
     pub mesh_distance: Option<f32>,
     pub nearest_point: Option<[f32; 3]>,
     pub signed_separation: Option<f32>,
@@ -167,29 +171,54 @@ pub fn measure_posed(
     let rig = &model.rig;
     let world = rig.world(pose, root);
 
-    let (tip_bone, _) = limb_bones(anim::strike_spec(action).limb);
-    let bi = rig.bone(tip_bone)?;
+    // The designated contact piece of the authored direction — exactly that
+    // piece, never every piece on its bone and never an accessory
+    // (`docs/art/procedural/anim/FORMAT.md`). Fighters without a direction
+    // file fall back to the generic strike limb and its whole bone.
+    let directed = model.directions.as_ref().and_then(|d| d.get(action));
+    let bi = match directed {
+        Some(d) => d.bone,
+        None => rig.bone(limb_bones(anim::strike_spec(action).limb).0)?,
+    };
     let bone = &rig.bones[bi];
     if bone.mesh.pos.is_empty() {
         return None;
     }
     // Which vertices belong to which piece (spec-built models keep ranges).
-    let ranges: Vec<(String, u32, u32)> = model
-        .pieces
-        .iter()
-        .filter(|p| p.bone == bi)
-        .map(|p| (p.id.clone(), p.vertices.0, p.vertices.1))
-        .collect();
+    let ranges: Vec<(String, u32, u32)> = match directed {
+        Some(d) => {
+            let p = &model.pieces[d.piece];
+            vec![(p.id.clone(), p.vertices.0, p.vertices.1)]
+        }
+        None => model
+            .pieces
+            .iter()
+            .filter(|p| p.bone == bi)
+            .map(|p| (p.id.clone(), p.vertices.0, p.vertices.1))
+            .collect(),
+    };
     let piece_ids: Vec<String> = if ranges.is_empty() {
         vec![bone.name.clone()]
     } else {
         ranges.iter().map(|r| r.0.clone()).collect()
     };
-    let verts: Vec<V3> = bone.mesh.pos.iter().map(|p| world[bi].point(*p)).collect();
-    // Triangles that belong to the designated piece(s): every index inside
-    // one of the piece ranges (pieces are appended contiguously, so a
-    // triangle never straddles two pieces). Legacy models: the whole bone.
+    // World positions of the whole bone (triangles index into these) and,
+    // separately, only the designated piece's own vertices — the ones that
+    // describe the contact.
+    let all: Vec<V3> = bone.mesh.pos.iter().map(|p| world[bi].point(*p)).collect();
     let in_piece = |vi: u32| ranges.is_empty() || ranges.iter().any(|r| vi >= r.1 && vi < r.2);
+    let verts: Vec<V3> = all
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| in_piece(*i as u32))
+        .map(|(_, p)| *p)
+        .collect();
+    if verts.is_empty() {
+        return None;
+    }
+    // Triangles that belong to the designated piece: every index inside one
+    // of the piece ranges (pieces are appended contiguously, so a triangle
+    // never straddles two pieces). Legacy models: the whole bone.
     let tris: Vec<[[f32; 2]; 3]> = bone
         .mesh
         .idx
@@ -197,7 +226,7 @@ pub fn measure_posed(
         .filter(|t| t.len() == 3 && t.iter().all(|i| in_piece(*i)))
         .map(|t| {
             let p = |i: u32| {
-                let v = verts[i as usize];
+                let v = all[i as usize];
                 [v.x, v.y]
             };
             [p(t[0]), p(t[1]), p(t[2])]
@@ -212,9 +241,19 @@ pub fn measure_posed(
         lo = v3(lo.x.min(p.x), lo.y.min(p.y), lo.z.min(p.z));
         hi = v3(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z));
     }
+    // "Tip" = the vertex farthest along the *strike* direction, which is the
+    // fighter's facing for a forward move and the opposite for a rearward
+    // one (back air): the hitbox's own local X sign decides, so a rearward
+    // reach is never reported as a negative forward reach.
+    let axis = match hitbox {
+        Some((_, c, _)) if ((c[0] - f.pos.x) * f.facing).abs() > 1e-3 => {
+            ((c[0] - f.pos.x) * f.facing).signum() * f.facing
+        }
+        _ => f.facing,
+    };
     let tip = *verts
         .iter()
-        .max_by(|a, b| (a.x * f.facing).total_cmp(&(b.x * f.facing)))
+        .max_by(|a, b| (a.x * axis).total_cmp(&(b.x * axis)))
         .unwrap();
 
     let mut out = ContactMeasure {
@@ -236,7 +275,7 @@ pub fn measure_posed(
         vertex_distance: None,
         triangle_count: tris.len(),
         tip: [tip.x, tip.y, tip.z],
-        tip_reach_x: (tip.x - f.pos.x) * f.facing,
+        tip_reach_x: (tip.x - f.pos.x) * axis,
     };
     if let Some((id, c, r)) = hitbox {
         out.hitbox = Some(HitboxRef {
@@ -244,7 +283,7 @@ pub fn measure_posed(
             center: c,
             radius: r,
         });
-        out.tip_reach_x = (tip.x - c[0]) * f.facing;
+        out.tip_reach_x = (tip.x - c[0]) * axis;
         let nearest = *verts
             .iter()
             .min_by(|a, b| {
@@ -262,6 +301,65 @@ pub fn measure_posed(
         }
     }
     Some(out)
+}
+
+/// Where a foot piece really is against the plane the fighter stands on.
+///
+/// The review asked for this by name: a pose can look right and still put a
+/// foot through the floor, and only the mesh bounds say so. Measured on the
+/// drawn pose, like every other diagnostic here.
+#[derive(Debug, Clone, Serialize)]
+pub struct FootSupport {
+    pub piece_id: String,
+    pub bone: String,
+    pub aabb_min: [f32; 3],
+    pub aabb_max: [f32; 3],
+    /// Lowest vertex of the piece minus the support plane: negative means
+    /// the drawn foot is below the floor.
+    pub support_distance: f32,
+}
+
+/// Foot mesh bounds and support-plane distances for `pose` under `root`.
+/// `plane_y` is the surface the fighter stands on (its own root while
+/// grounded); pass `0.0` with an identity root for a root-local answer.
+pub fn foot_support(
+    model: &CharacterModel,
+    pose: &Pose,
+    root: &Xf,
+    plane_y: f32,
+) -> Vec<FootSupport> {
+    let rig = &model.rig;
+    let world = rig.world(pose, root);
+    let mut out = Vec::new();
+    for id in ["k_foot_r", "k_foot_l"] {
+        let Some(pr) = model.pieces.iter().find(|p| p.id == id) else {
+            continue;
+        };
+        let mesh = &rig.bones[pr.bone].mesh;
+        let mut lo = v3(f32::MAX, f32::MAX, f32::MAX);
+        let mut hi = v3(f32::MIN, f32::MIN, f32::MIN);
+        for p in &mesh.pos[pr.vertices.0 as usize..pr.vertices.1 as usize] {
+            let q = world[pr.bone].point(*p);
+            lo = v3(lo.x.min(q.x), lo.y.min(q.y), lo.z.min(q.z));
+            hi = v3(hi.x.max(q.x), hi.y.max(q.y), hi.z.max(q.z));
+        }
+        out.push(FootSupport {
+            piece_id: id.to_string(),
+            bone: rig.bones[pr.bone].name.clone(),
+            aabb_min: [lo.x, lo.y, lo.z],
+            aabb_max: [hi.x, hi.y, hi.z],
+            support_distance: lo.y - plane_y,
+        });
+    }
+    out
+}
+
+/// The lowest support distance of `pose`, if the model has foot pieces.
+pub fn lowest_support(model: &CharacterModel, pose: &Pose, root: &Xf, plane_y: f32) -> Option<f32> {
+    foot_support(model, pose, root, plane_y)
+        .iter()
+        .map(|s| s.support_distance)
+        .fold(None, |a: Option<f32>, x| Some(a.map_or(x, |v| v.min(x))))
 }
 
 /// World-space hurt capsule of a fighter (segment ends + radius), as the

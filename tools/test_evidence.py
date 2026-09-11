@@ -38,7 +38,8 @@ def png_bytes(w, h):
             + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
 
 
-def make_capture(root, cases=CASES, drop=(), skipped=None, report_status=None, isolation=True):
+def make_capture(root, cases=CASES, drop=(), skipped=None, report_status=None, isolation=True,
+                 animation="clean", support_sheet="clean", special_n_hitbox="clean"):
     """Write a synthetic capture dir. `drop` = relative paths to omit."""
     files = []
     expected = []
@@ -67,6 +68,87 @@ def make_capture(root, cases=CASES, drop=(), skipped=None, report_status=None, i
             os.makedirs(os.path.dirname(p), exist_ok=True)
             with open(p, "w", encoding="utf-8") as f:
                 json.dump({"facings": []}, f)
+    if special_n_hitbox and special_n_hitbox != "missing" and any(a == "special_n" for a, _, _ in cases):
+        # special_n's own fighter hitbox (separate from the projectile
+        # release covered by its ordinary contact-special_n sheets above)
+        # gets its own supplemental sheet pair -- required whenever
+        # special_n has contact evidence at all (see
+        # special_n_hitbox_supplement_coverage in evidence.py).
+        # "missing" (or falsy) leaves both files/entries out entirely, to
+        # reproduce the gap the coverage check exists to catch.
+        for rel, (w, h) in ((f"characters/kestrel/contact-special_n-hitbox.png", (1536, 512)),
+                            (f"characters/kestrel/contact-special_n-hitbox-wide.png", (2048, 1024))):
+            p = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "wb") as f:
+                f.write(png_bytes(w, h))
+            files.append({"path": rel, "kind": "game3d", "width": w, "height": h, "camera": {}})
+    if animation:
+        # What `overframe --capture` exports for a directed character.
+        unreachable = ["bair"] if animation == "unreachable" else []
+        support = [{"state": "idle", "state_frame": 6, "lowest_support_distance": 0.42,
+                    "feet": [{"piece_id": "k_foot_r", "aabb_min": [0, 0.42, 0], "aabb_max": [4, 2, 2],
+                              "support_distance": 0.42}]},
+                   {"state": "crouch", "state_frame": 6,
+                    "lowest_support_distance": -1.31 if animation == "sunken" else 0.0,
+                    "feet": []}]
+        anim = {"schema_version": 1, "character_id": "kestrel", "units": "game_units",
+                "direction_file": "docs/art/procedural/anim/kestrel.json",
+                "direction_sha256": "a" * 64,
+                "actions": [{"action_id": a, "intersection_required": True,
+                             "guaranteed_intersection": a not in unreachable}
+                            for a, _, _ in cases],
+                "unreachable_actions": unreachable, "support": support}
+        p = os.path.join(root, "runtime", "animation", "kestrel.json")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(anim, f)
+    if support_sheet and support_sheet != "missing":
+        # What `overframe --capture` exports for the support-plane sheet:
+        # 4 cells (idle/crouch/hitstun/land_lag), each naming two distinct,
+        # coherent feet plus the support plane they are measured against.
+        # "broken" reproduces the real bug found in review: a cell whose
+        # feet list came back empty (no ContactQuery for that draw) folds
+        # to an f32::MAX sentinel instead of a real measurement.
+        # "empty_cells" reproduces a second real failure mode: the whole
+        # `cells` list comes back empty (nothing drawn at all), which an
+        # earlier version of the coverage check silently accepted as
+        # "clean" because its per-cell loop had nothing to iterate over.
+        # "dup_feet" gives both feet the same piece id -- one foot measured
+        # twice, the other never queried.
+        # "incoherent_bounds" gives a foot an aabb_min above its own
+        # aabb_max, and a `lowest_support_distance` that does not match
+        # either foot's own support_distance.
+        # "missing" (handled above, at the `if`) omits the file and entry
+        # entirely -- support.png never got produced at all.
+        rel = "characters/kestrel/support.png"
+        p = os.path.join(root, rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(png_bytes(2048, 512))
+
+        def foot(name, d):
+            return {"piece_id": name, "aabb_min": [0, d, 0], "aabb_max": [4, d + 2, 2],
+                    "support_distance": d}
+        cells = []
+        if support_sheet != "empty_cells":
+            for st in ("idle", "crouch", "hitstun", "land_lag"):
+                if support_sheet == "broken" and st == "crouch":
+                    cells.append({"which": st, "feet": [], "lowest_support_distance": 3.4028235e38,
+                                  "support_plane_y": 0})
+                elif support_sheet == "dup_feet" and st == "crouch":
+                    cells.append({"which": st, "feet": [foot("k_foot_r", 0.5), foot("k_foot_r", 0.5)],
+                                  "lowest_support_distance": 0.5, "support_plane_y": 0})
+                elif support_sheet == "incoherent_bounds" and st == "crouch":
+                    bad_foot = {"piece_id": "k_foot_r", "aabb_min": [0, 5.0, 0], "aabb_max": [4, 1.0, 2],
+                                "support_distance": 0.5}
+                    cells.append({"which": st, "feet": [bad_foot, foot("k_foot_l", 0.5)],
+                                  "lowest_support_distance": 9.9, "support_plane_y": 0})
+                else:
+                    cells.append({"which": st, "feet": [foot("k_foot_r", 0.5), foot("k_foot_l", 0.5)],
+                                  "lowest_support_distance": 0.5, "support_plane_y": 0})
+        files.append({"path": rel, "kind": "game3d", "width": 2048, "height": 512,
+                      "camera": {"cells": cells}})
     os.makedirs(os.path.join(root, "runtime"), exist_ok=True)
     with open(os.path.join(root, "runtime", "frame-data-report.json"), "w", encoding="utf-8") as f:
         json.dump(report, f)
@@ -206,6 +288,124 @@ class Coverage(unittest.TestCase):
             self.assertEqual(code, 3, log)
             self.assertNotIn("Traceback", log)
             self.assertIn("problem:", log)
+
+    def test_the_animation_round_is_measured_but_never_art_approved(self):
+        make_capture(self.cap)
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 0, log)
+        cap = m["capabilities"]["animation_direction_kestrel"]
+        self.assertEqual(cap["state"], "implemented_unverified")
+        self.assertEqual(cap["direction_sha256"], "a" * 64)
+        self.assertEqual(m["animation"]["kestrel"]["unreachable_actions"], [])
+        # Art approval is still the reviewer's, and CI still never sets it.
+        self.assertEqual(m["capabilities"]["art_review_kestrel"]["state"], "not_verified")
+        for k, v in m["capabilities"].items():
+            if isinstance(v, dict):
+                self.assertIn(v["state"], evidence.STATES, k)
+
+    def test_an_unreachable_direction_is_a_problem_and_is_never_verified(self):
+        make_capture(self.cap, animation="unreachable")
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 3, log)
+        self.assertEqual(m["capabilities"]["animation_direction_kestrel"]["state"], "not_verified")
+        self.assertTrue(any("unreachable directions" in p for p in m["problems"]))
+
+    def test_a_foot_through_the_floor_is_a_problem(self):
+        make_capture(self.cap, animation="sunken")
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 3, log)
+        self.assertEqual(m["capabilities"]["animation_direction_kestrel"]["state"], "not_verified")
+        self.assertTrue(any("below the support plane" in p for p in m["problems"]))
+        self.assertLess(m["animation"]["kestrel"]["worst_support_distance"], 0)
+
+    def test_a_missing_support_plane_sheet_is_a_problem(self):
+        make_capture(self.cap, support_sheet="missing")
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 3, log)
+        self.assertTrue(any("support plane sheet missing" in p for p in m["problems"]))
+        self.assertEqual(m["capabilities"]["animation_direction_kestrel"]["state"], "not_verified")
+        self.assertFalse(m["support_plane"]["kestrel"]["present"])
+
+    def test_a_support_cell_folding_to_a_sentinel_is_a_problem_not_a_pass(self):
+        # The real bug: a cell whose feet list came back empty (no
+        # ContactQuery for that draw) folded to an f32::MAX sentinel and
+        # was accepted as if it were a measurement. That must never read
+        # as clean, whether the coverage sees zero feet or the exact
+        # sentinel magnitude.
+        make_capture(self.cap, support_sheet="broken")
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 3, log)
+        self.assertTrue(any("foot measurements (need 2)" in p for p in m["problems"]))
+        self.assertEqual(m["capabilities"]["animation_direction_kestrel"]["state"], "not_verified")
+        self.assertIn("crouch", m["support_plane"]["kestrel"]["cells_bad"])
+
+    def test_an_empty_support_cells_list_is_a_problem_not_a_pass(self):
+        # A second real failure mode: the whole `cells` list comes back
+        # empty. A per-cell loop with nothing to iterate over must not
+        # read as "no bad cells" -- all four expected states are missing.
+        make_capture(self.cap, support_sheet="empty_cells")
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 3, log)
+        self.assertTrue(any("expected cell" in p and "is missing" in p for p in m["problems"]))
+        self.assertEqual(m["capabilities"]["animation_direction_kestrel"]["state"], "not_verified")
+        self.assertEqual(sorted(m["support_plane"]["kestrel"]["cells_bad"]),
+                          sorted(["idle", "crouch", "hitstun", "land_lag"]))
+
+    def test_two_feet_sharing_one_piece_id_is_a_problem(self):
+        # The same foot measured twice while the other foot was never
+        # queried must not read as "two foot measurements, therefore fine".
+        make_capture(self.cap, support_sheet="dup_feet")
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 3, log)
+        self.assertTrue(any("not two distinct pieces" in p for p in m["problems"]))
+        self.assertIn("crouch", m["support_plane"]["kestrel"]["cells_bad"])
+
+    def test_incoherent_foot_bounds_is_a_problem(self):
+        # An aabb_min above its own aabb_max, and a lowest_support_distance
+        # that does not match either foot's own number, must both surface
+        # -- "two finite numbers happened to be present" is not the same
+        # as "these numbers are mutually coherent".
+        make_capture(self.cap, support_sheet="incoherent_bounds")
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 3, log)
+        self.assertTrue(any("incoherent bounds/support_distance" in p for p in m["problems"]))
+        self.assertTrue(any("lowest_support_distance does not match its own feet" in p for p in m["problems"]))
+        self.assertIn("crouch", m["support_plane"]["kestrel"]["cells_bad"])
+
+    def test_a_clean_support_plane_sheet_is_not_a_problem(self):
+        make_capture(self.cap, support_sheet="clean")
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 0, log)
+        self.assertTrue(m["support_plane"]["kestrel"]["present"])
+        self.assertEqual(m["support_plane"]["kestrel"]["cells_bad"], [])
+
+    def test_a_missing_special_n_hitbox_supplement_is_a_problem(self):
+        # special_n's own fighter hitbox (separate from the projectile
+        # release its ordinary contact-special_n sheets cover) must have
+        # its supplemental sheet pair present whenever special_n has
+        # contact evidence at all -- these are additional files, not a
+        # second contact_expected row, so nothing else would catch their
+        # absence without this check.
+        make_capture(self.cap, special_n_hitbox="missing")
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 3, log)
+        self.assertTrue(any("special_n fighter-hitbox supplement missing" in p for p in m["problems"]))
+        self.assertFalse(m["special_n_hitbox_supplement"]["kestrel"]["present"])
+        self.assertEqual(m["capabilities"]["animation_direction_kestrel"]["state"], "not_verified")
+
+    def test_a_clean_special_n_hitbox_supplement_is_not_a_problem(self):
+        make_capture(self.cap, special_n_hitbox="clean")
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 0, log)
+        self.assertTrue(m["special_n_hitbox_supplement"]["kestrel"]["present"])
+        self.assertFalse(any("special_n fighter-hitbox supplement" in p for p in m["problems"]))
+
+    def test_without_the_animation_export_the_round_reads_as_unimplemented(self):
+        make_capture(self.cap, animation=None)
+        code, m, log = run_manifest(self.cap, self.out)
+        self.assertEqual(code, 0, log)
+        self.assertEqual(m["capabilities"]["animation_direction_kestrel"]["state"],
+                         "specified_not_implemented")
 
     def test_spec_hashes_list_every_spec_even_when_missing(self):
         make_capture(self.cap)

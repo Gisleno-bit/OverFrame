@@ -26,6 +26,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import shutil
 import struct
@@ -229,7 +230,192 @@ def contact_coverage(index, present, problems, capture_dir):
     }
 
 
-def capabilities(index, checks, tests_passed, coverage=None, present=None):
+def special_n_hitbox_supplement_coverage(index, present, problems):
+    """`special_n` has two real runtime events (the projectile release,
+    covered by its ordinary declared contact sheets, and the move's own
+    fighter hitbox 8 frames later) -- per review
+    91f9c5a2834353bbb7207dcc4d866a4e513fd48f / art commit
+    343def9c8c45ec69dba36b2b7ce863255ee9b0e4, the emission exception must
+    never let the second event's evidence go missing without failing
+    coverage. These supplemental sheets are additional files (not a second
+    `contact_expected` row -- see contact_coverage), so this is the only
+    check that makes their presence mandatory: whenever a character's
+    `contact_expected` names a `special_n` case, both
+    `characters/<ch>/contact-special_n-hitbox.png` and
+    `characters/<ch>/contact-special_n-hitbox-wide.png` must be present, or
+    it is a problem (publish fails), not a silently-missing supplement."""
+    expected = (index or {}).get("contact_expected", [])
+    chars_with_special_n = sorted({e["character_id"] for e in expected if e.get("action_id") == "special_n"})
+    per_char = {}
+    for ch in chars_with_special_n:
+        primary = f"characters/{ch}/contact-special_n-hitbox.png"
+        wide = f"characters/{ch}/contact-special_n-hitbox-wide.png"
+        missing = [p for p in (primary, wide) if p not in present]
+        for p in missing:
+            problems.append(f"special_n fighter-hitbox supplement missing: {p}")
+        per_char[ch] = {"primary": primary, "wide": wide, "present": not missing}
+    return per_char
+
+
+SUPPORT_SENTINEL_BOUND = 1000.0  # game units; a real foot never reads anywhere near this
+
+
+def _finite_and_sane(x):
+    """True for a real measurement: a finite number nowhere near a sentinel
+    like f32::MAX (~3.4e38 is finite in Python's f64, so `isfinite` alone
+    would not catch it -- an implausible magnitude is checked too)."""
+    return isinstance(x, (int, float)) and math.isfinite(x) and abs(x) < SUPPORT_SENTINEL_BOUND
+
+
+EXPECTED_SUPPORT_STATES = ("idle", "crouch", "hitstun", "land_lag")
+SUPPORT_DISTANCE_EPS = 1e-3  # game units; ties a foot's own numbers together
+
+
+def _coherent_foot(f):
+    """A single foot record is internally coherent: a real 3-component
+    aabb_min/aabb_max (finite, sane, min not sitting above max on any
+    axis) and a finite, sane `support_distance` -- not merely three
+    numbers that happen to be present."""
+    aabb_min = f.get("aabb_min")
+    aabb_max = f.get("aabb_max")
+    if not (
+        isinstance(aabb_min, (list, tuple))
+        and isinstance(aabb_max, (list, tuple))
+        and len(aabb_min) == 3
+        and len(aabb_max) == 3
+    ):
+        return False
+    if not all(_finite_and_sane(v) for v in list(aabb_min) + list(aabb_max)):
+        return False
+    if any(aabb_min[i] > aabb_max[i] for i in range(3)):
+        return False
+    return _finite_and_sane(f.get("support_distance"))
+
+
+def _cell_problems(c):
+    """Every way one support.png cell can fail to be real evidence, as a
+    list of short reasons (empty = clean). None of the following reads as
+    "no problem": a `feet` list that is not exactly two entries (an empty
+    list from a draw nobody queried folds to a sentinel just as easily as
+    it looks "absent"), two feet sharing one piece id (the same foot
+    measured twice while the other foot was never queried), a foot whose
+    own aabb_min/aabb_max/support_distance are not mutually coherent or
+    do not agree with the drawn support plane, or a `lowest_support_distance`
+    that does not match the minimum of its own feet."""
+    feet = c.get("feet") or []
+    lowest = c.get("lowest_support_distance")
+    reasons = []
+    if len(feet) != 2:
+        reasons.append(f"{len(feet)} foot measurements (need 2)")
+    ids = [f.get("piece_id") for f in feet]
+    if len(feet) == 2 and (len(set(ids)) != len(ids) or any(not i for i in ids)):
+        reasons.append(f"feet are not two distinct pieces: {ids}")
+    incoherent = [f.get("piece_id", "?") for f in feet if not _coherent_foot(f)]
+    if incoherent:
+        reasons.append(f"incoherent bounds/support_distance: {incoherent}")
+    plane = c.get("support_plane_y")
+    if _finite_and_sane(plane):
+        off_plane = [
+            f.get("piece_id", "?")
+            for f in feet
+            if _coherent_foot(f)
+            and abs(f["aabb_min"][1] - plane - f["support_distance"]) > SUPPORT_DISTANCE_EPS
+        ]
+        if off_plane:
+            reasons.append(f"support_distance does not match aabb_min.y - plane: {off_plane}")
+    if not _finite_and_sane(lowest):
+        reasons.append("lowest_support_distance is not finite/sane")
+    else:
+        coherent_feet = [f for f in feet if _coherent_foot(f)]
+        if coherent_feet and abs(min(f["support_distance"] for f in coherent_feet) - lowest) > SUPPORT_DISTANCE_EPS:
+            reasons.append("lowest_support_distance does not match its own feet")
+    return reasons
+
+
+def support_plane_sheet_coverage(index, present, problems):
+    """`characters/<ch>/support.png` must exist for every character with
+    contact evidence, and it must carry exactly the four expected cells
+    (idle/crouch/hitstun/land_lag) -- an empty, short, duplicated, or
+    unexpectedly-named `cells` list is never accepted as "clean" just
+    because the loop that would have flagged a bad cell had nothing to
+    iterate over. Each present cell must in turn carry two distinct,
+    physically coherent foot measurements (see `_cell_problems`); any
+    other outcome is a problem every time, not just when a foot reads
+    below the floor."""
+    chars = (index or {}).get("characters") or []
+    per_char = {}
+    for ch in chars:
+        rel = f"characters/{ch}/support.png"
+        if rel not in present:
+            problems.append(f"support plane sheet missing: {rel}")
+            per_char[ch] = {"present": False, "cells_ok": 0, "cells_bad": []}
+            continue
+        entry = next((f for f in (index or {}).get("files", []) if f["path"] == rel), None)
+        cells = ((entry or {}).get("camera") or {}).get("cells") or []
+        by_state = {}
+        for c in cells:
+            by_state.setdefault(c.get("which", "?"), []).append(c)
+        bad = []
+        for state in EXPECTED_SUPPORT_STATES:
+            group = by_state.pop(state, None)
+            if not group:
+                bad.append(state)
+                problems.append(f"{rel}: expected cell '{state}' is missing")
+                continue
+            if len(group) > 1:
+                bad.append(state)
+                problems.append(f"{rel}: cell '{state}' appears {len(group)} times")
+                continue
+            reasons = _cell_problems(group[0])
+            if reasons:
+                bad.append(state)
+                problems.append(f"{rel}: cell {state} " + "; ".join(reasons))
+        for extra in by_state:
+            problems.append(f"{rel}: unexpected cell '{extra}' (not one of {EXPECTED_SUPPORT_STATES})")
+        per_char[ch] = {
+            "present": True,
+            "cells_ok": len(EXPECTED_SUPPORT_STATES) - len(bad),
+            "cells_bad": bad,
+        }
+    return per_char
+
+
+def animation_summary(capture_dir, present):
+    """What the animation-direction round claims, read back from the run's
+    own export (`runtime/animation/<character>.json`).
+
+    It never upgrades a state on its own: it reports the direction file's
+    content hash, the actions whose geometry could not be satisfied, and the
+    worst measured foot-support distance. Art approval stays with the
+    reviewer."""
+    out = {}
+    for rel in sorted(p for p in present if p.startswith("runtime/animation/") and p.endswith(".json")):
+        j = load_json(os.path.join(capture_dir, rel), None)
+        if not isinstance(j, dict):
+            continue
+        ch = j.get("character_id") or os.path.basename(rel)[:-5]
+        support = [x.get("lowest_support_distance") for x in (j.get("support") or [])
+                   if isinstance(x.get("lowest_support_distance"), (int, float))]
+        actions = j.get("actions") or []
+        out[ch] = {
+            "path": rel,
+            "direction_file": j.get("direction_file"),
+            "direction_sha256": j.get("direction_sha256"),
+            "actions": len(actions),
+            "actions_requiring_intersection": sum(1 for a in actions if a.get("intersection_required")),
+            "actions_with_guaranteed_intersection": sum(
+                1 for a in actions if a.get("intersection_required") and a.get("guaranteed_intersection")),
+            "unreachable_actions": j.get("unreachable_actions") or [],
+            "worst_support_distance": min(support) if support else None,
+            "feet_below_the_floor": [x.get("state") for x in (j.get("support") or [])
+                                     if isinstance(x.get("lowest_support_distance"), (int, float))
+                                     and x["lowest_support_distance"] < -1e-3],
+        }
+    return out
+
+
+def capabilities(index, checks, tests_passed, coverage=None, present=None, animation=None, support_plane=None,
+                  special_n_hitbox=None):
     """A capability is `verified` only when the manifest names evidence that
     exists in this run and the checks passed. States are limited to the
     exchange schema; art approval is never a CI state (it lives in the
@@ -299,7 +485,41 @@ def capabilities(index, checks, tests_passed, coverage=None, present=None):
     }
     caps["art_review_kestrel"] = {"state": "not_verified", "evidence": [],
                                   "note": "set only by the reviewer against this SHA's evidence; CI never marks it"}
-    caps["animation_direction_kestrel"] = {"state": "specified_not_implemented", "evidence": []}
+    # The 22 authored directions: implemented and measured here, never
+    # `verified` from CI — that word belongs to the reviewer's art pass
+    # against this SHA's game3d images (docs/art/reviews/<sha>.md).
+    for ch, an in (animation or {}).items():
+        sp = (support_plane or {}).get(ch, {})
+        sp_ok = sp.get("present") and not sp.get("cells_bad")
+        snh = (special_n_hitbox or {}).get(ch)
+        # Only a character whose contact_expected actually names a
+        # special_n case owes this supplement; a character without that
+        # move (or one not yet contact-exported) is not held to it.
+        snh_ok = snh is None or snh.get("present")
+        ok = (not an.get("unreachable_actions")
+              and not an.get("feet_below_the_floor")
+              and an.get("actions_requiring_intersection")
+              == an.get("actions_with_guaranteed_intersection")
+              and sp_ok
+              and snh_ok
+              and tests_ok)
+        evidence = [an.get("path"), f"characters/{ch}/contact-*.png", f"characters/{ch}/support.png"]
+        if snh:
+            evidence.append(f"characters/{ch}/contact-special_n-hitbox*.png")
+        evidence.append("src/model/anim_dir.rs, src/model/anim_directed.rs tests")
+        caps[f"animation_direction_{ch}"] = {
+            "state": "implemented_unverified" if ok else "not_verified",
+            "evidence": evidence,
+            "direction_sha256": an.get("direction_sha256"),
+            "actions": an.get("actions"),
+            "unreachable_actions": an.get("unreachable_actions"),
+            "worst_support_distance": an.get("worst_support_distance"),
+            "support_plane_sheet": sp,
+            "special_n_hitbox_supplement": snh,
+            "note": "geometry and timing are measured; the artistic pass is the reviewer's and is never set by CI",
+        }
+    if not animation:
+        caps["animation_direction_kestrel"] = {"state": "specified_not_implemented", "evidence": []}
     caps["procedural_v1_boulder"] = {"state": "specified_not_implemented", "evidence": []}
     caps["procedural_v1_viper"] = {"state": "specified_not_implemented", "evidence": []}
     caps["trama"] = {"state": "specified_not_implemented", "evidence": []}
@@ -358,6 +578,14 @@ def cmd_manifest(a):
         problems.append(f"run total {total} B > budget {RUN_LIMIT}")
     present = {f["path"] for f in files}
     coverage = contact_coverage(index, present, problems, a.capture)
+    support_plane = support_plane_sheet_coverage(index, present, problems)
+    special_n_hitbox = special_n_hitbox_supplement_coverage(index, present, problems)
+    animation = animation_summary(a.capture, present)
+    for ch, an in animation.items():
+        if an.get("unreachable_actions"):
+            problems.append(f"animation {ch}: unreachable directions {', '.join(an['unreachable_actions'])}")
+        if an.get("feet_below_the_floor"):
+            problems.append(f"animation {ch}: feet below the support plane in {', '.join(an['feet_below_the_floor'])}")
     passed, failed = parse_test_totals(a.tests_log)
     specs = {}
     for rel in SPEC_FILES:
@@ -402,7 +630,10 @@ def cmd_manifest(a):
         "skipped": (index or {}).get("skipped", []),
         "frame_data_cases": (index or {}).get("frame_data_cases", []),
         "isolation_check": (index or {}).get("isolation_check"),
-        "capabilities": capabilities(index, checks, passed, coverage, present),
+        "animation": animation,
+        "support_plane": support_plane,
+        "special_n_hitbox_supplement": special_n_hitbox,
+        "capabilities": capabilities(index, checks, passed, coverage, present, animation, support_plane, special_n_hitbox),
         "size_budget": {"png": PNG_LIMIT, "gif": GIF_LIMIT, "run": RUN_LIMIT, "total_bytes": total},
         "problems": problems,
     }

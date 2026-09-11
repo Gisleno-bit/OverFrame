@@ -95,6 +95,14 @@
     "sample_stride": 3,
     "playback_fps": 20
   },
+  "action_motion": {
+    "output": [
+      960,
+      540
+    ],
+    "playback_fps": 60,
+    "note": "optional, opt-in per-action motion-cycle capture: every simulation tick from one tick before the move starts through its last recovery tick, none skipped, at the sim's own 60Hz -- lets the reviewer watch the full cycle instead of only the primary/wide contact cells. Same declared contact_wide_camera anchor and rule; both facing rows (contact_wide_camera.rows_facing), produced together whenever the case is requested. Two outputs per facing: characters/<ch>/contact-<action>[-<variant>]-motion.gif (facing +1) / -motion2.gif (facing -1), each labelled with the fps it actually achieves -- the `image` crate's GIF encoder cannot reach a real 60fps (its centisecond rounding floors 60fps to an effective ~100fps; see the file's own note) -- plus a lossless per-tick PNG sequence (characters/<ch>/contact-<action>[-<variant>]-motion[2]-frames/tick_%04d.png) and a JSON sidecar (…-motion[2].json: sha/case/facing/ticks/camera/fps) for re-encoding to APNG/MP4 at the true rate. Supplementary: not part of contact_expected, never required for coverage, and primary/wide sheets are unchanged."
+  },
   "runtime_frame_data": "export_required_no_rows_supplied",
   "characters": [
     "kestrel"

@@ -116,14 +116,14 @@ impl Default for AnimStyle {
 
 // ----------------------------------------------------------------- helpers
 
-fn lean(p: &mut Pose, rig: &Rig, deg: f32) {
+pub(crate) fn lean(p: &mut Pose, rig: &Rig, deg: f32) {
     p.add(rig, "spine", v3(0.0, 0.0, -deg * 0.55));
     p.add(rig, "chest", v3(0.0, 0.0, -deg * 0.45));
 }
 
 /// Leg pose: `thigh`/`shin` forward-swing degrees; the foot compensates to
 /// stay level unless `foot` is given.
-fn leg(p: &mut Pose, rig: &Rig, side: &str, thigh: f32, shin: f32, foot: Option<f32>) {
+pub(crate) fn leg(p: &mut Pose, rig: &Rig, side: &str, thigh: f32, shin: f32, foot: Option<f32>) {
     p.rot(rig, &format!("thigh_{side}"), 0.0, 0.0, thigh);
     p.rot(rig, &format!("shin_{side}"), 0.0, 0.0, shin);
     let f = foot.unwrap_or(-(thigh + shin) * 0.8);
@@ -131,19 +131,19 @@ fn leg(p: &mut Pose, rig: &Rig, side: &str, thigh: f32, shin: f32, foot: Option<
 }
 
 /// Arm pose: `upper` forward-swing, `fore` elbow bend, `out` sideways lift.
-fn arm(p: &mut Pose, rig: &Rig, side: &str, upper: f32, fore: f32, out: f32) {
+pub(crate) fn arm(p: &mut Pose, rig: &Rig, side: &str, upper: f32, fore: f32, out: f32) {
     let s = if side == "r" { -1.0 } else { 1.0 };
     p.rot(rig, &format!("upper_arm_{side}"), s * out, 0.0, upper);
     p.rot(rig, &format!("forearm_{side}"), 0.0, 0.0, fore);
     p.rot(rig, &format!("hand_{side}"), 0.0, 0.0, fore * 0.15);
 }
 
-fn both_legs(p: &mut Pose, rig: &Rig, thigh: f32, shin: f32) {
+pub(crate) fn both_legs(p: &mut Pose, rig: &Rig, thigh: f32, shin: f32) {
     leg(p, rig, "r", thigh, shin, None);
     leg(p, rig, "l", thigh, shin, None);
 }
 
-fn both_arms(p: &mut Pose, rig: &Rig, upper: f32, fore: f32, out: f32) {
+pub(crate) fn both_arms(p: &mut Pose, rig: &Rig, upper: f32, fore: f32, out: f32) {
     arm(p, rig, "r", upper, fore, out);
     arm(p, rig, "l", upper, fore, out);
 }

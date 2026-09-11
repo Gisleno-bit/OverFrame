@@ -1,0 +1,1726 @@
+//! The authored animation directions, implemented
+//! (`docs/art/procedural/anim/kestrel.json`, contract `anim/FORMAT.md`).
+//!
+//! Every action of a fighter that ships a direction file gets its pose from
+//! here instead of the generic aimed strike in [`super::anim`]. The three
+//! rules the contract insists on are all structural, not cosmetic:
+//!
+//! * **The contact piece is solved, not guessed.** The strike pose places the
+//!   *exact* `contact_piece_id` (its centroid) on the runtime hit region,
+//!   by solving the real hip/knee/ankle or shoulder/elbow/wrist chain in the
+//!   fighter's own root-local frame. The hitbox offset is used with its sign,
+//!   so a rearward move (back air) aims backward; nothing is clamped positive.
+//!   When the limb cannot reach, it extends fully along the line to the target
+//!   and the shortfall is reported ([`feasibility`]) rather than hidden.
+//! * **The runtime owns the timeline.** Anticipation peaks at the authored
+//!   fraction of the *available inactive startup* (never adding a frame),
+//!   contact holds through the true active interval — `startup + active +
+//!   late_active`, the late window included — and recovery starts only after
+//!   the real last active tick. A held smash freezes on the anticipation pose
+//!   because the simulation freezes `state_frame` there.
+//! * **Special cases use their real events.** The projectile action aims at
+//!   the runtime spawn point (and never chases the projectile afterwards),
+//!   the radial action centres the body in its own effect instead of pushing
+//!   a hand to the boundary, and throws work from the hold position and the
+//!   runtime release parameters. None of them grow a fictitious melee hitbox.
+//!
+//! Nothing here reads or writes simulation state: no damage, frame data,
+//! hitbox, capsule, model scale or bone length is touched. Poses are built in
+//! the root-local frame (the drawn facing is a rotation of the whole root, see
+//! [`super::render_eval`]), so the same pose serves both facings and the
+//! measurements come out facing-symmetric.
+
+use super::anim;
+use super::anim_dir::{Directions, PoseFamily, Resolved};
+use super::characters::CharacterModel;
+use super::math3::{ease, ease_in, ease_out, v3, Xf, M3, V3};
+use super::rig::{Pose, Rig};
+use crate::sim::attacks::{self, MoveData};
+use crate::sim::fighter::{Fighter, State};
+
+/// Where the simulation holds a grabbed fighter, relative to the holder's
+/// root and facing (`sim::state::GameState::update_grabs`). Read-only
+/// knowledge of the sim: the throw poses aim the hands at the real hold
+/// position instead of inventing one.
+pub const HOLD_LOCAL_X: f32 = 16.0;
+/// Where `SpecialN` spawns its projectile relative to the root and facing
+/// (`sim::state::GameState::step`, spawn requests).
+pub const PROJECTILE_SPAWN_LOCAL_X: f32 = 14.0;
+
+// ----------------------------------------------------------------- 2D helpers
+
+/// Unit direction of a bone at absolute Z angle `deg`: a bone hangs down at
+/// 0° and swings its tip toward +X at 90° (the convention `anim` keys in).
+#[inline]
+fn dir(deg: f32) -> [f32; 2] {
+    let (s, c) = deg.to_radians().sin_cos();
+    [s, -c]
+}
+
+/// Inverse of [`dir`]: the absolute Z angle of the vector `(x, y)`.
+#[inline]
+fn ang(x: f32, y: f32) -> f32 {
+    x.atan2(-y).to_degrees()
+}
+
+#[inline]
+fn wrap180(mut a: f32) -> f32 {
+    while a > 180.0 {
+        a -= 360.0;
+    }
+    while a < -180.0 {
+        a += 360.0;
+    }
+    a
+}
+
+#[inline]
+fn rot_z_xy(deg: f32, p: V3) -> [f32; 2] {
+    let (s, c) = deg.to_radians().sin_cos();
+    [p.x * c - p.y * s, p.x * s + p.y * c]
+}
+
+/// Cumulative Z rotation of a transform whose rotation is Z-only (the
+/// directed poses keep every ancestor of a solved chain planar, so the
+/// projected chain is a true 2D articulated chain).
+#[inline]
+fn z_of(m: &M3) -> f32 {
+    m.m[1][0].atan2(m.m[0][0]).to_degrees()
+}
+
+// ----------------------------------------------------------------- the chain
+
+/// A solved limb: the two long links plus the short rigid step from the tip
+/// joint to the contact piece.
+#[derive(Clone, Copy, Debug)]
+struct Chain {
+    upper: usize,
+    fore: usize,
+    tip: usize,
+    parent: Option<usize>,
+    l1: f32,
+    l2: f32,
+}
+
+fn chain(rig: &Rig, tip_bone: usize) -> Option<Chain> {
+    let fore = rig.bones[tip_bone].parent?;
+    let upper = rig.bones[fore].parent?;
+    Some(Chain {
+        upper,
+        fore,
+        tip: tip_bone,
+        parent: rig.bones[upper].parent,
+        l1: rig.bones[fore].offset.len(),
+        l2: rig.bones[tip_bone].offset.len(),
+    })
+}
+
+/// What a solve achieved, in world units, for the feasibility report.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Reach {
+    /// Distance from the limb's root joint to the aim point.
+    pub required: f32,
+    /// Longest distance that chain can put the piece centroid at.
+    pub max_reach: f32,
+    /// Distance from the achieved piece centroid to the aim point.
+    pub achieved: f32,
+    /// The chain could place the centroid exactly on the aim point.
+    pub reached: bool,
+}
+
+/// Elbows bend forward (positive local Z), knees bend backward (negative).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Bend {
+    Elbow,
+    Knee,
+}
+
+impl Bend {
+    fn sign(self) -> f32 {
+        match self {
+            Bend::Elbow => 1.0,
+            Bend::Knee => -1.0,
+        }
+    }
+}
+
+/// Put `effector` (a point in the tip bone's frame) on `target`
+/// (root-local XY) by rotating the chain about Z only.
+///
+/// Exact two-link inverse kinematics in the XY fighting plane — the plane the
+/// simulation tests and the plane `model::contact` projects onto. When the
+/// target is out of reach the limb extends fully along the line to it (never
+/// past it, never toward a mirrored target), and `reached` says so.
+#[allow(clippy::too_many_arguments)]
+fn solve(
+    rig: &Rig,
+    pose: &mut Pose,
+    ch: &Chain,
+    effector: V3,
+    target: [f32; 2],
+    bend: Bend,
+    tip_abs: Option<f32>,
+    tip_local: f32,
+) -> Reach {
+    let mut c = tip_local;
+    let mut out = Reach::default();
+    // Two passes: the short tip link changes the effective second link, and
+    // an absolute tip orientation depends on the solved angles.
+    for _ in 0..3 {
+        pose.rot[ch.tip] = v3(0.0, 0.0, c);
+        let world = rig.world(pose, &Xf::IDENTITY);
+        let s = world[ch.upper].t;
+        let phi = ch.parent.map(|p| z_of(&world[p].m)).unwrap_or(0.0);
+        // Vector from the fore joint to the effector, in the fore bone's own
+        // frame: down the second link, then the rotated tip offset.
+        let e = rot_z_xy(c, effector);
+        let q = [e[0], -ch.l2 + e[1]];
+        let l2eff = (q[0] * q[0] + q[1] * q[1]).sqrt();
+        let gamma = ang(q[0], q[1]);
+        let d = [target[0] - s.x, target[1] - s.y];
+        let required = (d[0] * d[0] + d[1] * d[1]).sqrt();
+        let rmax = ch.l1 + l2eff - 1e-3;
+        let rmin = (ch.l1 - l2eff).abs() + 1e-3;
+        let r = required.clamp(rmin, rmax);
+        let beta = ang(d[0], d[1]);
+        // Aim point actually solved for: the target itself when in reach,
+        // otherwise the farthest point of the same line.
+        let tgt = [s.x + r * dir(beta)[0], s.y + r * dir(beta)[1]];
+        let cos_a = ((r * r + ch.l1 * ch.l1 - l2eff * l2eff) / (2.0 * r * ch.l1)).clamp(-1.0, 1.0);
+        let alpha = cos_a.acos().to_degrees();
+        // Pick the side whose joint bend is anatomically legal; if both or
+        // neither are, take the straighter one.
+        let mut best: Option<(f32, f32, bool)> = None;
+        for sign in [1.0f32, -1.0] {
+            let a_abs = beta + sign * alpha;
+            let du = dir(a_abs);
+            let elb = [s.x + ch.l1 * du[0], s.y + ch.l1 * du[1]];
+            let psi = ang(tgt[0] - elb[0], tgt[1] - elb[1]);
+            let b = wrap180(psi - gamma - a_abs);
+            let legal = b * bend.sign() >= -1e-3;
+            let better = match best {
+                None => true,
+                Some((_, bb, blegal)) => match (legal, blegal) {
+                    (true, false) => true,
+                    (false, true) => false,
+                    _ => b.abs() < bb.abs(),
+                },
+            };
+            if better {
+                best = Some((a_abs, b, legal));
+            }
+        }
+        let (a_abs, b, _) = best.unwrap();
+        pose.rot[ch.upper] = v3(0.0, 0.0, wrap180(a_abs - phi));
+        pose.rot[ch.fore] = v3(0.0, 0.0, b);
+        if let Some(t) = tip_abs {
+            c = wrap180(t - (a_abs + b));
+        }
+        pose.rot[ch.tip] = v3(0.0, 0.0, c);
+        out.required = required;
+        out.max_reach = ch.l1 + l2eff;
+        out.reached = required <= rmax && required >= rmin;
+    }
+    // What the piece centroid really ended up at.
+    let world = rig.world(pose, &Xf::IDENTITY);
+    let p = world[ch.tip].point(effector);
+    out.achieved = ((p.x - target[0]).powi(2) + (p.y - target[1]).powi(2)).sqrt();
+    out
+}
+
+// ----------------------------------------------------------------- shapes
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Stage {
+    /// The anticipation peak (also the pose a held smash freezes on).
+    Wind,
+    /// First contact.
+    Contact,
+    /// Follow-through held through the clean window.
+    Ext,
+    /// Joint folded first, before the body settles.
+    Fold,
+}
+
+/// Per-family shape: everything the prose fixes that is not the contact
+/// solve itself (torso, hips, tip orientation, coil, head).
+#[derive(Clone, Copy, Debug)]
+struct Shape {
+    lean: f32,
+    lean_wind: f32,
+    /// Extra forward lean the builder may add — in measured steps, only when
+    /// the authored lean leaves the piece outside the hit region.
+    lean_assist: f32,
+    crouch: f32,
+    /// Absolute orientation of the contact bone at contact (`None` keeps the
+    /// local angle): feet lead with the sole, fists follow the forearm.
+    tip_abs: Option<f32>,
+    tip_local: f32,
+    /// Where the piece coils at the anticipation peak, relative to the
+    /// limb's root joint.
+    coil: [f32; 2],
+    /// Head yaw (about Y): "look back", "keep the face toward the strike".
+    head_yaw: f32,
+    follow_lean: f32,
+    follow_tip: f32,
+    /// Fraction (0..1) by which the Contact/Ext solve target is pulled from
+    /// the true aim point back toward the limb root before solving. Zero
+    /// for every family but one: when the aim point sits beyond the limb's
+    /// maximum reach, the two-link solve degenerates to a fully extended,
+    /// unbent line to it (see `solve`'s `rmax` clamp) -- an authored
+    /// "bent forearm" direction cannot show up as anything but a straight
+    /// arm in that case. Pulling the *solve* target closer (along the same
+    /// line, so the limb still reaches toward the real region) lets the
+    /// solver find a genuine bend; `staged` re-measures the achieved piece
+    /// against the real, unpulled aim point afterwards, so intersection is
+    /// still judged against the true hit region, never the decoy target.
+    aim_pull: f32,
+}
+
+#[allow(clippy::too_many_arguments)]
+const fn sh(
+    lean: f32,
+    lean_wind: f32,
+    lean_assist: f32,
+    crouch: f32,
+    tip_abs: Option<f32>,
+    tip_local: f32,
+    coil: [f32; 2],
+    head_yaw: f32,
+) -> Shape {
+    Shape {
+        lean,
+        lean_wind,
+        lean_assist,
+        crouch,
+        tip_abs,
+        tip_local,
+        coil,
+        head_yaw,
+        follow_lean: 3.0,
+        follow_tip: 5.0,
+        aim_pull: 0.0,
+    }
+}
+
+fn shape(f: PoseFamily) -> Shape {
+    use PoseFamily::*;
+    match f {
+        // "From the compact forward guard straight out and back along the
+        // same short line"; the chest leans only as far as the fist needs.
+        Punch => sh(7.0, -4.0, 10.0, 0.0, None, 8.0, [-3.5, -2.0], 0.0),
+        // "Lift the right knee, extend the sole forward … then fold back."
+        Kick => sh(6.0, -6.0, 10.0, 1.0, Some(0.0), 0.0, [2.0, -7.0], 0.0),
+        // "Coil the right fist close to the waist, then cut upward."
+        Uppercut => sh(-8.0, 12.0, 8.0, 0.0, None, -20.0, [1.5, -6.5], 0.0),
+        // "Fold the support knee and skim the right sole forward."
+        LowKick => sh(16.0, 2.0, 10.0, 5.0, Some(-8.0), 0.0, [1.0, -7.0], 0.0),
+        // "Draw the right palm near the rear shoulder, then drive it."
+        PalmDrive => sh(20.0, -12.0, 16.0, 2.0, None, 0.0, [-5.0, -1.0], 0.0),
+        // "Compress the right arm at the chest then thrust upward" --
+        // "low compression into an upward palm, held until real activity
+        // ends" (gameplay-direction.md): a real, sustained knee bend, not
+        // the plain standing brace.
+        OverheadDrive => sh(-10.0, 10.0, 8.0, 4.0, None, -15.0, [0.5, -4.0], 0.0),
+        // "Extend a low right heel from a tightly folded knee."
+        LowSweep => sh(12.0, 0.0, 12.0, 6.5, Some(-5.0), 0.0, [0.5, -8.0], 0.0),
+        // "Drive the bent right forearm ahead of the chest": the runtime
+        // hitbox centre sits beyond the arm's maximum reach (need 13.36u,
+        // chain reaches 10.01u), so solving straight at it always
+        // degenerates to a fully extended arm -- indistinguishable from
+        // special_side/fsmash's straight punches, exactly what the review
+        // flagged. `aim_pull` pulls the *solve* target back toward the
+        // shoulder along the same line so a real elbow bend is possible;
+        // the achieved piece is still measured, and required to intersect,
+        // against the real (unpulled) hitbox region -- see `aim_pull`'s
+        // own doc comment.
+        RunningForearm => Shape {
+            aim_pull: 0.42,
+            ..sh(26.0, 6.0, 12.0, 3.5, None, 25.0, [-2.0, -3.0], 0.0)
+        },
+        // "Snap the right foot forward while the left knee folds back."
+        SplitKick => sh(0.0, -8.0, 8.0, 0.0, Some(5.0), 0.0, [3.0, -5.0], 0.0),
+        // "Fold the right knee beneath the chest, then push the sole
+        // forward and slightly up"; the chest counterleans.
+        RisingKick => sh(-6.0, 10.0, 10.0, 0.0, Some(10.0), 0.0, [2.0, -6.0], 0.0),
+        // "Look back, coil the left knee, then extend the heel behind the
+        // hips": the sole leads backward, so the piece points -X.
+        BackKick => sh(14.0, 2.0, 0.0, 0.0, Some(180.0), 0.0, [-2.0, -6.0], -35.0),
+        // "Tuck the right knee close then extend the foot upward."
+        OverheadKick => sh(-18.0, 4.0, 6.0, 0.0, Some(60.0), 0.0, [2.0, -5.0], 0.0),
+        // "Tuck the right heel beneath the hips, then drive it down."
+        HeelDrop => sh(8.0, -6.0, 8.0, 0.0, Some(-35.0), 0.0, [1.5, -5.0], 0.0),
+        // "Gather the right palm to the sternum, then extend it toward the
+        // runtime projectile emission line."
+        ProjectileRelease => sh(10.0, -6.0, 34.0, 0.0, None, -5.0, [-1.5, -4.0], 0.0),
+        // "Gather the right arm at the chest and lead the ascent."
+        RisingDrive => sh(-14.0, 8.0, 8.0, 0.0, None, -20.0, [0.5, -4.0], 0.0),
+        // "Coil the right elbow back then extend the palm."
+        LateralDrive => sh(24.0, -8.0, 12.0, 2.0, None, 0.0, [-4.0, -2.0], 0.0),
+        // "Open the elbows from a compact guard into a short symmetric
+        // pulse around the chest" — no limb defines the radius.
+        RadialPulse => sh(6.0, 0.0, 0.0, 3.0, None, 0.0, [0.0, 0.0], 0.0),
+        ThrowForward => sh(12.0, -2.0, 0.0, 0.0, None, -10.0, [0.0, 0.0], 0.0),
+        ThrowBackward => sh(-4.0, 6.0, 0.0, 0.0, None, -10.0, [0.0, 0.0], -30.0),
+        ThrowUpward => sh(-16.0, 8.0, 0.0, 0.0, None, -25.0, [0.0, 0.0], 0.0),
+        ThrowDownward => sh(26.0, -4.0, 0.0, 5.0, None, 10.0, [0.0, 0.0], 0.0),
+    }
+}
+
+/// What the strike aims at, in root-local XY, and whether the runtime gives
+/// it a hit region the contact piece is required to intersect.
+#[derive(Clone, Copy, Debug)]
+pub struct Aim {
+    pub contact: [f32; 2],
+    /// Absolute coil point (throws hold a real victim); `None` = the
+    /// family's coil offset from the limb root.
+    pub coil_abs: Option<[f32; 2]>,
+    pub radius: f32,
+    /// The contact piece must intersect this region for the action to pass.
+    /// False for the throws (no fighter hitbox) and for the projectile
+    /// action, whose real hit region is the spawned projectile.
+    pub required: bool,
+    pub kind: &'static str,
+}
+
+/// Which real runtime event a pose is being built for.
+///
+/// Most actions have exactly one. The projectile action has **two**, and
+/// they are eight frames apart: the simulation releases the shot on the tick
+/// the move starts (`sim::fighter::handle_free_intent`), and the move table
+/// also gives it an ordinary fighter hitbox on its own `startup` frame. The
+/// emission is not an excuse to ignore that hitbox, so the pose leads the
+/// emission line first and then drives the same hand into the hitbox, and
+/// both events are measured.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Event {
+    /// The move's fighter hitbox (or the throw release).
+    Hitbox,
+    /// The projectile leaving the hand.
+    Release,
+}
+
+/// Frames of the move on which each of its real events happens.
+pub fn events_of(d: &Resolved, md: &MoveData) -> Vec<(Event, u32)> {
+    if crate::export::action_spawns_projectile(d.id) {
+        // Frame 0 is the release: the shot is requested on the tick the
+        // move starts, so the authored anticipation fraction has no
+        // inactive sample to peak in (timing_contract: "if no inactive
+        // sample exists, apply contact immediately").
+        let mut v = vec![(Event::Release, 0)];
+        if md.hitbox_at(md.startup).is_some() {
+            v.push((Event::Hitbox, md.startup));
+        }
+        return v;
+    }
+    vec![(Event::Hitbox, md.startup)]
+}
+
+/// The frame the pose must be *at contact* on: the move's hitbox frame, or
+/// frame 0 for an action whose only early event is a release.
+pub fn contact_frame(d: &Resolved, md: &MoveData) -> u32 {
+    events_of(d, md)
+        .iter()
+        .find(|(e, _)| *e == Event::Hitbox)
+        .map(|(_, f)| *f)
+        .unwrap_or(0)
+}
+
+/// The aim of one action's `Hitbox` event, from the runtime data only.
+pub fn aim_for(f: &Fighter, d: &Resolved, md: &MoveData) -> Option<Aim> {
+    aim_for_event(f, d, md, Event::Hitbox)
+}
+
+/// The aim of one action for a specific real event.
+pub fn aim_for_event(f: &Fighter, d: &Resolved, md: &MoveData, event: Event) -> Option<Aim> {
+    let mid = f.character.height * 0.5;
+    if d.family == PoseFamily::RadialPulse {
+        return None;
+    }
+    if crate::export::action_spawns_projectile(d.id) {
+        if event == Event::Release {
+            // The palm leads the emission line and stays there — it never
+            // chases the projectile downrange.
+            return Some(Aim {
+                contact: [PROJECTILE_SPAWN_LOCAL_X, mid],
+                coil_abs: None,
+                radius: attacks::PROJECTILE_RADIUS,
+                required: false,
+                kind: "projectile_spawn",
+            });
+        }
+        // …and the move's own fighter hitbox is a real hit region: the
+        // designated hand has to be in it on its clean frames.
+        return Some(Aim {
+            contact: [md.hitbox.offset.x, md.hitbox.offset.y + mid],
+            coil_abs: None,
+            radius: md.hitbox.radius,
+            required: true,
+            kind: "hitbox",
+        });
+    }
+    if !crate::export::action_has_hitbox(d.id) {
+        // Throws: the hand opens toward the runtime release parameters,
+        // from the position the simulation really holds the victim at.
+        return Some(Aim {
+            contact: [md.hitbox.offset.x, md.hitbox.offset.y + mid],
+            coil_abs: Some([HOLD_LOCAL_X, mid]),
+            radius: 0.0,
+            required: false,
+            kind: "throw_release",
+        });
+    }
+    Some(Aim {
+        contact: [md.hitbox.offset.x, md.hitbox.offset.y + mid],
+        coil_abs: None,
+        radius: md.hitbox.radius,
+        required: true,
+        kind: "hitbox",
+    })
+}
+
+// ----------------------------------------------------------------- support
+
+/// States whose grounded pose rests on the stage plane (rolls, techs,
+/// getups and knockdowns deliberately leave it).
+fn rests_on_the_floor(f: &Fighter) -> bool {
+    f.grounded
+        && matches!(
+            f.state,
+            State::Stand
+                | State::Walk
+                | State::Dash
+                | State::Run
+                | State::RunTurn
+                | State::Crouch
+                | State::JumpSquat
+                | State::LandLag { .. }
+                | State::Waveland
+                | State::Shield
+                | State::ShieldStun { .. }
+                | State::ShieldDrop
+                | State::Attack { .. }
+                | State::Grab
+                | State::Hold
+                | State::Grabbed
+                | State::Throw { .. }
+                | State::Rebound { .. }
+        )
+}
+
+/// Lift a grounded pose until the supporting foot rests on the plane.
+///
+/// Measured, never guessed: the shift is exactly the depth of the lowest
+/// vertex of the support foot piece, and the pose is only ever raised. The
+/// simulation root, the hurt capsule and every bone length are untouched —
+/// this moves the drawn body, which is what sank through the floor.
+fn support_lift(rig: &Rig, model: &CharacterModel, pose: &mut Pose, skip: Option<usize>) -> f32 {
+    let low = super::contact::foot_support(model, pose, &Xf::IDENTITY, 0.0)
+        .iter()
+        .filter(|s| rig.bone(&s.bone) != skip)
+        .map(|s| s.support_distance)
+        .fold(None, |a: Option<f32>, x| Some(a.map_or(x, |v| v.min(x))));
+    let lift = low.map(|y| (-y).max(0.0)).unwrap_or(0.0);
+    if lift > 0.0 {
+        if let Some(i) = rig.bone("root") {
+            pose.off[i] = pose.off[i] + v3(0.0, lift, 0.0);
+        }
+    }
+    lift
+}
+
+// ----------------------------------------------------------------- framing
+
+fn side_of(rig: &Rig, bone: usize) -> &'static str {
+    let n = &rig.bones[bone].name;
+    if n.ends_with("_l") {
+        "l"
+    } else if n.ends_with("_r") {
+        "r"
+    } else {
+        ""
+    }
+}
+
+/// The limbs the strike does *not* use: the counterbalancing hand, the
+/// support leg, the trailing arm — one line of the direction each.
+#[allow(clippy::too_many_arguments)]
+fn frame_body(
+    p: &mut Pose,
+    rig: &Rig,
+    fam: PoseFamily,
+    side: &str,
+    airborne: bool,
+    stage: Stage,
+    crouch: f32,
+    crouch_depth: f32,
+) {
+    use PoseFamily::*;
+    let other = if side == "l" { "r" } else { "l" };
+    let k = match stage {
+        Stage::Wind => 0.45,
+        Stage::Fold => 0.6,
+        _ => 1.0,
+    };
+    // Legs of an arm strike: braced on the ground, trailing in the air.
+    let stand_legs = |p: &mut Pose| {
+        if airborne {
+            anim::leg(p, rig, "r", 26.0, -40.0, Some(-12.0));
+            anim::leg(p, rig, "l", -16.0, -28.0, Some(-10.0));
+        } else {
+            anim::leg(p, rig, "r", 16.0, -24.0, None);
+            anim::leg(p, rig, "l", -12.0, -18.0, None);
+        }
+    };
+    // Support leg of a kick (the leg that is not solved).
+    let support = |p: &mut Pose| {
+        if airborne {
+            anim::leg(p, rig, other, -20.0, -34.0, Some(-10.0));
+        } else {
+            anim::leg(p, rig, other, -8.0, -26.0, None);
+        }
+    };
+    // A standing leg bent toward the engine's own full-crouch reference
+    // (`anim::crouch`'s thigh/shin bend, at this character's
+    // `AnimStyle::crouch_depth` root drop), by however much of that
+    // depth this stage's `crouch` asks for. A family's `crouch` root
+    // offset alone is not a real lower stance: the support leg's own FK
+    // angles do not shorten with it, so the foot goes exactly `crouch`
+    // units below the floor and `support_lift` raises the root straight
+    // back up by the same amount, cancelling most of the intended drop
+    // (measured directly: `diag_crouch_cancel`). Bending the knee here
+    // shortens the leg's own reach, so the floor-rest correction stays
+    // small and the crouch actually shows.
+    let crouch_leg = |p: &mut Pose, side: &str, thigh: f32, shin: f32| {
+        let cf = if crouch_depth > 1e-3 {
+            (crouch / crouch_depth).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let (deep_thigh, deep_shin) = if side == "r" {
+            (62.0, -104.0)
+        } else {
+            (48.0, -100.0)
+        };
+        anim::leg(
+            p,
+            rig,
+            side,
+            thigh + (deep_thigh - thigh) * cf,
+            shin + (deep_shin - shin) * cf,
+            None,
+        );
+    };
+    match fam {
+        Punch => {
+            // "Left fist stays beside the upper chest, below the face."
+            anim::arm(p, rig, other, 24.0 - 8.0 * k, 104.0, 12.0);
+            stand_legs(p);
+        }
+        Uppercut => {
+            // "Left palm guards the chest rather than following."
+            anim::arm(p, rig, other, 34.0, 96.0, 14.0);
+            stand_legs(p);
+        }
+        PalmDrive => {
+            // "Left hand pulls to the ribs and stays separated."
+            anim::arm(p, rig, other, 30.0 + 14.0 * k, 112.0, 20.0);
+            stand_legs(p);
+        }
+        OverheadDrive => {
+            // "Left hand remains lower, framing the abdomen." "Rise from a
+            // compact knee bend into an upward torso line" -- a real
+            // compression on both legs (see `crouch_leg`), held through
+            // the active window like the direction asks, not just a root
+            // offset `support_lift` would otherwise erase.
+            anim::arm(p, rig, other, 46.0, 86.0, 16.0);
+            if airborne {
+                stand_legs(p);
+            } else {
+                crouch_leg(p, "r", 16.0, -24.0);
+                crouch_leg(p, "l", -12.0, -18.0);
+            }
+        }
+        RunningForearm => {
+            // "Left arm streams behind the torso, elbow separated."
+            anim::arm(p, rig, other, -52.0 * k, 44.0, 24.0);
+            if airborne {
+                stand_legs(p);
+            } else {
+                anim::leg(p, rig, "r", 42.0 * k, -34.0, None);
+                anim::leg(p, rig, "l", -36.0 * k, -18.0, None);
+            }
+        }
+        ProjectileRelease => {
+            // "Left hand braces the upper chest, below the emission line."
+            anim::arm(p, rig, other, 44.0, 98.0, 16.0);
+            stand_legs(p);
+        }
+        RisingDrive => {
+            // "Left hand stays near the ribs, separated from the scarf";
+            // "knees trail at different heights".
+            anim::arm(p, rig, other, 28.0, 108.0, 18.0);
+            anim::leg(p, rig, "r", 34.0 * k, -52.0, Some(-14.0));
+            anim::leg(p, rig, "l", 12.0 * k, -30.0, Some(-10.0));
+        }
+        LateralDrive => {
+            // "Left hand trails behind the hip."
+            anim::arm(p, rig, other, -44.0 * k, 52.0, 22.0);
+            if airborne {
+                stand_legs(p);
+            } else {
+                anim::leg(p, rig, "r", 34.0 * k, -30.0, None);
+                anim::leg(p, rig, "l", -30.0 * k, -16.0, None);
+            }
+        }
+        RadialPulse => {
+            // "Both hands frame the pulse at different depths; neither
+            // pretends to define its whole radius."
+            anim::arm(
+                p,
+                rig,
+                "r",
+                34.0 + 26.0 * k,
+                74.0 - 30.0 * k,
+                30.0 + 26.0 * k,
+            );
+            anim::arm(
+                p,
+                rig,
+                "l",
+                26.0 + 30.0 * k,
+                84.0 - 34.0 * k,
+                24.0 + 30.0 * k,
+            );
+            stand_legs(p);
+        }
+        Kick | LowKick | LowSweep => {
+            // "Both fists frame the chest, with the rear elbow visibly
+            // separated" / "near hand guards the chin, far hand back".
+            anim::arm(p, rig, side, -26.0 * k, 62.0, 18.0);
+            anim::arm(p, rig, other, 38.0 * k, 72.0, 22.0);
+            // dtilt/dsmash ("fold the support knee", "sit the hips over the
+            // support leg") need a real bent support knee under a real
+            // lower stance, not the plain kick's fixed brace -- see
+            // `crouch_leg`. Plain `ftilt` (Kick) keeps its original brace.
+            if matches!(fam, LowKick | LowSweep) && !airborne {
+                crouch_leg(p, other, -8.0, -26.0);
+            } else {
+                support(p);
+            }
+        }
+        SplitKick => {
+            // "Hands spread at different heights and stay behind the sole";
+            // "the left knee folds back".
+            anim::arm(p, rig, side, -34.0 * k, 54.0, 26.0);
+            anim::arm(p, rig, other, 44.0 * k, 78.0, 34.0);
+            anim::leg(p, rig, other, -46.0 * k, -76.0, Some(-16.0));
+        }
+        RisingKick => {
+            // "Left hand guards near the face, right hand low and behind."
+            anim::arm(p, rig, side, -30.0 * k, 58.0, 20.0);
+            anim::arm(p, rig, other, 62.0 * k, 84.0, 24.0);
+            anim::leg(p, rig, other, -24.0 * k, -60.0, Some(-14.0));
+        }
+        BackKick => {
+            // "Near hand stays in front of the chest; far hand opens down."
+            anim::arm(p, rig, other, 40.0 * k, 88.0, 16.0);
+            anim::arm(p, rig, side, -18.0 * k, 26.0, 30.0);
+            anim::leg(p, rig, other, 30.0 * k, -54.0, Some(-14.0));
+        }
+        OverheadKick => {
+            // "Hands remain below the chest and at different depths";
+            // "keep the other knee bent".
+            anim::arm(p, rig, side, 22.0 * k, 96.0, 20.0);
+            anim::arm(p, rig, other, 34.0 * k, 104.0, 32.0);
+            anim::leg(p, rig, other, 6.0 * k, -84.0, Some(-18.0));
+        }
+        HeelDrop => {
+            // "One hand guards the chest and the other opens backward."
+            anim::arm(p, rig, side, 30.0 * k, 92.0, 18.0);
+            anim::arm(p, rig, other, -46.0 * k, 40.0, 34.0);
+            anim::leg(p, rig, other, -34.0 * k, -66.0, Some(-16.0));
+        }
+        ThrowForward | ThrowUpward | ThrowDownward => {
+            // The guiding hand holds, then withdraws / opens away.
+            anim::arm(p, rig, other, 88.0 - 26.0 * k, 22.0 + 30.0 * k, 14.0);
+            stand_legs(p);
+        }
+        ThrowBackward => {
+            // "Right hand guides the crossing target, then opens away."
+            anim::arm(p, rig, other, 78.0 - 40.0 * k, 26.0 + 34.0 * k, 26.0);
+            stand_legs(p);
+        }
+    }
+}
+
+// ----------------------------------------------------------------- poses
+
+fn base_pose(model: &CharacterModel, f: &Fighter, md: &MoveData, frame: u64) -> Pose {
+    let rig = &model.rig;
+    if matches!(f.state, State::Throw { .. }) {
+        anim::grab_reach(rig)
+    } else if md.is_aerial || !f.grounded {
+        anim::air(rig, f.vel.y > 0.5, f.fastfalling)
+    } else {
+        anim::stance(rig, &model.style, frame as f32)
+    }
+}
+
+/// Build one key pose of a directed action.
+#[allow(clippy::too_many_arguments)]
+fn staged(
+    model: &CharacterModel,
+    d: &Resolved,
+    f: &Fighter,
+    md: &MoveData,
+    frame: u64,
+    stage: Stage,
+    lean_extra: f32,
+    event: Event,
+) -> (Pose, Option<Reach>) {
+    let rig = &model.rig;
+    let s = shape(d.family);
+    let mut p = base_pose(model, f, md, frame);
+    let side = side_of(rig, d.bone);
+    let airborne = md.is_aerial || !f.grounded;
+
+    // Torso and hips: the authored line, plus any measured assist.
+    let lean = match stage {
+        Stage::Wind => s.lean_wind,
+        Stage::Contact => s.lean + lean_extra,
+        Stage::Ext => s.lean + lean_extra + s.follow_lean,
+        Stage::Fold => (s.lean + lean_extra) * 0.4,
+    };
+    anim::lean(&mut p, rig, lean);
+    let crouch = match stage {
+        Stage::Wind => s.crouch * 0.5,
+        Stage::Fold => s.crouch * 0.4,
+        _ => s.crouch,
+    };
+    if crouch != 0.0 {
+        if let Some(i) = rig.bone("root") {
+            p.off[i] = p.off[i] + v3(0.0, -crouch, 0.0);
+        }
+    }
+    let yaw = match stage {
+        Stage::Wind => s.head_yaw * 0.6,
+        Stage::Fold => s.head_yaw * 0.3,
+        _ => s.head_yaw,
+    };
+    p.rot(rig, "head", 0.0, yaw, -lean * 0.25);
+
+    frame_body(
+        &mut p,
+        rig,
+        d.family,
+        side,
+        airborne,
+        stage,
+        crouch,
+        model.style.crouch_depth,
+    );
+
+    // Rest the drawn body on the stage before solving, so the strike is
+    // measured from a pose whose support foot is really on the floor.
+    if rests_on_the_floor(f) {
+        let skip = if side.is_empty() {
+            None
+        } else {
+            rig.bone(&format!("foot_{side}"))
+        };
+        support_lift(rig, model, &mut p, skip);
+    }
+
+    // The contact solve.
+    let Some(aim) = aim_for_event(f, d, md, event) else {
+        return (p, None);
+    };
+    let Some(ch) = chain(rig, d.bone) else {
+        return (p, None);
+    };
+    let bend = if rig.bones[d.bone].name.starts_with("foot") {
+        Bend::Knee
+    } else {
+        Bend::Elbow
+    };
+    let world = rig.world(&p, &Xf::IDENTITY);
+    let root = world[ch.upper].t;
+    let target = match stage {
+        Stage::Wind => aim
+            .coil_abs
+            .unwrap_or([root.x + s.coil[0], root.y + s.coil[1]]),
+        Stage::Fold => {
+            // Fold the joint first: pull the piece halfway home along the
+            // limb, which bends knee/elbow instead of sweeping again.
+            let home = [root.x + s.coil[0] * 0.6, root.y + s.coil[1] * 0.9];
+            [
+                (aim.contact[0] + home[0] * 2.0) / 3.0,
+                (aim.contact[1] + home[1] * 2.0) / 3.0,
+            ]
+        }
+        _ => {
+            if s.aim_pull > 0.0 {
+                [
+                    root.x + (aim.contact[0] - root.x) * (1.0 - s.aim_pull),
+                    root.y + (aim.contact[1] - root.y) * (1.0 - s.aim_pull),
+                ]
+            } else {
+                aim.contact
+            }
+        }
+    };
+    let tip_abs = match (s.tip_abs, stage) {
+        (Some(t), Stage::Ext) => Some(t + s.follow_tip),
+        (t, _) => t,
+    };
+    let tip_local = match stage {
+        Stage::Ext => s.tip_local + s.follow_tip,
+        Stage::Wind => s.tip_local * 0.5,
+        _ => s.tip_local,
+    };
+    let mut reach = solve(
+        rig, &mut p, &ch, d.effector, target, bend, tip_abs, tip_local,
+    );
+    // `aim_pull` (Contact/Ext only) solves toward a point short of the real
+    // aim: re-measure `achieved` against the *real* aim.contact so every
+    // consumer (feasibility's centroid_gap, the lean_assist search's
+    // "good enough" check) judges intersection against the true hit
+    // region, never the closer decoy point actually fed to the solver.
+    if s.aim_pull > 0.0 && matches!(stage, Stage::Contact | Stage::Ext) {
+        let world = rig.world(&p, &Xf::IDENTITY);
+        let achieved_pt = world[ch.tip].point(d.effector);
+        reach.achieved = ((achieved_pt.x - aim.contact[0]).powi(2)
+            + (achieved_pt.y - aim.contact[1]).powi(2))
+        .sqrt();
+    }
+    (p, Some(reach))
+}
+
+/// Build the contact pose, adding the family's measured lean assist only
+/// while the contact piece stays outside the runtime hit region.
+fn contact_pose(
+    model: &CharacterModel,
+    d: &Resolved,
+    f: &Fighter,
+    md: &MoveData,
+    frame: u64,
+    stage: Stage,
+    event: Event,
+) -> (Pose, Option<Reach>, f32) {
+    let s = shape(d.family);
+    let aim = aim_for_event(f, d, md, event);
+    let want = aim.map(|a| a.radius * 0.85).unwrap_or(0.0);
+    let mut best: Option<(Pose, Option<Reach>, f32)> = None;
+    let steps = if s.lean_assist > 0.0 { 9 } else { 1 };
+    for i in 0..steps {
+        let extra = s.lean_assist * i as f32 / (steps - 1).max(1) as f32;
+        let (p, r) = staged(model, d, f, md, frame, stage, extra, event);
+        let good = r.map(|x| x.achieved <= want).unwrap_or(true);
+        let better = match &best {
+            None => true,
+            Some((_, br, _)) => {
+                r.map(|x| x.achieved).unwrap_or(0.0) < br.map(|x| x.achieved).unwrap_or(0.0)
+            }
+        };
+        if good {
+            return (p, r, extra);
+        }
+        if better {
+            best = Some((p, r, extra));
+        }
+    }
+    best.expect("at least one candidate")
+}
+
+/// The whole directed timeline of one action.
+fn directed(model: &CharacterModel, d: &Resolved, f: &Fighter, frame: u64) -> Pose {
+    let md = attacks::data(f.character.id, d.id);
+    let sf = f.state_frame;
+    let base = base_pose(model, f, &md, frame);
+    let (contact, _, extra) = contact_pose(model, d, f, &md, frame, Stage::Contact, Event::Hitbox);
+    let charging = f.charge > 0 && f.charge_armed && attacks::is_smash(d.id);
+    let (wind, _) = staged(model, d, f, &md, frame, Stage::Wind, extra, Event::Hitbox);
+    // A held smash freezes on the anticipation pose (the simulation freezes
+    // `state_frame` there, so nothing else in the timeline moves either).
+    if charging {
+        return wind;
+    }
+    let last_active = md.startup + md.active + md.late_active;
+    if sf < md.startup {
+        // An action with a second, earlier runtime event — the projectile
+        // release on frame 0 — leads that event first and then carries the
+        // same hand into the move's own hitbox. Neither event is dropped
+        // and neither is delayed.
+        if crate::export::action_spawns_projectile(d.id) {
+            let (release, _, _) =
+                contact_pose(model, d, f, &md, frame, Stage::Contact, Event::Release);
+            if md.startup == 0 {
+                return release;
+            }
+            let u = sf as f32 / md.startup as f32;
+            return release.blend(&contact, ease(u));
+        }
+        // Anticipation inside the *available* inactive startup, never a
+        // frame more: peak at the authored fraction, then drive to contact.
+        let u = sf as f32 / md.startup.max(1) as f32;
+        let frac = d.fraction.clamp(0.0, 1.0);
+        if frac <= 0.0 {
+            return base.blend(&contact, ease_in(u));
+        }
+        if u <= frac {
+            return base.blend(&wind, ease(u / frac));
+        }
+        return wind.blend(&contact, ease_in((u - frac) / (1.0 - frac)));
+    }
+    if sf < last_active {
+        // The whole real active interval — clean and late alike — keeps the
+        // contact pose; the follow-through only deepens it.
+        let (ext, _, _) = contact_pose(model, d, f, &md, frame, Stage::Ext, Event::Hitbox);
+        let k = (sf - md.startup) as f32 / md.active.max(1) as f32;
+        return contact.blend(&ext, ease_out(k.min(1.0)));
+    }
+    // Recovery: fold the joint first, then settle. Never a second strike.
+    let (ext, _, _) = contact_pose(model, d, f, &md, frame, Stage::Ext, Event::Hitbox);
+    let (fold, _) = staged(model, d, f, &md, frame, Stage::Fold, extra, Event::Hitbox);
+    let v = (sf - last_active) as f32 / md.endlag.max(1) as f32;
+    if v < 0.45 {
+        ext.blend(&fold, ease(v / 0.45))
+    } else {
+        fold.blend(&base, ease(((v - 0.45) / 0.55).min(1.0)))
+    }
+}
+
+/// The pose of a fighter on `frame`: the authored direction when the model
+/// ships one for this action, the generic evaluator otherwise.
+pub fn fighter_pose(model: &CharacterModel, f: &Fighter, frame: u64) -> Pose {
+    let rig = &model.rig;
+    let id = match f.state {
+        State::Attack { id, .. } | State::Throw { id } => Some(id),
+        _ => None,
+    };
+    let directed_pose = match (id, model.directions.as_ref()) {
+        (Some(id), Some(dirs)) => dirs.get(id).map(|d| directed(model, d, f, frame)),
+        _ => None,
+    };
+    let mut p = match directed_pose {
+        Some(p) => {
+            // The charge tremble is the sim's own tell, kept as it was.
+            let mut p = p;
+            if f.charge > 0 && f.charge_armed {
+                let c = f.charge as f32;
+                let amp = 0.6 + c / 60.0 * 1.4;
+                let j = (c * 2.7).sin() * amp;
+                if let Some(i) = rig.bone("root") {
+                    p.off[i] = p.off[i]
+                        + v3(
+                            j * 0.5,
+                            -model.style.crouch_depth * 0.15 * (c / 60.0) - j.abs() * 0.3,
+                            0.0,
+                        );
+                }
+            }
+            p
+        }
+        None => anim::fighter_pose(rig, f, &model.style, frame),
+    };
+    // Every drawn grounded pose rests on the stage plane, measured from the
+    // foot meshes themselves (idle, crouch, shield stun, landing lag…).
+    if rests_on_the_floor(f) && model.directions.is_some() {
+        let skip = match (id, model.directions.as_ref()) {
+            (Some(id), Some(dirs)) => dirs
+                .get(id)
+                .filter(|d| rig.bones[d.bone].name.starts_with("foot"))
+                .map(|d| d.bone),
+            _ => None,
+        };
+        support_lift(rig, model, &mut p, skip);
+    }
+    p
+}
+
+// ----------------------------------------------------------------- evidence
+
+/// What the implementation achieved for one action, in world units — the
+/// report the direction contract asks for instead of a guessed correction.
+///
+/// **This is a synthetic probe, not the measured render output.** It is
+/// built from [`contact_pose`] on a bare, one-shot [`Fighter`] at exactly
+/// the event's frame: no simulation runs, no render history is replayed,
+/// and none of [`fighter_pose`]'s extra effects apply — no eased-facing
+/// interpolation, no hitlag rattle, no animation-history extras lag
+/// (scarf/crest), no [`support_lift`]. It exists to catch geometry the IK
+/// solve cannot reach *at all*, cheaply, for every action at once.
+/// `guaranteed_intersection` here is not a claim that the real, rendered
+/// per-frame pose intersects — that claim can only come from the actual
+/// measurement pipeline ([`super::render_eval::evaluate`] +
+/// [`super::contact::measure_posed`], the one `contact_json` and the
+/// capture sheets use on real exported ticks, both facings, clean and
+/// late frames alike). Treat this struct as a cheap pre-check, never as a
+/// substitute for that real measurement.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Feasibility {
+    pub action_id: &'static str,
+    pub pose_family: &'static str,
+    pub contact_piece_id: String,
+    pub anticipation_fraction: f32,
+    pub aim_kind: &'static str,
+    pub target_local: [f32; 2],
+    pub hit_radius: f32,
+    pub intersection_required: bool,
+    pub required_reach: f32,
+    pub max_reach: f32,
+    /// Distance from the achieved piece centroid to the aim point.
+    pub centroid_gap: f32,
+    /// A convex piece whose centroid is within the radius of the centre
+    /// always has surface distance ≤ that gap, so the strike intersects.
+    pub guaranteed_intersection: bool,
+    pub lean_assist_deg: f32,
+    pub note: Option<String>,
+    /// Every real runtime event of this action, measured on its own frame.
+    /// Most actions have one; the projectile action has two (the release on
+    /// the move's first frame and its own fighter hitbox on `startup`), and
+    /// the emission never excuses the hitbox.
+    pub events: Vec<EventFeasibility>,
+}
+
+/// One real runtime event of an action, measured on the frame it happens.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EventFeasibility {
+    pub event: &'static str,
+    pub state_frame: u32,
+    pub aim_kind: &'static str,
+    pub target_local: [f32; 2],
+    pub hit_radius: f32,
+    pub intersection_required: bool,
+    pub required_reach: f32,
+    pub max_reach: f32,
+    pub centroid_gap: f32,
+    pub guaranteed_intersection: bool,
+    pub lean_assist_deg: f32,
+    pub note: Option<String>,
+}
+
+/// Feasibility of every directed action of `model`, on a synthetic fighter
+/// in the action's own state (no simulation is run). See the caveat on
+/// [`Feasibility`] itself: this is a cheap reachability pre-check, not the
+/// measured render output, and must never stand in for the real per-frame
+/// contact measurement (`contact_json` / the capture sheets).
+pub fn feasibility(model: &CharacterModel) -> Vec<Feasibility> {
+    let Some(dirs) = model.directions.as_ref() else {
+        return Vec::new();
+    };
+    dirs.actions
+        .iter()
+        .map(|d| feasibility_of(model, dirs, d))
+        .collect()
+}
+
+/// Synthetic per-action probe behind [`feasibility`] — see the caveat on
+/// [`Feasibility`]: built from a bare one-shot [`Fighter`], not the real
+/// render/measurement path.
+fn feasibility_of(model: &CharacterModel, _dirs: &Directions, d: &Resolved) -> Feasibility {
+    let md = attacks::data(character_of(model), d.id);
+    let mut f = Fighter::new(character_of(model).data(), 0, crate::sim::Vec2::ZERO);
+    f.facing = 1.0;
+    f.grounded = !md.is_aerial;
+    if crate::export::action_has_hitbox(d.id) {
+        f.set_state_pub(State::Attack {
+            id: d.id,
+            aerial: md.is_aerial,
+        });
+    } else {
+        f.set_state_pub(State::Throw { id: d.id });
+    }
+    // Every real runtime event of this action, each measured on the frame
+    // the simulation puts it on and on the pose drawn there.
+    let mut events = Vec::new();
+    for (event, at) in events_of(d, &md) {
+        f.state_frame = at;
+        let aim = aim_for_event(&f, d, &md, event);
+        let (_, reach, extra) = contact_pose(model, d, &f, &md, 0, Stage::Contact, event);
+        let r = reach.unwrap_or_default();
+        let radius = aim.map(|a| a.radius).unwrap_or(0.0);
+        let required = aim.map(|a| a.required).unwrap_or(false);
+        let guaranteed = radius > 0.0 && r.achieved <= radius;
+        let note = if aim.is_none() {
+            Some(
+                "radial effect: the body is centred in the runtime effect; no limb defines its radius"
+                    .to_string(),
+            )
+        } else if event == Event::Release {
+            Some(format!(
+                "the simulation releases the projectile on the move's first frame, so the authored anticipation fraction ({:.2}) has no inactive sample to peak in and the palm leads the emission line from frame 0; the piece centroid ends {:.3}u from the spawn point (projectile radius {:.3}u). This event never replaces the move's own hitbox, measured separately below",
+                d.fraction, r.achieved, radius
+            ))
+        } else if !required {
+            Some(format!(
+                "no fighter hitbox to intersect ({}); measured against the real runtime event",
+                aim.map(|a| a.kind).unwrap_or("")
+            ))
+        } else if !r.reached && guaranteed {
+            Some(format!(
+                "limb cannot reach the hitbox centre (needs {:.3}u, chain reaches {:.3}u): it extends fully along the line and the piece still intersects, centroid {:.3}u from the centre (radius {:.3}u)",
+                r.required, r.max_reach, r.achieved, radius
+            ))
+        } else if !guaranteed {
+            Some(format!(
+                "UNREACHABLE: centroid ends {:.3}u from the hitbox centre, radius {:.3}u — an art decision is needed (no simulation, hitbox, capsule, scale or bone length may be changed to close it)",
+                r.achieved, radius
+            ))
+        } else {
+            None
+        };
+        events.push(EventFeasibility {
+            event: match event {
+                Event::Hitbox => "hitbox",
+                Event::Release => "projectile_release",
+            },
+            state_frame: at,
+            aim_kind: aim.map(|a| a.kind).unwrap_or("radial_effect"),
+            target_local: aim.map(|a| a.contact).unwrap_or([0.0, 0.0]),
+            hit_radius: radius,
+            intersection_required: required,
+            required_reach: r.required,
+            max_reach: r.max_reach,
+            centroid_gap: r.achieved,
+            guaranteed_intersection: guaranteed,
+            lean_assist_deg: extra,
+            note,
+        });
+    }
+    // The flat fields describe the event that has to intersect (the
+    // fighter hitbox), so a positive gap can never be hidden behind an
+    // emission exception.
+    let main = events
+        .iter()
+        .find(|e| e.intersection_required)
+        .or_else(|| events.first())
+        .cloned()
+        .unwrap_or(EventFeasibility {
+            event: "none",
+            state_frame: 0,
+            aim_kind: "radial_effect",
+            target_local: [0.0, 0.0],
+            hit_radius: 0.0,
+            intersection_required: false,
+            required_reach: 0.0,
+            max_reach: 0.0,
+            centroid_gap: 0.0,
+            guaranteed_intersection: false,
+            lean_assist_deg: 0.0,
+            note: None,
+        });
+    Feasibility {
+        action_id: d.action_id,
+        pose_family: d.family.name(),
+        contact_piece_id: d.piece_id.clone(),
+        anticipation_fraction: d.fraction,
+        aim_kind: main.aim_kind,
+        target_local: main.target_local,
+        hit_radius: main.hit_radius,
+        intersection_required: main.intersection_required,
+        required_reach: main.required_reach,
+        max_reach: main.max_reach,
+        centroid_gap: main.centroid_gap,
+        guaranteed_intersection: main.guaranteed_intersection,
+        lean_assist_deg: main.lean_assist_deg,
+        note: main.note.clone(),
+        events,
+    }
+}
+
+fn character_of(model: &CharacterModel) -> crate::sim::roster::CharacterId {
+    match model.spec_id {
+        Some("boulder") => crate::sim::roster::CharacterId::Boulder,
+        Some("viper") => crate::sim::roster::CharacterId::Viper,
+        _ => crate::sim::roster::CharacterId::Kestrel,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::characters::build;
+    use crate::sim::attacks::MoveId;
+    use crate::sim::roster::CharacterId;
+    use crate::sim::Vec2;
+
+    fn fighter(id: MoveId, md: &MoveData, sf: u32) -> Fighter {
+        let mut f = Fighter::new(CharacterId::Kestrel.data(), 0, Vec2::ZERO);
+        f.facing = 1.0;
+        f.grounded = !md.is_aerial;
+        if crate::export::action_has_hitbox(id) {
+            f.set_state_pub(State::Attack {
+                id,
+                aerial: md.is_aerial,
+            });
+        } else {
+            f.set_state_pub(State::Throw { id });
+        }
+        f.state_frame = sf;
+        f
+    }
+
+    /// World position of the contact piece's centroid for a fighter.
+    fn centroid(model: &CharacterModel, d: &Resolved, pose: &Pose) -> [f32; 2] {
+        let w = model.rig.world(pose, &Xf::IDENTITY);
+        let p = w[d.bone].point(d.effector);
+        [p.x, p.y]
+    }
+
+    #[test]
+    fn two_link_solve_lands_on_a_reachable_target() {
+        let m = build(CharacterId::Kestrel);
+        let d = m
+            .directions
+            .as_ref()
+            .unwrap()
+            .get(MoveId::SpecialUp)
+            .unwrap();
+        let md = attacks::data(CharacterId::Kestrel, MoveId::SpecialUp);
+        let f = fighter(MoveId::SpecialUp, &md, md.startup);
+        let (p, r, _) = contact_pose(&m, d, &f, &md, 0, Stage::Contact, Event::Hitbox);
+        let r = r.unwrap();
+        assert!(r.reached, "up-special is inside the arm's reach: {r:?}");
+        assert!(r.achieved < 0.05, "lands on the centre: {r:?}");
+        let c = centroid(&m, d, &p);
+        let aim = aim_for(&f, d, &md).unwrap();
+        assert!((c[0] - aim.contact[0]).abs() < 0.05 && (c[1] - aim.contact[1]).abs() < 0.05);
+    }
+
+    #[test]
+    fn dtilt_dsmash_and_usmash_really_crouch_not_just_offset_the_root() {
+        // A family's `crouch` root offset alone is not a real lower stance:
+        // the support leg's own FK angles do not shorten with it, so an
+        // unbent leg sends the foot `crouch` units below the floor and
+        // `support_lift` raises the root right back up, cancelling the
+        // offset almost entirely (measured before this fix: dtilt and
+        // dsmash both netted the same ~-0.99u drop regardless of their very
+        // different authored crouch values, and usmash netted zero).
+        // `crouch_leg` bends the knee along with the offset so the drop
+        // actually shows. Guard the real per-frame root height, not the
+        // authored constant, against ever regressing back to that
+        // cancellation -- and keep the direction's own ordering honest:
+        // dsmash ("much more seated") must sit lower than dtilt ("moderately
+        // crouched").
+        let m = build(CharacterId::Kestrel);
+        let root_i = m.rig.bone("root").unwrap();
+        let root_y = |mid: MoveId| -> f32 {
+            let md = attacks::data(CharacterId::Kestrel, mid);
+            let f = fighter(mid, &md, md.startup);
+            let p = fighter_pose(&m, &f, 0);
+            m.rig.world(&p, &Xf::IDENTITY)[root_i].t.y
+        };
+        let stand_y = {
+            let mut f = Fighter::new(CharacterId::Kestrel.data(), 0, Vec2::ZERO);
+            f.facing = 1.0;
+            f.grounded = true;
+            let p = fighter_pose(&m, &f, 0);
+            m.rig.world(&p, &Xf::IDENTITY)[root_i].t.y
+        };
+        let dtilt = root_y(MoveId::Dtilt);
+        let dsmash = root_y(MoveId::Dsmash);
+        let usmash = root_y(MoveId::Usmash);
+        assert!(
+            dtilt < stand_y - 1.5,
+            "dtilt should sit visibly lower than standing: {dtilt} vs stand {stand_y}"
+        );
+        assert!(
+            dsmash < stand_y - 1.5,
+            "dsmash should sit visibly lower than standing: {dsmash} vs stand {stand_y}"
+        );
+        assert!(
+            usmash < stand_y - 0.5,
+            "usmash should show real leg compression, not a standing brace: {usmash} vs stand {stand_y}"
+        );
+        assert!(
+            dsmash < dtilt - 0.3,
+            "dsmash (\"much more seated\") should sit lower than dtilt (\"moderately crouched\"): dsmash {dsmash} dtilt {dtilt}"
+        );
+    }
+
+    #[test]
+    fn dash_attack_bends_the_elbow_instead_of_a_straight_punch() {
+        // The runtime hitbox centre sits beyond the arm's maximum reach
+        // (the review's complaint: "a fully extended punch ... despite the
+        // authored running-forearm direction"), so solving straight at it
+        // always degenerates to a fully extended, unbent line -- see
+        // `solve`'s `rmax` clamp. `aim_pull` (RunningForearm's `Shape`)
+        // pulls the solve target back within real reach so the elbow can
+        // actually bend; guard that it does, and that the piece still
+        // measures inside the real (unpulled) hit region afterwards.
+        let m = build(CharacterId::Kestrel);
+        let d = m
+            .directions
+            .as_ref()
+            .unwrap()
+            .get(MoveId::DashAttack)
+            .unwrap();
+        let md = attacks::data(CharacterId::Kestrel, MoveId::DashAttack);
+        let f = fighter(MoveId::DashAttack, &md, md.startup);
+        let (p, r, _) = contact_pose(&m, d, &f, &md, 0, Stage::Contact, Event::Hitbox);
+        let fore = m.rig.bone("forearm_r").unwrap();
+        let bend = p.rot[fore].z.abs();
+        assert!(
+            bend > 30.0,
+            "forearm_r should show a real elbow bend, not a near-straight arm: {bend:.1} deg"
+        );
+        let r = r.unwrap();
+        assert!(
+            r.reached,
+            "the pulled target should be within real reach: {r:?}"
+        );
+        assert!(
+            r.achieved <= md.hitbox.radius,
+            "the piece must still land inside the real hitbox after the pull: {r:?}"
+        );
+    }
+
+    #[test]
+    fn every_action_puts_its_own_piece_in_its_own_hit_region() {
+        let m = build(CharacterId::Kestrel);
+        let mut unreachable = Vec::new();
+        for fz in feasibility(&m) {
+            if !fz.intersection_required {
+                continue;
+            }
+            if !fz.guaranteed_intersection {
+                unreachable.push(format!(
+                    "{}: gap {:.3} > radius {:.3}",
+                    fz.action_id, fz.centroid_gap, fz.hit_radius
+                ));
+            }
+        }
+        assert!(unreachable.is_empty(), "{}", unreachable.join("; "));
+    }
+
+    #[test]
+    fn a_rearward_move_aims_backward_and_is_never_clamped_forward() {
+        let m = build(CharacterId::Kestrel);
+        let d = m.directions.as_ref().unwrap().get(MoveId::Bair).unwrap();
+        let md = attacks::data(CharacterId::Kestrel, MoveId::Bair);
+        assert!(md.hitbox.offset.x < 0.0, "back air really is rearward");
+        let f = fighter(MoveId::Bair, &md, md.startup);
+        let aim = aim_for(&f, d, &md).unwrap();
+        assert_eq!(aim.contact[0], md.hitbox.offset.x);
+        let (p, r, _) = contact_pose(&m, d, &f, &md, 0, Stage::Contact, Event::Hitbox);
+        let c = centroid(&m, d, &p);
+        assert!(c[0] < -6.0, "the left foot ends behind the root: {c:?}");
+        assert!(
+            r.unwrap().achieved <= md.hitbox.radius,
+            "and inside the rear hitbox: {r:?}"
+        );
+        // The designated piece is the left foot, not the right one.
+        assert_eq!(m.rig.bones[d.bone].name, "foot_l");
+        assert_eq!(d.piece_id, "k_foot_l");
+    }
+
+    #[test]
+    fn contact_is_held_through_the_whole_active_interval_late_frames_included() {
+        let m = build(CharacterId::Kestrel);
+        let d = m.directions.as_ref().unwrap().get(MoveId::Nair).unwrap();
+        let md = attacks::data(CharacterId::Kestrel, MoveId::Nair);
+        assert!(md.late_active > 0, "nair has a late window");
+        let last = md.startup + md.active + md.late_active;
+        for sf in md.startup..last {
+            let f = fighter(MoveId::Nair, &md, sf);
+            let p = fighter_pose(&m, &f, 0);
+            let c = centroid(&m, d, &p);
+            let aim = aim_for(&f, d, &md).unwrap();
+            let gap = ((c[0] - aim.contact[0]).powi(2) + (c[1] - aim.contact[1]).powi(2)).sqrt();
+            assert!(
+                gap <= md.hitbox.radius,
+                "sf {sf} of {last}: gap {gap:.3} > radius {}",
+                md.hitbox.radius
+            );
+        }
+        // And the first recovery frame really does leave it.
+        let f = fighter(MoveId::Nair, &md, last + md.endlag - 1);
+        let p = fighter_pose(&m, &f, 0);
+        let c = centroid(&m, d, &p);
+        let aim = aim_for(&f, d, &md).unwrap();
+        assert!(
+            ((c[0] - aim.contact[0]).powi(2) + (c[1] - aim.contact[1]).powi(2)).sqrt()
+                > md.hitbox.radius * 0.5,
+            "the leg is gathered by the end of recovery"
+        );
+    }
+
+    #[test]
+    fn anticipation_peaks_at_the_authored_fraction_without_adding_a_frame() {
+        let m = build(CharacterId::Kestrel);
+        let dirs = m.directions.as_ref().unwrap();
+        // fsmash: fraction 0.7 of an 11-frame startup.
+        let d = dirs.get(MoveId::Fsmash).unwrap();
+        let md = attacks::data(CharacterId::Kestrel, MoveId::Fsmash);
+        assert_eq!(d.fraction, 0.7);
+        let gap = |sf: u32| {
+            let f = fighter(MoveId::Fsmash, &md, sf);
+            let p = fighter_pose(&m, &f, 0);
+            let c = centroid(&m, d, &p);
+            let aim = aim_for(&f, d, &md).unwrap();
+            ((c[0] - aim.contact[0]).powi(2) + (c[1] - aim.contact[1]).powi(2)).sqrt()
+        };
+        let peak = (0.7 * md.startup as f32).round() as u32;
+        // The coil is farthest from the target at the authored peak.
+        for sf in 0..md.startup {
+            if sf != peak {
+                assert!(
+                    gap(sf) <= gap(peak) + 1e-3,
+                    "sf {sf} coils further than the peak {peak}"
+                );
+            }
+        }
+        // Contact is reached exactly on the first active frame, not before.
+        assert!(gap(md.startup) <= md.hitbox.radius);
+        assert!(gap(md.startup - 1) > md.hitbox.radius * 0.5);
+        // A zero-fraction action hits immediately: jab's startup is 1.
+        let jmd = attacks::data(CharacterId::Kestrel, MoveId::Jab);
+        let jd = dirs.get(MoveId::Jab).unwrap();
+        assert_eq!(jd.fraction, 0.0);
+        let f = fighter(MoveId::Jab, &jmd, jmd.startup);
+        let p = fighter_pose(&m, &f, 0);
+        let c = centroid(&m, jd, &p);
+        let aim = aim_for(&f, jd, &jmd).unwrap();
+        assert!(
+            ((c[0] - aim.contact[0]).powi(2) + (c[1] - aim.contact[1]).powi(2)).sqrt()
+                <= jmd.hitbox.radius
+        );
+    }
+
+    #[test]
+    fn a_held_smash_freezes_on_the_anticipation_pose() {
+        let m = build(CharacterId::Kestrel);
+        let md = attacks::data(CharacterId::Kestrel, MoveId::Fsmash);
+        let mut f = fighter(MoveId::Fsmash, &md, (md.startup / 2).max(1) - 1);
+        let free = fighter_pose(&m, &f, 0);
+        f.charge = 20;
+        f.charge_armed = true;
+        let held = fighter_pose(&m, &f, 0);
+        let d = m.directions.as_ref().unwrap().get(MoveId::Fsmash).unwrap();
+        let aim = aim_for(&f, d, &md).unwrap();
+        let gap = |p: &Pose| {
+            let c = centroid(&m, d, p);
+            ((c[0] - aim.contact[0]).powi(2) + (c[1] - aim.contact[1]).powi(2)).sqrt()
+        };
+        assert!(
+            gap(&held) > gap(&free) - 1e-3,
+            "charging holds the wind-up, never a half-extended strike"
+        );
+        // More charge only trembles: the arm stays coiled.
+        f.charge = 55;
+        let deep = fighter_pose(&m, &f, 0);
+        assert!((gap(&deep) - gap(&held)).abs() < 2.0);
+    }
+
+    #[test]
+    fn both_facings_give_the_same_pose_and_the_root_does_the_turning() {
+        let m = build(CharacterId::Kestrel);
+        let md = attacks::data(CharacterId::Kestrel, MoveId::Ftilt);
+        let mut a = fighter(MoveId::Ftilt, &md, md.startup);
+        let pa = fighter_pose(&m, &a, 0);
+        a.facing = -1.0;
+        let pb = fighter_pose(&m, &a, 0);
+        assert_eq!(pa, pb, "poses are authored in the root-local frame");
+    }
+
+    #[test]
+    fn grounded_poses_rest_on_the_support_plane() {
+        let m = build(CharacterId::Kestrel);
+        for st in [
+            State::Stand,
+            State::Crouch,
+            State::Hitstun { tumble: false },
+            State::LandLag { total: 12 },
+            State::Shield,
+            State::Attack {
+                id: MoveId::Ftilt,
+                aerial: false,
+            },
+        ] {
+            let mut f = Fighter::new(CharacterId::Kestrel.data(), 0, Vec2::ZERO);
+            f.grounded = true;
+            f.facing = 1.0;
+            f.set_state_pub(st);
+            f.state_frame = 6;
+            let p = fighter_pose(&m, &f, 30);
+            let lowest = super::super::contact::foot_support(&m, &p, &Xf::IDENTITY, 0.0)
+                .iter()
+                .map(|x| x.support_distance)
+                .fold(f32::MAX, f32::min);
+            assert!(
+                lowest > -1e-3,
+                "{st:?}: the lowest foot vertex is {lowest} below the floor"
+            );
+            assert!(
+                lowest < 2.5,
+                "{st:?}: the feet float {lowest} above the floor"
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_directed_touches_the_simulation_tables() {
+        // The directions read frame data; they never write it. Building
+        // every pose of every action leaves the move table identical.
+        let m = build(CharacterId::Kestrel);
+        let before: Vec<(u32, u32, u32, f32, f32)> = attacks::ALL_MOVES
+            .iter()
+            .map(|id| {
+                let d = attacks::data(CharacterId::Kestrel, *id);
+                (
+                    d.startup,
+                    d.active,
+                    d.late_active,
+                    d.hitbox.offset.x,
+                    d.hitbox.radius,
+                )
+            })
+            .collect();
+        for id in attacks::ALL_MOVES {
+            let md = attacks::data(CharacterId::Kestrel, id);
+            for sf in 0..md.total() {
+                let f = fighter(id, &md, sf);
+                let _ = fighter_pose(&m, &f, sf as u64);
+            }
+        }
+        let after: Vec<(u32, u32, u32, f32, f32)> = attacks::ALL_MOVES
+            .iter()
+            .map(|id| {
+                let d = attacks::data(CharacterId::Kestrel, *id);
+                (
+                    d.startup,
+                    d.active,
+                    d.late_active,
+                    d.hitbox.offset.x,
+                    d.hitbox.radius,
+                )
+            })
+            .collect();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn the_projectile_action_serves_both_of_its_real_events() {
+        let m = build(CharacterId::Kestrel);
+        let d = m
+            .directions
+            .as_ref()
+            .unwrap()
+            .get(MoveId::SpecialN)
+            .unwrap();
+        let md = attacks::data(CharacterId::Kestrel, MoveId::SpecialN);
+        // Two events, eight frames apart, both from the simulation.
+        let evs = events_of(d, &md);
+        assert_eq!(evs, vec![(Event::Release, 0), (Event::Hitbox, md.startup)]);
+
+        // 1) The release: the palm leads the emission line on frame 0.
+        let f0 = fighter(MoveId::SpecialN, &md, 0);
+        let rel = aim_for_event(&f0, d, &md, Event::Release).unwrap();
+        assert_eq!(rel.kind, "projectile_spawn");
+        assert_eq!(rel.contact[0], PROJECTILE_SPAWN_LOCAL_X);
+        let c0 = centroid(&m, d, &fighter_pose(&m, &f0, 0));
+        let gap0 = ((c0[0] - rel.contact[0]).powi(2) + (c0[1] - rel.contact[1]).powi(2)).sqrt();
+        assert!(
+            gap0 < attacks::PROJECTILE_RADIUS,
+            "palm on the emission point at the spawn: {gap0}"
+        );
+
+        // 2) The move's own fighter hitbox is real and is not excused by
+        // the emission: the same hand has to be inside it on its clean
+        // frames. Per review 91f9c5a2834353bbb7207dcc4d866a4e513fd48f and
+        // art commit 343def9c8c45ec69dba36b2b7ce863255ee9b0e4, the
+        // emission exception must never hide or turn this hitbox green --
+        // it is measured and required to intersect just like any other
+        // action's, with its own corrected pose (extra forward lean; see
+        // `shape(PoseFamily::ProjectileRelease)`).
+        let hit = aim_for(&f0, d, &md).unwrap();
+        assert_eq!(hit.kind, "hitbox");
+        assert!(hit.required, "the clean hitbox must be intersected");
+        assert_eq!(hit.contact, [md.hitbox.offset.x, md.hitbox.offset.y + 15.0]);
+        for sf in md.startup..md.startup + md.active + md.late_active {
+            let f = fighter(MoveId::SpecialN, &md, sf);
+            let c = centroid(&m, d, &fighter_pose(&m, &f, 0));
+            let gap = ((c[0] - hit.contact[0]).powi(2) + (c[1] - hit.contact[1]).powi(2)).sqrt();
+            assert!(
+                gap <= md.hitbox.radius,
+                "sf {sf}: the hand is {gap:.3}u from the clean hitbox centre (radius {})",
+                md.hitbox.radius
+            );
+        }
+        // Both events are reported, neither hidden.
+        let fz = feasibility(&m)
+            .into_iter()
+            .find(|x| x.action_id == "special_n")
+            .unwrap();
+        assert_eq!(fz.events.len(), 2);
+        assert!(fz.intersection_required && fz.guaranteed_intersection);
+        assert_eq!(fz.aim_kind, "hitbox", "the flat fields describe the hitbox");
+        assert!(fz.events.iter().any(|e| e.event == "projectile_release"));
+
+        // The hand still never chases the projectile downrange: by the end
+        // of the move it is recovering, not further forward.
+        let mut g = f0.clone();
+        g.state_frame = md.total() - 1;
+        let b = centroid(&m, d, &fighter_pose(&m, &g, 0));
+        assert!(b[0] < hit.contact[0], "the palm does not follow the shot");
+    }
+
+    #[test]
+    fn throws_use_the_hold_position_and_the_release_parameters() {
+        let m = build(CharacterId::Kestrel);
+        for (id, back) in [
+            (MoveId::ThrowF, false),
+            (MoveId::ThrowB, true),
+            (MoveId::ThrowU, false),
+            (MoveId::ThrowD, false),
+        ] {
+            let d = m.directions.as_ref().unwrap().get(id).unwrap();
+            let md = attacks::data(CharacterId::Kestrel, id);
+            let f = fighter(id, &md, md.startup);
+            let aim = aim_for(&f, d, &md).unwrap();
+            assert_eq!(aim.kind, "throw_release");
+            assert!(!aim.required, "a throw has no melee hitbox to intersect");
+            assert_eq!(aim.coil_abs.unwrap()[0], HOLD_LOCAL_X);
+            let p = fighter_pose(&m, &f, 0);
+            let c = centroid(&m, d, &p);
+            if back {
+                assert!(c[0] < 0.0, "{id:?}: the hand opens backward: {c:?}");
+                assert_eq!(d.piece_id, "k_hand_l");
+            } else {
+                assert!(c[0] > 0.0, "{id:?}: the hand opens forward: {c:?}");
+            }
+            // Before the release the hands are at the held target.
+            let mut h = f.clone();
+            h.state_frame = 0;
+            let hc = centroid(&m, d, &fighter_pose(&m, &h, 0));
+            assert!(hc[0] > 2.0, "{id:?}: the hold is in front: {hc:?}");
+        }
+    }
+
+    #[test]
+    fn the_radial_action_centres_the_body_instead_of_reaching() {
+        let m = build(CharacterId::Kestrel);
+        let d = m
+            .directions
+            .as_ref()
+            .unwrap()
+            .get(MoveId::SpecialDown)
+            .unwrap();
+        let md = attacks::data(CharacterId::Kestrel, MoveId::SpecialDown);
+        assert_eq!(md.startup, 0, "zero startup: an immediate visual response");
+        let f = fighter(MoveId::SpecialDown, &md, 0);
+        assert!(aim_for(&f, d, &md).is_none(), "no limb solve");
+        assert_eq!(d.piece_id, "k_chest");
+        let p = fighter_pose(&m, &f, 0);
+        let c = centroid(&m, d, &p);
+        let mid = f.character.height * 0.5;
+        let gap = (c[0].powi(2) + (c[1] - mid).powi(2)).sqrt();
+        assert!(
+            gap < md.hitbox.radius,
+            "the chest sits inside the effect: {gap} vs {}",
+            md.hitbox.radius
+        );
+    }
+}

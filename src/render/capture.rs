@@ -251,6 +251,19 @@ fn label_text(text: &str, x: f32, y: f32, scale: f32) {
     );
 }
 
+/// Which real runtime event a contact sheet is about.
+///
+/// An action normally has one, and `Declared` is the suite's own choice of
+/// cells for it. The projectile action has two — the emission and the
+/// move's own fighter hitbox — so it also gets a `FighterHitbox` pair, on
+/// the same declared cameras, rather than letting the emission exception
+/// hide a real hit region.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SheetEvent {
+    Declared,
+    FighterHitbox,
+}
+
 /// Which sampled ticks make the wide contact sheet, by index into the
 /// case's ticks — four cells: context, anchor (first active / spawn /
 /// throw start), a later real event (last active / in flight / release)
@@ -260,10 +273,11 @@ fn wide_picks(
     ticks: &[export::CaseTick],
     mid: crate::sim::attacks::MoveId,
     suite: &Suite,
+    event: SheetEvent,
 ) -> Result<Vec<(usize, String)>, String> {
     let last = ticks.len().saturating_sub(1);
     let x = &suite.contact_exceptions;
-    if export::action_spawns_projectile(mid) {
+    if export::action_spawns_projectile(mid) && event == SheetEvent::Declared {
         let fp = ticks
             .iter()
             .position(|t| t.projectile.is_some())
@@ -320,14 +334,16 @@ fn primary_picks(
     wide: &[(usize, String)],
     mid: crate::sim::attacks::MoveId,
     suite: &Suite,
+    event: SheetEvent,
 ) -> Vec<(usize, String)> {
-    let labels: &Vec<String> = if export::action_spawns_projectile(mid) {
-        &suite.contact_exceptions.projectile_primary
-    } else if !export::action_has_hitbox(mid) {
-        &suite.contact_exceptions.throw_primary
-    } else {
-        &suite.contact_camera.cells
-    };
+    let labels: &Vec<String> =
+        if export::action_spawns_projectile(mid) && event == SheetEvent::Declared {
+            &suite.contact_exceptions.projectile_primary
+        } else if !export::action_has_hitbox(mid) {
+            &suite.contact_exceptions.throw_primary
+        } else {
+            &suite.contact_camera.cells
+        };
     [0usize, 1, 3]
         .iter()
         .zip(labels)
@@ -352,6 +368,12 @@ fn cell_query(snap: &export::CaseTick, mid: crate::sim::attacks::MoveId) -> Diag
                 .center
                 .map(|c| (r.hitbox_id.clone(), [c.0, c.1], r.radius.unwrap_or(0.0))),
         }),
+        // The caption's "support" line and the JSON's `foot_support` are
+        // always the measured fighter's own feet (port 0), never whichever
+        // fighter's DiagOut happened to come back non-empty last -- with the
+        // opposing Boulder fixture alive for every contact-case run, "last"
+        // used to mean port 1 (see `select_diag`'s doc comment).
+        support_port: Some(0),
     }
 }
 
@@ -361,6 +383,7 @@ fn cell_report(
     snap: &export::CaseTick,
     what: &str,
     measure: Option<&crate::model::contact::ContactMeasure>,
+    support: &[crate::model::contact::FootSupport],
     replayed: usize,
 ) -> (Vec<String>, serde_json::Value) {
     let f = &snap.state.fighters[0];
@@ -369,40 +392,61 @@ fn cell_report(
         .projectile
         .as_ref()
         .and_then(|p| p.center.map(|c| (c.0, c.1, p.radius.unwrap_or(0.0))));
-    let mut caption = vec![format!(
-        "{what}  {} tick {}  sf {}  [{}]",
-        r.sample_phase, r.tick_index, r.state_frame, snap.label
-    )];
+    // Compact rows, each measured against the cell width when it is drawn
+    // (`caption_block`): the event on one row, the runtime phase/tick/state
+    // on another, the measurement on its own. The full metadata stays in
+    // the JSON below, which is where the numbers are read from anyway.
+    let mut caption = vec![
+        what.to_string(),
+        format!(
+            "{} t{} sf{} [{}]",
+            r.sample_phase, r.tick_index, r.state_frame, snap.label
+        ),
+    ];
     caption.push(match (r.center, r.radius) {
-        (Some(c), Some(rad)) => {
-            format!("hitbox {} r={rad:.2} @({:.2},{:.2})", r.hitbox_id, c.0, c.1)
-        }
+        (Some(c), Some(rad)) => format!("hb {} r{rad:.2} ({:.1},{:.1})", r.hitbox_id, c.0, c.1),
         _ => match proj {
-            Some((x, y, rad)) => format!("projectile r={rad:.2} @({x:.2},{y:.2})"),
+            Some((x, y, rad)) => format!("proj r{rad:.2} ({x:.1},{y:.1})"),
             None => "no runtime hitbox this tick".into(),
         },
     });
     if let Some(m) = measure {
-        caption.push(match m.signed_separation {
-            Some(sep) => format!(
-                "{} sep {sep:+.2}u (mesh {:.2}, vtx {:.2})  reach {:+.2}u",
+        match m.signed_separation {
+            Some(sep) => {
+                caption.push(format!(
+                    "{} sep {sep:+.2} mesh {:.2}",
+                    m.piece_ids.join("+"),
+                    m.mesh_distance.unwrap_or(f32::NAN)
+                ));
+                caption.push(format!(
+                    "vtx {:.2} reach {:+.2}",
+                    m.vertex_distance.unwrap_or(f32::NAN),
+                    m.tip_reach_x
+                ));
+            }
+            None => caption.push(format!(
+                "{} reach {:+.2}",
                 m.piece_ids.join("+"),
-                m.mesh_distance.unwrap_or(f32::NAN),
-                m.vertex_distance.unwrap_or(f32::NAN),
                 m.tip_reach_x
-            ),
-            None => format!(
-                "{} tip x {:+.2}u from root",
-                m.piece_ids.join("+"),
-                m.tip_reach_x
-            ),
-        });
+            )),
+        }
     }
     let eased = measure.map(|m| m.eased_facing).unwrap_or(f.facing);
     caption.push(format!(
-        "root ({:.2},{:.2}) f {:+} drawn {eased:+.2} hl {} c {}",
+        "root({:.1},{:.1}) f{:+} d{eased:+.2} hl{} c{}",
         f.pos.x, f.pos.y, f.facing as i32, r.hitlag_remaining, r.contact_marker as u8
     ));
+    // Support: how far the lowest foot vertex sits above the plane the
+    // fighter stands on (negative = through the floor).
+    let low = support
+        .iter()
+        .map(|s| s.support_distance)
+        .fold(None, |a: Option<f32>, x| {
+            Some(a.map_or(x, |v: f32| v.min(x)))
+        });
+    if let (true, Some(low)) = (f.grounded, low) {
+        caption.push(format!("support {low:+.2}"));
+    }
     let meta = serde_json::json!({
         "which": what,
         "label": snap.label,
@@ -423,6 +467,8 @@ fn cell_report(
         "contact_marker": r.contact_marker,
         "capsule": crate::model::contact::capsule(f),
         "contact_piece": measure,
+        "grounded": f.grounded,
+        "foot_support": support,
     });
     (caption, meta)
 }
@@ -478,6 +524,7 @@ async fn render_contact_case(
     rel_wide: &str,
     want_primary: bool,
     want_wide: bool,
+    event: SheetEvent,
 ) -> Result<ContactSheets, String> {
     let aid = export::action_id(mid);
     let pcell = suite.contact_camera.cell;
@@ -490,7 +537,7 @@ async fn render_contact_case(
     let mut failed: Option<String> = None;
     for facing in &suite.contact_wide_camera.rows_facing {
         match export::run_case_facing(id, mid, variant, *facing) {
-            Ok(t) => match wide_picks(&t, mid, suite) {
+            Ok(t) => match wide_picks(&t, mid, suite, event) {
                 Ok(p) => rows.push((*facing, t, p)),
                 Err(e) => failed = Some(e),
             },
@@ -503,8 +550,11 @@ async fn render_contact_case(
     let Some(right) = rows.iter().find(|r| r.0 == 1.0) else {
         return Err("no facing +1 row declared".into());
     };
-    let primary = primary_picks(&right.2, mid, suite);
+    let primary = primary_picks(&right.2, mid, suite, event);
     let right_ticks = right.1.clone();
+    // A supplemental sheet says so in its own metadata; the cameras and
+    // cell rules stay the suite's.
+    let supplemental = event == SheetEvent::FighterHitbox;
 
     let mut out_sheets = ContactSheets::default();
     // --- primary sheet
@@ -527,7 +577,13 @@ async fn render_contact_case(
                 },
                 Some(&cell_query(snap, mid)),
             );
-            let (caption, mut meta) = cell_report(snap, what, measured.as_ref(), replayed);
+            let (caption, mut meta) = cell_report(
+                snap,
+                what,
+                measured.contact.as_ref(),
+                &measured.support,
+                replayed,
+            );
             flush_gl();
             set_camera(&super::scene3d::rt_camera_2d(&primary_rt));
             caption_block(&caption, cw as f32);
@@ -549,11 +605,17 @@ async fn render_contact_case(
             camera: serde_json::json!({
                 "action_id": aid, "variant_id": variant, "facing": 1,
                 "declared": "capture-suite.json#contact_camera",
+                "event": if supplemental { "fighter_hitbox" } else { "declared" },
+                "supplemental": supplemental,
                 "cells_rule": suite.contact_camera.cells,
                 "camera_rule": {"eye": suite.contact_camera.eye, "target": suite.contact_camera.target, "orthographic_height": suite.contact_camera.orthographic_height},
                 "cells": cells,
             }),
-            note: Some("primary contact sheet; overlays: red = runtime hitbox, green = hurt capsules, orange = projectile, yellow cross = nearest point of the piece's XY-projected surface + line to the hitbox centre (signed_separation = that distance minus the radius), magenta = tip, white = joint, cyan = piece bounds; measured on the drawn pose after a history reset + replay".into()),
+            note: Some(if supplemental {
+                "supplemental primary sheet for the move's own fighter hitbox (the projectile action has two real runtime events: the emission on the move's first frame and this hit region on its startup frame). Same declared contact_camera and cell rule; same overlays and measurement path".into()
+            } else {
+                "primary contact sheet; overlays: red = runtime hitbox, green = hurt capsules, orange = projectile, yellow cross = nearest point of the piece's XY-projected surface + line to the hitbox centre (signed_separation = that distance minus the radius), magenta = tip, white = joint, cyan = piece bounds; measured on the drawn pose after a history reset + replay".to_string()
+            }),
         };
         out_sheets.primary = Some((sheet, entry));
     }
@@ -583,7 +645,13 @@ async fn render_contact_case(
                     },
                     Some(&cell_query(snap, mid)),
                 );
-                let (caption, meta) = cell_report(snap, what, measured.as_ref(), replayed);
+                let (caption, meta) = cell_report(
+                    snap,
+                    what,
+                    measured.contact.as_ref(),
+                    &measured.support,
+                    replayed,
+                );
                 flush_gl();
                 set_camera(&super::scene3d::rt_camera_2d(&wide_rt));
                 caption_block(&caption, cw as f32);
@@ -611,24 +679,201 @@ async fn render_contact_case(
             camera: serde_json::json!({
                 "action_id": aid, "variant_id": variant,
                 "declared": "capture-suite.json#contact_wide_camera",
+                "event": if supplemental { "fighter_hitbox" } else { "declared" },
+                "supplemental": supplemental,
                 "camera_rule": {"eye": suite.contact_wide_camera.eye, "target": suite.contact_wide_camera.target, "orthographic_height": suite.contact_wide_camera.orthographic_height, "anchor": suite.contact_wide_camera.anchor, "rule": suite.contact_wide_camera.camera_rule},
                 "cells_rule": suite.contact_wide_camera.cells,
                 "rows": row_meta,
             }),
-            note: Some("wide diagnostic sheet (auxiliary): one fixed camera per facing row, 4 columns incl. the last active tick (late frames included); same overlays and measurement path as the primary sheet".into()),
+            note: Some(if supplemental {
+                "supplemental wide sheet for the move's own fighter hitbox, both facings, on the declared contact_wide_camera: the projectile emission exception never hides this hit region, and the hand is measured against it here".to_string()
+            } else {
+                "wide diagnostic sheet (auxiliary): one fixed camera per facing row, 4 columns incl. the last active tick (late frames included); same overlays and measurement path as the primary sheet".to_string()
+            }),
         };
         out_sheets.wide = Some((sheet, entry));
     }
     Ok(out_sheets)
 }
 
+/// The GIF format's native delay unit is centiseconds. The `image` crate
+/// (0.25.10, `codecs/gif.rs::convert_frame`) gets there in two lossy
+/// steps: `img_frame.delay().into_ratio().to_integer()` first truncates
+/// the requested delay down to a whole **millisecond** (line 587), then
+/// `frame_delay / 10` floors that millisecond count down to a whole
+/// **centisecond** (line 598) -- so a requested playback fps only comes
+/// back out intact when `1000 / fps` happens to already be an exact
+/// multiple of 10 (20, 25, 50, 100 fps all round-trip cleanly; the
+/// existing `gif` recipe's 20 fps is why this was never noticed before).
+/// 60 fps is not one of those: `1000/60` truncates to 16ms, which floors
+/// to 1 centisecond, so the encoded GIF actually plays at 100 fps, not
+/// 60 -- roughly 1.67x too fast, not a rounding error. This computes the
+/// *actual* achieved fps for a requested one, so captions and metadata
+/// can report the real number instead of repeating the request as if the
+/// encoder had honoured it. (A pure function of the request, so it is
+/// tested directly without touching the encoder or a GPU context.)
+fn gif_actual_fps(requested_fps: u32) -> f64 {
+    let fps = requested_fps.max(1);
+    let truncated_ms = 1000u32 / fps;
+    let centis = truncated_ms / 10;
+    if centis == 0 {
+        // The encoder saturates a zero delay rather than erroring; most
+        // viewers read a zero delay as "as fast as it can", which is not
+        // a meaningful fps number to report as achieved.
+        f64::INFINITY
+    } else {
+        100.0 / centis as f64
+    }
+}
+
+/// Optional, opt-in per-action motion-cycle capture (`capture-suite.json`
+/// `#action_motion`): every simulation tick of one case's own run --
+/// [`export::run_case_facing`]'s "one tick before the move starts to the
+/// tick it ends" -- drawn in order, none skipped, at the sim's own 60Hz,
+/// for both facing rows (matching `contact_wide_camera.rows_facing`). A
+/// review aid for the full cycle (does anticipation read clearly? does
+/// recovery? is the whole arc coherent?), never a measurement: nothing
+/// here is captioned or compared pixel for pixel, and it never runs on a
+/// plain full sweep (only when the caller explicitly asks). One fixed
+/// camera for the whole clip -- the same `contact_wide_camera` anchor rule
+/// the wide sheet uses, anchored on the case's first `"active"` tick (or
+/// its midpoint if the case never reports one, e.g. a throw).
+///
+/// Produces two files per facing: the GIF itself, labelled with its real
+/// achieved playback speed rather than a false "60fps" (see
+/// [`gif_actual_fps`]) -- the `image` crate's GIF encoder cannot actually
+/// hit 60fps -- and a lossless per-tick PNG sequence plus a JSON sidecar
+/// (`sha`/`case`/`facing`/`ticks`/`camera`/`fps`) next to it, for
+/// re-encoding to APNG/MP4 at the sim's true rate. The GIF stays as a
+/// quick, honestly-labelled preview; the sidecar is the reliable source.
+#[allow(clippy::too_many_arguments)]
+async fn render_action_motion_gif(
+    app: &mut App,
+    rts: &mut Targets,
+    suite: &Suite,
+    wide_rule: &CamRule,
+    out: &Path,
+    id: CharacterId,
+    mid: crate::sim::attacks::MoveId,
+    variant: &str,
+    rel: &str,
+    facing: f32,
+    source_sha: &str,
+) -> Result<FileEntry, String> {
+    let facing = if facing < 0.0 { -1.0 } else { 1.0 };
+    let ticks = export::run_case_facing(id, mid, variant, facing)?;
+    if ticks.is_empty() {
+        return Err("empty case run".into());
+    }
+    let anchor_idx = ticks
+        .iter()
+        .position(|t| t.label == "active")
+        .unwrap_or(ticks.len() / 2);
+    let af = &ticks[anchor_idx].state.fighters[0];
+    let cam = fixed_cam(wide_rule, af.pos.x, af.pos.y, facing);
+    let spec = &suite.action_motion;
+    let (gw, gh) = (spec.output[0], spec.output[1]);
+    let rt = rts.get(gw, gh);
+    let stem = rel.strip_suffix(".gif").unwrap_or(rel);
+    let frames_rel = format!("{stem}-frames");
+    let sidecar_rel = format!("{stem}.json");
+    let path = out.join(rel);
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+    let mut enc = image::codecs::gif::GifEncoder::new_with_speed(file, 10);
+    enc.set_repeat(image::codecs::gif::Repeat::Infinite)
+        .map_err(|e| e.to_string())?;
+    let delay = image::Delay::from_numer_denom_ms(1000, spec.playback_fps.max(1));
+    app.scene.reset();
+    app.scene.reset_render_history();
+    let mut frames = 0u32;
+    for t in &ticks {
+        app.scene.draw_fixed(
+            &t.state,
+            &cam,
+            &rt,
+            SceneOpts {
+                hud: false,
+                ..SceneOpts::default()
+            },
+        );
+        next_frame().await;
+        let img = read_rt(&rt);
+        // One render, two outputs: the same frame goes into the (lossy
+        // playback-speed) GIF and is also saved losslessly for the PNG
+        // sequence, so the two can never drift apart in content.
+        save(out, &format!("{frames_rel}/tick_{frames:04}.png"), &img)?;
+        let frame = image::Frame::from_parts(img, 0, 0, delay);
+        enc.encode_frame(frame).map_err(|e| e.to_string())?;
+        frames += 1;
+    }
+    drop(enc);
+    let actual_fps = gif_actual_fps(spec.playback_fps);
+    let cam_meta = cam_json(&cam, gw, gh);
+    let sidecar = serde_json::json!({
+        "sha": source_sha,
+        "case": {"action_id": export::action_id(mid), "variant_id": variant},
+        "facing": facing,
+        "ticks": frames,
+        "camera": cam_meta.clone(),
+        "fps": 60,
+        "frames_dir": frames_rel.clone(),
+        "frame_naming": "tick_%04d.png, one per simulation tick, none skipped",
+        "note": "lossless per-tick PNG sequence at the simulation's real 60Hz; encode this to APNG/MP4 for reliable temporal review instead of the sibling .gif, whose encoder cannot actually reach 60fps (see that file's own note).",
+    });
+    std::fs::write(
+        out.join(&sidecar_rel),
+        serde_json::to_vec_pretty(&sidecar).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(FileEntry {
+        path: rel.to_string(),
+        kind: "game3d",
+        width: gw,
+        height: gh,
+        tick: None,
+        fixture: None,
+        camera: cam_meta.as_object().map_or_else(
+            || serde_json::json!({}),
+            |m| {
+                let mut m = m.clone();
+                m.insert("action_id".into(), export::action_id(mid).into());
+                m.insert("variant_id".into(), variant.into());
+                m.insert("facing".into(), facing.into());
+                m.insert(
+                    "declared".into(),
+                    "capture-suite.json#action_motion, anchor/rule from #contact_wide_camera".into(),
+                );
+                m.insert(
+                    "png_sequence".into(),
+                    serde_json::json!({"frames_dir": frames_rel.clone(), "sidecar": sidecar_rel.clone(), "frame_count": frames, "fps": 60}),
+                );
+                serde_json::Value::Object(m)
+            },
+        ),
+        note: Some(format!(
+            "optional review capture, not a measurement: {frames} frames, one per simulation tick from one tick before the move starts through its last recovery tick, sim runs at 60Hz and every tick is drawn, none skipped. Requested {} fps playback, but the `image` crate's GIF encoder actually achieves ~{actual_fps:.1} fps here (its centisecond rounding does not preserve 60fps -- see `{sidecar_rel}` for a lossless per-tick PNG sequence to re-encode locally instead). Not part of contact_expected.",
+            spec.playback_fps
+        )),
+    })
+}
+
 /// Caption lines on a dark band at the top of a cell (readable over any
 /// scene content).
+///
+/// Every row is measured against the cell before it is drawn
+/// ([`font::fit_line`]): a row that would not fit shrinks to the largest
+/// scale that does, so no caption can leave its cell.
 fn caption_block(lines: &[String], cell_w: f32) {
-    let h = 8.0 + 20.0 * lines.len() as f32 + 4.0;
+    const PAD: f32 = 8.0;
+    const LINE: f32 = 18.0;
+    const BASE: f32 = 1.3;
+    const MIN: f32 = 0.9;
+    let h = 6.0 + LINE * lines.len() as f32 + 4.0;
     draw_rectangle(0.0, 0.0, cell_w, h, Color::from_rgba(8, 10, 18, 190));
     for (li, line) in lines.iter().enumerate() {
-        label_text(line, 8.0, 8.0 + 20.0 * li as f32, 1.4);
+        let (text, scale) = font::fit_line(&ascii_fold(line), cell_w - PAD * 2.0, BASE, MIN);
+        label_text(&text, PAD, 6.0 + LINE * li as f32, scale);
     }
 }
 
@@ -935,7 +1180,15 @@ pub(super) async fn run(app: &mut App, opts: &CaptureOpts) -> Result<CaptureInde
                     "throw_no_hitbox"
                 },
             });
-            if !want(&rel) && !want(&rel_wide) {
+            // The optional motion gif (below) has its own name and its own
+            // gate (only ever produced when `--only` is explicitly given),
+            // so it must also be checked here: otherwise a run asking only
+            // for `--only <action>-motion` would never reach it, since
+            // neither the primary nor the wide sheet name matches that
+            // filter and the loop would skip the case entirely.
+            let motion_rel = format!("{stem}-motion.gif");
+            let want_motion = opts.only.is_some() && want(&motion_rel);
+            if !want(&rel) && !want(&rel_wide) && !want_motion {
                 continue;
             }
             let sheets = match render_contact_case(
@@ -951,13 +1204,14 @@ pub(super) async fn run(app: &mut App, opts: &CaptureOpts) -> Result<CaptureInde
                 &rel_wide,
                 want(&rel),
                 want(&rel_wide),
+                SheetEvent::Declared,
             )
             .await
             {
                 Ok(s) => s,
                 Err(e) => {
                     index.skipped.push((rel.clone(), e.clone()));
-                    index.skipped.push((rel_wide, e));
+                    index.skipped.push((rel_wide.clone(), e));
                     continue;
                 }
             };
@@ -983,6 +1237,95 @@ pub(super) async fn run(app: &mut App, opts: &CaptureOpts) -> Result<CaptureInde
                     }
                 }
                 index.files.push(entry);
+            }
+
+            // special_n has two real runtime events 8 frames apart: the
+            // projectile release (the sheets above, event = Declared) and
+            // the move's own ordinary fighter hitbox on `md.startup`
+            // (centre [16,21], radius 2 at facing +1, baseline gap
+            // +2.400044u) — per art commit 343def9c8c45ec69dba36b2b7ce863255ee9b0e4
+            // and review 91f9c5a2834353bbb7207dcc4d866a4e513fd48f. The
+            // emission exception in wide_picks/primary_picks must never
+            // hide that positive-gap hitbox, so it gets its own clearly
+            // labelled supplemental sheet pair, both facings, on the same
+            // declared cameras. Not part of contact_expected (that stays
+            // one declared case per action/variant) — these are additional
+            // files, not a second required coverage row.
+            if *mid == crate::sim::attacks::MoveId::SpecialN {
+                let hb_stem = format!("{stem}-hitbox");
+                let hb_rel = format!("{hb_stem}.png");
+                let hb_rel_wide = format!("{hb_stem}-wide.png");
+                if want(&hb_rel) || want(&hb_rel_wide) {
+                    match render_contact_case(
+                        app,
+                        &mut rts,
+                        &suite,
+                        &primary_rule,
+                        &wide_rule,
+                        id,
+                        *mid,
+                        variant,
+                        &hb_rel,
+                        &hb_rel_wide,
+                        want(&hb_rel),
+                        want(&hb_rel_wide),
+                        SheetEvent::FighterHitbox,
+                    )
+                    .await
+                    {
+                        Ok(hb_sheets) => {
+                            if let Some((img, entry)) = hb_sheets.primary {
+                                save(&out, &hb_rel, &img)?;
+                                index.files.push(entry);
+                            }
+                            if let Some((img, entry)) = hb_sheets.wide {
+                                save(&out, &hb_rel_wide, &img)?;
+                                index.files.push(entry);
+                            }
+                        }
+                        Err(e) => {
+                            index.skipped.push((hb_rel.clone(), e.clone()));
+                            index.skipped.push((hb_rel_wide.clone(), e));
+                        }
+                    }
+                }
+            }
+
+            // Optional, opt-in per-action motion-cycle GIF (capture-suite.json
+            // #action_motion): every simulation tick of this case's own run,
+            // none skipped, so a reviewer can watch the full cycle rather
+            // than only the primary/wide contact cells. This never runs on
+            // a plain full sweep (`--only` unset) -- only when explicitly
+            // asked for (e.g. `--only motion`), so it never competes with
+            // the run size budget of an ordinary evidence capture. Not part
+            // of `contact_expected`: supplementary, never required for
+            // coverage, and primary/wide sheets and their cameras are
+            // unchanged. Both facing rows are produced together (matching
+            // `contact_wide_camera.rows_facing`) whenever the trigger name
+            // matches -- `--only <action>-motion` is one request for the
+            // whole cycle, not one per facing.
+            if want_motion {
+                let motion_rel_b = format!("{stem}-motion2.gif");
+                for (rel, facing) in [(motion_rel.clone(), 1.0f32), (motion_rel_b, -1.0f32)] {
+                    match render_action_motion_gif(
+                        app,
+                        &mut rts,
+                        &suite,
+                        &wide_rule,
+                        &out,
+                        id,
+                        *mid,
+                        variant,
+                        &rel,
+                        facing,
+                        &opts.source_sha,
+                    )
+                    .await
+                    {
+                        Ok(entry) => index.files.push(entry),
+                        Err(e) => index.skipped.push((rel, e)),
+                    }
+                }
             }
         }
 
@@ -1059,6 +1402,134 @@ pub(super) async fn run(app: &mut App, opts: &CaptureOpts) -> Result<CaptureInde
                 fixture: Some(idle.id.clone()),
                 camera: serde_json::json!({ "cells": cells, "note": "state set on the idle fixture's player 0 at state_frame 6; the capsule is Fighter::hurt_segment/hurt_radius exactly as the sim tests it" }),
                 note: Some("green wireframe = hurt capsule the simulation tests".into()),
+            });
+        }
+
+        // Supplemental support view: the same states plus a landing, with a
+        // camera that leaves room *below* the support plane, so both feet
+        // are fully visible and the measured support distances can be read
+        // against the drawn floor line. The declared capsule camera above is
+        // unchanged; this is the extra fixed diagnostic view the review
+        // allows, with its camera recorded here.
+        let rel = format!("characters/{name}/support.png");
+        if want(&rel) {
+            let (cw, ch) = (512u32, 512u32);
+            let cellrt = rts.get(cw, ch);
+            let states = [
+                ("idle", State::Stand, 6u32),
+                ("crouch", State::Crouch, 6),
+                ("hitstun", State::Hitstun { tumble: false }, 6),
+                ("land_lag", State::LandLag { total: 12 }, 1),
+            ];
+            let mut sheet: RgbaImage = ImageBuffer::new(cw * states.len() as u32, ch);
+            let mut cells = Vec::new();
+            let base = idle.state_at(suite.combat.fixture_tick);
+            // Room for the whole fighter plus 8 units under the floor.
+            const OH: f32 = 52.0;
+            const BELOW: f32 = 8.0;
+            for (k, (what, st, sf)) in states.iter().enumerate() {
+                let mut gs = base.clone();
+                gs.fighters[0].set_state_pub(*st);
+                gs.fighters[0].state_frame = *sf;
+                gs.fighters[1].set_state_pub(State::Dead);
+                let f = &gs.fighters[0];
+                let cy = f.pos.y - BELOW + OH * 0.5;
+                let c = FixedCam {
+                    eye: v3(f.pos.x, cy, 120.0),
+                    target: v3(f.pos.x, cy, 0.0),
+                    ortho_height: OH,
+                };
+                // Ask for port 0's feet explicitly -- this view is evidence
+                // about the fighter being posed, not whichever fighter's
+                // DiagOut a same-came-back-non-empty heuristic used to pick.
+                // No attack is in progress here, so there is no `contact`
+                // query to piggyback on; `support_port` is the only way to
+                // name the fighter without inventing one.
+                let diag = Diagnostics {
+                    capsules: true,
+                    support_port: Some(0),
+                    ..Default::default()
+                };
+                app.scene.reset_render_history();
+                let measured = app.scene.draw_fixed_diag(
+                    &gs,
+                    &c,
+                    &cellrt,
+                    SceneOpts {
+                        hud: false,
+                        ..SceneOpts::default()
+                    },
+                    Some(&diag),
+                );
+                let feet = &measured.support;
+                // Two real, finite foot measurements or this cell is not
+                // evidence: an empty/short list folding to f32::MAX and
+                // getting drawn as "lowest foot" is exactly the defect this
+                // guards against -- fail loudly here instead of saving a
+                // sentinel as if it were a measurement.
+                if feet.len() != 2 || feet.iter().any(|x| !x.support_distance.is_finite()) {
+                    return Err(format!(
+                        "support.png/{what}: expected 2 finite foot measurements, got {:?}",
+                        feet.iter()
+                            .map(|x| (x.piece_id.clone(), x.support_distance))
+                            .collect::<Vec<_>>()
+                    ));
+                }
+                let lowest = feet
+                    .iter()
+                    .map(|x| x.support_distance)
+                    .fold(f32::MAX, f32::min);
+                flush_gl();
+                set_camera(&super::scene3d::rt_camera_2d(&cellrt));
+                // The support plane, exactly where the camera puts it.
+                let plane_y = (cy + OH * 0.5 - f.pos.y) * ch as f32 / OH;
+                draw_rectangle(
+                    0.0,
+                    plane_y,
+                    cw as f32,
+                    1.0,
+                    Color::from_rgba(90, 220, 220, 190),
+                );
+                let mut rows = vec![
+                    format!("{what}  sf{sf}"),
+                    format!("support plane y={:.2} (cyan)", f.pos.y),
+                    format!("lowest foot {lowest:+.3}"),
+                ];
+                for x in feet {
+                    rows.push(format!(
+                        "{} y[{:.2},{:.2}] d{:+.3}",
+                        x.piece_id, x.aabb_min[1], x.aabb_max[1], x.support_distance
+                    ));
+                }
+                caption_block(&rows, cw as f32);
+                flush_gl();
+                set_default_camera();
+                next_frame().await;
+                let img = read_rt(&cellrt);
+                blit(&mut sheet, &img, k as u32 * cw, 0);
+                cells.push(serde_json::json!({
+                    "which": what, "state": format!("{:?}", f.state), "state_frame": sf,
+                    "root": [f.pos.x, f.pos.y], "facing": f.facing,
+                    "support_plane_y": f.pos.y,
+                    "lowest_support_distance": lowest,
+                    "feet": feet,
+                    "camera": cam_json(&c, cw, ch),
+                }));
+            }
+            save(&out, &rel, &sheet)?;
+            index.files.push(FileEntry {
+                path: rel,
+                kind: "game3d",
+                width: cw * states.len() as u32,
+                height: ch,
+                tick: Some(suite.combat.fixture_tick as i64),
+                fixture: Some(idle.id.clone()),
+                camera: serde_json::json!({
+                    "cells": cells,
+                    "declared_here": "supplemental fixed diagnostic view (docs/art/reviews: \"add a fixed diagnostic capsule view with declared camera if needed\"); the suite's own contact and capsule cameras are unchanged",
+                    "camera_rule": {"eye": ["player.x", "player.y - 8 + 26", 120], "orthographic_height": OH, "note": "8 units of the frame are below the support plane so the feet cannot be cut off"},
+                }),
+                note: Some("cyan line = the support plane the fighter stands on; captions carry each foot piece's measured Y bounds and its signed distance to that plane (negative = through the floor)".into()),
             });
         }
 
@@ -1401,6 +1872,7 @@ pub(super) async fn run(app: &mut App, opts: &CaptureOpts) -> Result<CaptureInde
             &rel_wide,
             true,
             wide_img.is_some(),
+            SheetEvent::Declared,
         )
         .await
         {
@@ -1458,4 +1930,43 @@ pub(super) async fn run(app: &mut App, opts: &CaptureOpts) -> Result<CaptureInde
     let text = serde_json::to_string_pretty(&index).map_err(|e| e.to_string())?;
     std::fs::write(out.join("capture-index.json"), text).map_err(|e| e.to_string())?;
     Ok(index)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The exact regression Codex's Windows review caught: a requested
+    /// 60fps GIF does not actually play at 60fps, because the `image`
+    /// crate's encoder truncates to a whole millisecond before flooring to
+    /// a whole centisecond. 1000/60 = 16.67ms truncates to 16ms, and
+    /// 16ms/10 floors to 1 centisecond -- an actual playback rate of
+    /// 100fps, not 60. This is the number `render_action_motion_gif` must
+    /// report instead of repeating the false "60fps" claim.
+    #[test]
+    fn gif_actual_fps_reports_the_real_rate_not_the_request() {
+        assert_eq!(gif_actual_fps(60), 100.0);
+    }
+
+    /// The pre-existing `gif` recipe's 20fps happens to round-trip
+    /// perfectly (1000/20 = 50ms, an exact multiple of 10) -- which is
+    /// exactly why this bug went unnoticed until a 60fps request exposed
+    /// it. This case guards against "fixing" the function into reporting
+    /// a wrong number for a request that was never actually broken.
+    #[test]
+    fn gif_actual_fps_matches_the_request_when_it_divides_evenly() {
+        assert_eq!(gif_actual_fps(20), 20.0);
+        assert_eq!(gif_actual_fps(25), 25.0);
+        assert_eq!(gif_actual_fps(50), 50.0);
+        assert_eq!(gif_actual_fps(100), 100.0);
+    }
+
+    /// A request slow enough that even a whole extra millisecond of
+    /// truncation error cannot change which centisecond it floors to
+    /// still comes back accurate to within that one encoder unit.
+    #[test]
+    fn gif_actual_fps_is_never_wildly_off_for_a_slow_request() {
+        let got = gif_actual_fps(10);
+        assert!((got - 10.0).abs() < 0.5, "got {got}");
+    }
 }

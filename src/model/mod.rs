@@ -5,6 +5,8 @@
 //! what this module produces.
 
 pub mod anim;
+pub mod anim_dir;
+pub mod anim_directed;
 pub mod camera;
 pub mod characters;
 pub mod contact;
