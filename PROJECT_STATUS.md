@@ -58,7 +58,9 @@ the manifest names the test or image that proves them.
 cargo build --release
 overframe --capture out/                 # Windows / desktop: real GPU
 xvfb-run -a overframe --capture out/     # Linux without a display (Mesa)
-overframe-replay --export-runtime out/runtime   # frame-data.csv, characters.json, stages.json (no GPU)
+# The capture command above also writes out/runtime/ (CSV and JSON).
 ```
 
 Everything under `out/` is what CI publishes, byte-for-byte in layout.
+The separate `overframe-replay` tool renders a scripted 2D demo; it does not
+accept `--export-runtime`. Use the production capture command for these exports.

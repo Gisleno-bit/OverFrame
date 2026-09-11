@@ -48,3 +48,8 @@ Preserve original assets and deterministic simulation. Do not rewrite a solid sy
 ## Windows iteration checkpoint
 
 The [checkpoint-2 Windows review](reviews/69917fb3a501bf9ad8d3fd465e71c2235709b271.md) records actual images, preserved simulation data, rejected test exceptions and the next concrete pose corrections. Its implementation SHA is an isolated unpublished WIP, not main or an approved delivery. The [gameplay review direction](procedural/anim/kestrel-gameplay-direction.md) records original move roles and follow-up reproduction cases.
+
+
+## Integrated technical iteration
+
+The [019c2b1 integration review](reviews/019c2b141b0ddce864c35fcd03ec7163922e85cd.md) records the transferred directed-animation source, passing Windows build, matching local/CI evidence and its remaining visual gate. Kestrel is still the active phase; the [low-sweep/upward-release direction](procedural/anim/kestrel-physical-iteration.md) is the next visual correction.
