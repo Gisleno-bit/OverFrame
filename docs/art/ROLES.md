@@ -4,6 +4,12 @@ Quién decide qué en OVERFRAME, y qué material se estudia para animaciones
 y movimientos. Las instrucciones explícitas actuales del usuario tienen prioridad;
 este documento conserva el reparto de trabajo acordado para el juego.
 
+## Entrega activa: Alpha 0.7
+
+La petición del usuario del 2026-09-11 fija [Alpha 0.7](ALPHA_0_7.md) como objetivo actual.
+ChatGPT dirige técnica, gameplay y arte; Claude implementa. Ese documento actualiza
+el orden de fases del piloto anterior sin descartar su trabajo ya realizado.
+
 ## Inicio de cada entrega
 
 Confirmar repositorio, rama, SHA y cambios existentes siguiendo [WORKFLOW.md](WORKFLOW.md).
@@ -16,7 +22,7 @@ conservar el trabajo de ambos y evitar mezclar sus carpetas, comandos o polític
 | Quién | Se encarga de | No hace |
 |---|---|---|
 | **Espartaco** (Gisleno-bit) | Producción y decisiones: prioridades, fases (build → itch.io → Steam), presupuesto, jugadores y feedback, aprobar o rechazar entregas | — |
-| **ChatGPT — dirección visual** | **Todo el tema visual**: diseño de personajes y escenario como especificaciones procedurales (`docs/art/procedural/*.json`, FORMAT.md), paletas, identidad (logo, portada, HUD), **dirección de animación y poses de los movimientos**, revisión de cada tanda de evidencia (`docs/art/reviews/<sha>.md`) con observaciones por `piece_id` | Escribir código Rust; cambiar daño, hitboxes, frame data o cápsulas para acomodar una pieza |
+| **ChatGPT — dirección técnica, gameplay y visual** | **Dirección técnica y de gameplay, diagnóstico y criterios de aceptación; todo el tema visual**: diseño de personajes y escenario como especificaciones procedurales (`docs/art/procedural/*.json`, FORMAT.md), paletas, identidad (logo, portada, HUD), **dirección de animación y poses de los movimientos**, revisión de cada tanda de evidencia (`docs/art/reviews/<sha>.md`) con observaciones por `piece_id` | Escribir código Rust; cambiar daño, hitboxes, frame data o cápsulas para acomodar una pieza |
 | **Claude — código** | Simulación, renderer, loader de specs, captura de evidencia, exportación de frame data, CI, tests, empaquetado; implementar las specs y las poses que ChatGPT define, y avisar cuando algo no sea implementable tal cual | Decidir la dirección de arte por su cuenta; inventar números "a ojo" en lugar de exportarlos del runtime |
 
 Bucle: ChatGPT entrega spec → Claude implementa y commitea → CI (o Claude en

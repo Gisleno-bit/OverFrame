@@ -23,7 +23,7 @@ Read the latest relevant dated review, [PROJECT_STATUS.md](../../PROJECT_STATUS.
 
 ## Ownership and a concrete handoff
 
-The product owner decides scope, priorities and release approval. ChatGPT authors visual direction in `docs/art/` and `assets/brand/`; Claude authors game implementation, tests, capture/export tooling and CI. ChatGPT may transfer Claude's exact delivered implementation bytes and execute checks under the existing task authorization. That transfer is not permission to invent implementation outside the agreed role.
+The product owner decides scope, priorities and major irreversible decisions. The current [Alpha 0.7 direction](ALPHA_0_7.md) supersedes the old pilot delivery order. ChatGPT directs technical decisions, gameplay and visuals, recording concrete specifications/reviews in `docs/art/` and `assets/brand/`; Claude authors game implementation, tests, capture/export tooling and CI. ChatGPT may transfer Claude's exact delivered implementation bytes and execute checks under the existing task authorization. That transfer is not permission to invent implementation outside the agreed role.
 
 Each handoff records the following together:
 

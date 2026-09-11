@@ -42,4 +42,4 @@ Read the latest dated checkpoint in [the Kestrel implementation review](reviews/
 
 The last integrated Kestrel implementation in that checkpoint is `91f9c5a2834353bbb7207dcc4d866a4e513fd48f`. Opus authored additional animation work in its existing Claude task, but no fresh complete source archive or final verification reached the Windows checkout before the session-limit interruption. Retrieve and verify that work; do not treat it as lost or already integrated. The archive handoff and remaining acceptance criteria are in [WORKFLOW.md](WORKFLOW.md).
 
-The character order remains Kestrel → Boulder → Viper → Trama, followed by Lattice, HUD/identity, Windows/controller/performance validation and the pilot release materials. Repository reconciliation grants no animation, hardware or release pass.
+The newer product-owner request sets [Alpha 0.7](ALPHA_0_7.md) as the active delivery: Kestrel → gameplay camera → Boulder → Viper → stages → HUD → game feel → Windows/gamepad → online sanity → Alpha release. Trama work is preserved outside that requested sequence. Repository reconciliation grants no animation, hardware or release pass.
