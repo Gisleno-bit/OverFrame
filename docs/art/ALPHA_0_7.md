@@ -53,3 +53,8 @@ The [checkpoint-2 Windows review](reviews/69917fb3a501bf9ad8d3fd465e71c2235709b2
 ## Integrated technical iteration
 
 The [019c2b1 integration review](reviews/019c2b141b0ddce864c35fcd03ec7163922e85cd.md) records the transferred directed-animation source, passing Windows build, matching local/CI evidence and its remaining visual gate. Kestrel is still the active phase; the [low-sweep/upward-release direction](procedural/anim/kestrel-physical-iteration.md) is the next visual correction.
+
+
+## 2026-09-11 — Low sweep and upward-smash correction
+
+The [b9e650b Windows candidate review](reviews/b9e650b93a94b8b56061cdf30789d7fc68ad7cd2.md) accepts the corrected low-sweep chamber and upward extension as an incremental improvement. The actual Windows capture has no grounded foot penetration, preserves active contact and leaves simulation fixtures unchanged. Full Kestrel approval remains pending. Next: implement the [explicit gameplay corrections](procedural/anim/kestrel-gameplay-fixes.md), then finish the compact original SpecialN presentation.

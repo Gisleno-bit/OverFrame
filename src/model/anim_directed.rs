@@ -275,6 +275,21 @@ struct Shape {
     /// against the real, unpulled aim point afterwards, so intersection is
     /// still judged against the true hit region, never the decoy target.
     aim_pull: f32,
+    /// `Stage::Contact`/`Ext` only: root-offset override, replacing `crouch`
+    /// for those two stages (Wind still uses `crouch * 0.5`, Fold `crouch *
+    /// 0.4`). `None` keeps the old single-curve behaviour (every stage
+    /// scales the same `crouch`). Some families need compression already
+    /// visible at Wind and a real, distinct extension by first active --
+    /// two different depths, not one depth on a shared curve.
+    crouch_active: Option<f32>,
+    /// Root-local XY offset added to the true hitbox centre (`Aim::contact`)
+    /// to get the Contact/Ext solve target — an authored point *inside* the
+    /// hit region, not necessarily its centre. `[0.0, 0.0]` for every family
+    /// but one. `achieved`/`reached` are re-measured against the real,
+    /// unshifted `aim.contact` afterward (same safety net `aim_pull` uses),
+    /// so "intersects" always means the true hit region, never the decoy
+    /// point actually solved for.
+    contact_offset: [f32; 2],
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -300,6 +315,8 @@ const fn sh(
         follow_lean: 3.0,
         follow_tip: 5.0,
         aim_pull: 0.0,
+        crouch_active: None,
+        contact_offset: [0.0, 0.0],
     }
 }
 
@@ -318,12 +335,48 @@ fn shape(f: PoseFamily) -> Shape {
         // "Draw the right palm near the rear shoulder, then drive it."
         PalmDrive => sh(20.0, -12.0, 16.0, 2.0, None, 0.0, [-5.0, -1.0], 0.0),
         // "Compress the right arm at the chest then thrust upward" --
-        // "low compression into an upward palm, held until real activity
-        // ends" (gameplay-direction.md): a real, sustained knee bend, not
-        // the plain standing brace.
-        OverheadDrive => sh(-10.0, 10.0, 8.0, 4.0, None, -15.0, [0.5, -4.0], 0.0),
-        // "Extend a low right heel from a tightly folded knee."
-        LowSweep => sh(12.0, 0.0, 12.0, 6.5, Some(-5.0), 0.0, [0.5, -8.0], 0.0),
+        // 2026-09 review: usmash was compressing MORE through the active
+        // window and never read as an upward release. Flip the curve: real,
+        // deep compression is already visible at Wind (startup/charge,
+        // `crouch * 0.5` off a bigger `crouch`), and `crouch_active` gives
+        // Contact/Ext their own, separate value -- full neutral standing
+        // height, a genuine extension relative to the Wind compression,
+        // never a pop above it (which would float the feet; `support_lift`
+        // only ever corrects a sunk foot, never a floating one).
+        OverheadDrive => Shape {
+            crouch_active: Some(0.0),
+            ..sh(-10.0, 10.0, 8.0, 16.0, None, -15.0, [0.5, -4.0], 0.0)
+        },
+        // "Extend a low right heel from a tightly folded knee": a real low
+        // heel sweep, not dtilt's poke. Deeper seated crouch than dtilt
+        // (LowKick), a tighter Wind-stage fold, and a counter-lean at Wind
+        // that reverses into the strike at Contact (a genuine counterweight
+        // arc, not dtilt's barely-there `lean_wind`). `contact_offset`
+        // solves toward an authored point inside dsmash's hitbox (centre
+        // (20,13) r10 in root-local XY) rather than dead-centre -- lower and
+        // closer to the body, so the shin actually reads diagonal toward
+        // the floor instead of levelling out flat at the circle's centre;
+        // `achieved` still gets re-measured against the true centre before
+        // any pass/fail call is made (see `contact_offset`'s own doc).
+        //
+        // The chamber height (`coil[1]`) is a floor constraint, not taste:
+        // `support_lift` skips the directed action's own contact foot in
+        // every stage, so nothing catches that foot if the chamber puts it
+        // under the plane. A first pass at -10.0 (heel tucked *down* beside
+        // the seated hip) sank it through the stage across the whole
+        // anticipation window and the wind -> contact blend (measured, both
+        // facings: sf2 -0.281, sf3 -0.247, sf4 -0.239, sf5 -1.557). -5.0
+        // folds the heel *up* under the seated hip instead -- the tighter
+        // fold the direction actually asks for -- and clears the plane on
+        // every tick of the cycle. Contact/Ext geometry is untouched by
+        // this: `coil` only feeds the Wind target and the Fold "home"
+        // point, so the active low diagonal and its measured separation are
+        // exactly as captured. Guarded per tick, both feet, both facings, by
+        // `neither_foot_penetrates_the_floor_on_any_tick_of_the_redirected_smashes`.
+        LowSweep => Shape {
+            contact_offset: [-4.0, -6.0],
+            ..sh(8.0, -4.0, 12.0, 9.0, Some(-18.0), 0.0, [-1.0, -5.0], -6.0)
+        },
         // "Drive the bent right forearm ahead of the chest": the runtime
         // hitbox centre sits beyond the arm's maximum reach (need 13.36u,
         // chain reaches 10.01u), so solving straight at it always
@@ -694,17 +747,34 @@ fn frame_body(
             );
             stand_legs(p);
         }
-        Kick | LowKick | LowSweep => {
+        Kick | LowKick => {
             // "Both fists frame the chest, with the rear elbow visibly
             // separated" / "near hand guards the chin, far hand back".
             anim::arm(p, rig, side, -26.0 * k, 62.0, 18.0);
             anim::arm(p, rig, other, 38.0 * k, 72.0, 22.0);
-            // dtilt/dsmash ("fold the support knee", "sit the hips over the
-            // support leg") need a real bent support knee under a real
-            // lower stance, not the plain kick's fixed brace -- see
-            // `crouch_leg`. Plain `ftilt` (Kick) keeps its original brace.
-            if matches!(fam, LowKick | LowSweep) && !airborne {
+            // dtilt ("fold the support knee") needs a real bent support
+            // knee under a real lower stance, not the plain kick's fixed
+            // brace -- see `crouch_leg`. Plain `ftilt` (Kick) keeps its
+            // original brace.
+            if matches!(fam, LowKick) && !airborne {
                 crouch_leg(p, other, -8.0, -26.0);
+            } else {
+                support(p);
+            }
+        }
+        LowSweep => {
+            // Distinct from dtilt's poke, per direction: "front hand guards
+            // high", "the rear hand counterbalances behind" -- the near
+            // hand tucks up tight (a high, folded guard) instead of framing
+            // the chest, and the far hand opens back and low as a real
+            // counterweight (compare `HeelDrop`'s "other hand opens
+            // backward"), not a second guarding fist.
+            anim::arm(p, rig, side, -14.0 * k, 104.0, 16.0);
+            anim::arm(p, rig, other, -40.0 * k, 34.0, 30.0);
+            // "Sit the hips over the support leg": a deeper fold than
+            // dtilt's, not the shared brace.
+            if !airborne {
+                crouch_leg(p, other, -14.0, -34.0);
             } else {
                 support(p);
             }
@@ -796,7 +866,7 @@ fn staged(
     let crouch = match stage {
         Stage::Wind => s.crouch * 0.5,
         Stage::Fold => s.crouch * 0.4,
-        _ => s.crouch,
+        _ => s.crouch_active.unwrap_or(s.crouch),
     };
     if crouch != 0.0 {
         if let Some(i) = rig.bone("root") {
@@ -860,14 +930,15 @@ fn staged(
             ]
         }
         _ => {
-            if s.aim_pull > 0.0 {
+            let base = if s.aim_pull > 0.0 {
                 [
                     root.x + (aim.contact[0] - root.x) * (1.0 - s.aim_pull),
                     root.y + (aim.contact[1] - root.y) * (1.0 - s.aim_pull),
                 ]
             } else {
                 aim.contact
-            }
+            };
+            [base[0] + s.contact_offset[0], base[1] + s.contact_offset[1]]
         }
     };
     let tip_abs = match (s.tip_abs, stage) {
@@ -882,12 +953,15 @@ fn staged(
     let mut reach = solve(
         rig, &mut p, &ch, d.effector, target, bend, tip_abs, tip_local,
     );
-    // `aim_pull` (Contact/Ext only) solves toward a point short of the real
-    // aim: re-measure `achieved` against the *real* aim.contact so every
-    // consumer (feasibility's centroid_gap, the lean_assist search's
-    // "good enough" check) judges intersection against the true hit
-    // region, never the closer decoy point actually fed to the solver.
-    if s.aim_pull > 0.0 && matches!(stage, Stage::Contact | Stage::Ext) {
+    // `aim_pull`/`contact_offset` (Contact/Ext only) solve toward a point
+    // short of, or offset from, the real aim: re-measure `achieved` against
+    // the *real* aim.contact so every consumer (feasibility's centroid_gap,
+    // the lean_assist search's "good enough" check) judges intersection
+    // against the true hit region, never the decoy point actually fed to
+    // the solver.
+    if (s.aim_pull > 0.0 || s.contact_offset != [0.0, 0.0])
+        && matches!(stage, Stage::Contact | Stage::Ext)
+    {
         let world = rig.world(&p, &Xf::IDENTITY);
         let achieved_pt = world[ch.tip].point(d.effector);
         reach.achieved = ((achieved_pt.x - aim.contact[0]).powi(2)
@@ -1290,20 +1364,26 @@ mod tests {
     }
 
     #[test]
-    fn dtilt_dsmash_and_usmash_really_crouch_not_just_offset_the_root() {
+    fn dtilt_and_dsmash_really_crouch_not_just_offset_the_root() {
         // A family's `crouch` root offset alone is not a real lower stance:
         // the support leg's own FK angles do not shorten with it, so an
         // unbent leg sends the foot `crouch` units below the floor and
         // `support_lift` raises the root right back up, cancelling the
         // offset almost entirely (measured before this fix: dtilt and
         // dsmash both netted the same ~-0.99u drop regardless of their very
-        // different authored crouch values, and usmash netted zero).
-        // `crouch_leg` bends the knee along with the offset so the drop
-        // actually shows. Guard the real per-frame root height, not the
-        // authored constant, against ever regressing back to that
-        // cancellation -- and keep the direction's own ordering honest:
-        // dsmash ("much more seated") must sit lower than dtilt ("moderately
-        // crouched").
+        // different authored crouch values). `crouch_leg` bends the knee
+        // along with the offset so the drop actually shows. Guard the real
+        // per-frame root height, not the authored constant, against ever
+        // regressing back to that cancellation -- and keep the direction's
+        // own ordering honest: dsmash ("much more seated", the low-sweep
+        // family) must sit lower than dtilt ("moderately crouched").
+        // (usmash used to be asserted here too, compressed at first active
+        // -- the 2026-09 review flagged that exact shape as the bug
+        // ["usmash comprime MAS durante activo y no transmite descarga
+        // ascendente"], so that assertion doesn't belong in a "really
+        // crouches" test any more. Its own compression -> extension arc is
+        // covered by `usmash_compresses_at_wind_then_extends_by_first_active`
+        // below.)
         let m = build(CharacterId::Kestrel);
         let root_i = m.rig.bone("root").unwrap();
         let root_y = |mid: MoveId| -> f32 {
@@ -1321,7 +1401,6 @@ mod tests {
         };
         let dtilt = root_y(MoveId::Dtilt);
         let dsmash = root_y(MoveId::Dsmash);
-        let usmash = root_y(MoveId::Usmash);
         assert!(
             dtilt < stand_y - 1.5,
             "dtilt should sit visibly lower than standing: {dtilt} vs stand {stand_y}"
@@ -1331,13 +1410,178 @@ mod tests {
             "dsmash should sit visibly lower than standing: {dsmash} vs stand {stand_y}"
         );
         assert!(
-            usmash < stand_y - 0.5,
-            "usmash should show real leg compression, not a standing brace: {usmash} vs stand {stand_y}"
-        );
-        assert!(
             dsmash < dtilt - 0.3,
             "dsmash (\"much more seated\") should sit lower than dtilt (\"moderately crouched\"): dsmash {dsmash} dtilt {dtilt}"
         );
+    }
+
+    #[test]
+    fn usmash_compresses_at_wind_then_extends_by_first_active() {
+        // 2026-09 review, Windows 882cac5: "usmash comprime MAS durante
+        // activo y no transmite descarga ascendente" -- usmash was
+        // compressing *more* through the active window and never read as
+        // an upward release. The direction: real compression already
+        // visible at startup/charge (Wind), knee/pelvis extension upward
+        // by the first active frame -- a genuine compression -> extension
+        // arc, not a held crouch (that would just be "a standing brace",
+        // the old failure mode `crouch_active` replaced) and not a pop
+        // *above* neutral standing (that would float the feet --
+        // `support_lift` only ever corrects a sunk foot, never a floating
+        // one). This replaces the old `dtilt_dsmash_and_usmash_really_
+        // crouch_...` assertion that usmash must sit *below* standing at
+        // first active, which directly contradicted this direction.
+        let m = build(CharacterId::Kestrel);
+        let root_i = m.rig.bone("root").unwrap();
+        let md = attacks::data(CharacterId::Kestrel, MoveId::Usmash);
+        let d = m.directions.as_ref().unwrap().get(MoveId::Usmash).unwrap();
+        let stand_y = {
+            let mut f = Fighter::new(CharacterId::Kestrel.data(), 0, Vec2::ZERO);
+            f.facing = 1.0;
+            f.grounded = true;
+            let p = fighter_pose(&m, &f, 0);
+            m.rig.world(&p, &Xf::IDENTITY)[root_i].t.y
+        };
+        // Wind: sampled at the authored anticipation peak (matching
+        // `anticipation_peaks_at_the_authored_fraction...`'s own pattern)
+        // -- the frame the base->wind ease curve actually finishes
+        // rising on, not an arbitrary earlier midpoint still mostly
+        // blended toward the base idle stance.
+        let peak = (d.fraction * md.startup as f32).round() as u32;
+        let wind_f = fighter(MoveId::Usmash, &md, peak);
+        let wind_p = fighter_pose(&m, &wind_f, 0);
+        let wind_y = m.rig.world(&wind_p, &Xf::IDENTITY)[root_i].t.y;
+        // First active frame: real runtime event, same fixture the
+        // simulation itself uses.
+        let active_f = fighter(MoveId::Usmash, &md, md.startup);
+        let active_p = fighter_pose(&m, &active_f, 0);
+        let active_y = m.rig.world(&active_p, &Xf::IDENTITY)[root_i].t.y;
+        assert!(
+            wind_y < stand_y - 1.5,
+            "usmash should show real compression at Wind (startup/charge), not a standing brace: {wind_y} vs stand {stand_y}"
+        );
+        assert!(
+            active_y > wind_y + 1.0,
+            "usmash should extend back up by its first active frame, not stay compressed: wind {wind_y} -> active {active_y}"
+        );
+        assert!(
+            active_y <= stand_y + 0.5,
+            "the extension is a rise off the Wind compression back toward standing, not an artificial pop above it (would float the feet): active {active_y} vs stand {stand_y}"
+        );
+        // Real contact check, not weakened: the arm still has to reach the
+        // real runtime hitbox on the first active frame.
+        let (_, reach, _) = contact_pose(&m, d, &active_f, &md, 0, Stage::Contact, Event::Hitbox);
+        let reach = reach.unwrap();
+        let aim = aim_for(&active_f, d, &md).unwrap();
+        assert!(
+            reach.achieved <= aim.radius,
+            "usmash's contact piece must still intersect the real hitbox at first active: {reach:?} radius {}",
+            aim.radius
+        );
+    }
+
+    #[test]
+    fn neither_foot_penetrates_the_floor_on_any_tick_of_the_redirected_smashes() {
+        // Windows review of the visual patch: dsmash's *striking* foot sank
+        // through the stage during the anticipation window and through the
+        // wind -> contact blend (measured, both facings: sf2 -0.281, sf3
+        // -0.247, sf4 -0.239, sf5 -1.557). `support_lift` cannot catch that
+        // one: it deliberately skips the directed action's own contact foot
+        // in every stage (otherwise the floor correction would drag the
+        // strike off its aim), so only the chamber's own geometry keeps that
+        // foot above the plane.
+        //
+        // Sample the REAL per-tick drawn pose -- every state_frame of the
+        // whole cycle, not just the key stages, so the base -> wind and
+        // wind -> contact blends and the whole recovery are covered -- for
+        // both facings and both smashes this patch redirected. The active
+        // ticks additionally re-assert the strict contact requirement in the
+        // same test, so a future "fix" can never buy clean feet by pulling
+        // the strike out of its hit region.
+        let m = build(CharacterId::Kestrel);
+        for mid in [MoveId::Dsmash, MoveId::Usmash] {
+            let md = attacks::data(CharacterId::Kestrel, mid);
+            let d = m.directions.as_ref().unwrap().get(mid).unwrap();
+            let last_active = md.startup + md.active + md.late_active;
+            for facing in [1.0f32, -1.0] {
+                for sf in 0..md.total() {
+                    let mut f = Fighter::new(CharacterId::Kestrel.data(), 0, Vec2::ZERO);
+                    f.facing = facing;
+                    f.grounded = true;
+                    f.set_state_pub(State::Attack {
+                        id: mid,
+                        aerial: md.is_aerial,
+                    });
+                    f.state_frame = sf;
+                    let p = fighter_pose(&m, &f, 0);
+                    for s in super::super::contact::foot_support(&m, &p, &Xf::IDENTITY, 0.0) {
+                        assert!(
+                            s.support_distance > -1e-3,
+                            "{mid:?} facing {facing:+} sf {sf}: {} sinks {:.4} through the floor",
+                            s.piece_id,
+                            s.support_distance
+                        );
+                    }
+                    if sf >= md.startup && sf < last_active {
+                        let c = centroid(&m, d, &p);
+                        let aim = aim_for(&f, d, &md).unwrap();
+                        let gap = ((c[0] - aim.contact[0]).powi(2)
+                            + (c[1] - aim.contact[1]).powi(2))
+                        .sqrt();
+                        assert!(
+                            gap <= aim.radius,
+                            "{mid:?} facing {facing:+} sf {sf}: the contact piece left its real hit region ({gap:.4} > r{:.4}) -- clean feet must never be bought with a missed strike",
+                            aim.radius
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// `cargo test --lib diag_feet -- --ignored --nocapture` prints the
+    /// per-tick support distance of BOTH feet, every state_frame of the
+    /// whole cycle, both facings, for the smashes this patch redirected --
+    /// the measurement behind
+    /// `neither_foot_penetrates_the_floor_on_any_tick_of_the_redirected_smashes`.
+    /// Report-only: it asserts nothing, so it can be run against a broken
+    /// tree to see exactly which ticks sink and by how much.
+    #[test]
+    #[ignore]
+    fn diag_feet_support_per_tick() {
+        let m = build(CharacterId::Kestrel);
+        for mid in [MoveId::Dsmash, MoveId::Usmash] {
+            let md = attacks::data(CharacterId::Kestrel, mid);
+            for facing in [1.0f32, -1.0] {
+                println!(
+                    "=== {mid:?} facing {facing:+} startup={} active={} late={} endlag={} ===",
+                    md.startup, md.active, md.late_active, md.endlag
+                );
+                for sf in 0..md.total() {
+                    let mut f = Fighter::new(CharacterId::Kestrel.data(), 0, Vec2::ZERO);
+                    f.facing = facing;
+                    f.grounded = true;
+                    f.set_state_pub(State::Attack {
+                        id: mid,
+                        aerial: md.is_aerial,
+                    });
+                    f.state_frame = sf;
+                    let p = fighter_pose(&m, &f, 0);
+                    let phase = if sf < md.startup {
+                        "windup"
+                    } else if sf < md.startup + md.active + md.late_active {
+                        "active"
+                    } else {
+                        "recovery"
+                    };
+                    let cells: Vec<String> =
+                        super::super::contact::foot_support(&m, &p, &Xf::IDENTITY, 0.0)
+                            .iter()
+                            .map(|s| format!("{}={:+.4}", s.piece_id, s.support_distance))
+                            .collect();
+                    println!("sf={sf:<3} {phase:<8} {}", cells.join("  "));
+                }
+            }
+        }
     }
 
     #[test]
