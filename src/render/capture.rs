@@ -102,6 +102,7 @@ fn cam(eye: [f32; 3], target: [f32; 3], ortho_height: f32) -> FixedCam {
         eye: v3(eye[0], eye[1], eye[2]),
         target: v3(target[0], target[1], target[2]),
         ortho_height,
+        perspective: false,
     }
 }
 
@@ -437,6 +438,27 @@ fn cell_report(
                 m.tip_reach_x
             )),
         }
+        // A projectile action has no fighter hitbox to separate from, so
+        // the row above says only "reach". The question that matters for it
+        // is whether the piece's real surface meets the **emission region**
+        // -- measured with the same projected triangles -- and the answer
+        // goes on the image rather than only in the JSON, so a sheet can
+        // never read as a contact it does not have.
+        if let Some(e) = &m.emission {
+            caption.push(format!(
+                "emission r{:.2} ({:.1},{:.1}) sep {:+.3} mesh {:.3}",
+                e.radius, e.center[0], e.center[1], e.signed_separation, e.mesh_distance
+            ));
+            caption.push(format!(
+                "CONTACT {} (centroid {:.3}, not the test)",
+                if e.signed_separation <= 0.0 {
+                    "MET"
+                } else {
+                    "NOT MET"
+                },
+                e.centroid_distance
+            ));
+        }
     }
     let eased = measure.map(|m| m.eased_facing).unwrap_or(f.facing);
     caption.push(format!(
@@ -500,6 +522,7 @@ fn fixed_cam(rule: &CamRule, x: f32, y: f32, facing: f32) -> FixedCam {
         eye: v3(eye[0], eye[1], eye[2]),
         target: v3(target[0], target[1], target[2]),
         ortho_height: rule.orthographic_height,
+        perspective: false,
     }
 }
 
@@ -772,9 +795,19 @@ async fn render_action_motion_gif(
     if ticks.is_empty() {
         return Err("empty case run".into());
     }
+    // Anchor the fixed camera on the tick the action's real event happens:
+    // its first active hitbox, or -- for an action whose only event is a
+    // release -- the tick the shot actually leaves. Falling through to the
+    // middle of the sequence would quietly reframe a move that no longer
+    // has an `active` tick at all.
     let anchor_idx = ticks
         .iter()
         .position(|t| t.label == "active")
+        .or_else(|| {
+            ticks
+                .iter()
+                .position(|t| t.label == "emission" || t.label == "release")
+        })
         .unwrap_or(ticks.len() / 2);
     let af = &ticks[anchor_idx].state.fighters[0];
     let cam = fixed_cam(wide_rule, af.pos.x, af.pos.y, facing);
@@ -860,6 +893,156 @@ async fn render_action_motion_gif(
         ),
         note: Some(format!(
             "optional review capture, not a measurement: {frames} frames, one per simulation tick from one tick before the move starts through its last recovery tick, sim runs at 60Hz and every tick is drawn, none skipped. Requested {} fps playback, but the `image` crate's GIF encoder actually achieves ~{actual_fps:.1} fps here (its centisecond rounding does not preserve 60fps -- see `{sidecar_rel}` for a lossless per-tick PNG sequence to re-encode locally instead). Not part of contact_expected.",
+            spec.playback_fps
+        )),
+    })
+}
+
+/// The same case again, seen through **the game's own match camera**.
+///
+/// The declared art cameras are fixed and orthographic, which is what makes
+/// their measurements comparable; this one is the real
+/// [`MatchCamera`](crate::model::MatchCamera), updated every tick from the
+/// case's own state exactly as the game updates it, so an action can also be
+/// judged at the framing and scale a player actually sees. It is a review
+/// capture and says so: nothing is measured here.
+///
+/// The camera is settled on the first tick's state before recording, so the
+/// clip opens already framed instead of easing in from its default pose.
+///
+/// What it reproduces and what it does not is recorded in the sidecar and
+/// the index note rather than left to be assumed: the 3D pass is the
+/// interactive one — same camera, same shake, same billboard axes, same
+/// hitstop wash — and the HUD is deliberately off. It is still a review
+/// capture, not a measurement.
+#[allow(clippy::too_many_arguments)]
+async fn render_action_gamecam_gif(
+    app: &mut App,
+    rts: &mut Targets,
+    suite: &Suite,
+    out: &Path,
+    id: CharacterId,
+    mid: crate::sim::attacks::MoveId,
+    variant: &str,
+    rel: &str,
+    facing: f32,
+    source_sha: &str,
+) -> Result<FileEntry, String> {
+    let facing = if facing < 0.0 { -1.0 } else { 1.0 };
+    let ticks = export::run_case_facing(id, mid, variant, facing)?;
+    if ticks.is_empty() {
+        return Err("empty case run".into());
+    }
+    let spec = &suite.action_motion;
+    let (gw, gh) = (spec.output[0], spec.output[1]);
+    let rt = rts.get(gw, gh);
+    let aspect = gw as f32 / gh.max(1) as f32;
+    let stem = rel.strip_suffix(".gif").unwrap_or(rel);
+    let frames_rel = format!("{stem}-frames");
+    let sidecar_rel = format!("{stem}.json");
+    let path = out.join(rel);
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    let file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+    let mut enc = image::codecs::gif::GifEncoder::new_with_speed(file, 10);
+    enc.set_repeat(image::codecs::gif::Repeat::Infinite)
+        .map_err(|e| e.to_string())?;
+    let delay = image::Delay::from_numer_denom_ms(1000, spec.playback_fps.max(1));
+
+    let mut mc = crate::model::MatchCamera::new();
+    for _ in 0..90 {
+        mc.update(&ticks[0].state, aspect);
+    }
+    let opened = crate::render::scene3d::FixedCam::from_match(&mc);
+
+    app.scene.reset();
+    app.scene.reset_render_history();
+    // `Scene::billboard` takes its axes from the scene's *own* camera, and
+    // `Scene::reset` only clears that camera's smoothing, not its pose. So
+    // the camera this capture projects with is also assigned to the scene,
+    // shake included: otherwise the soft halo and the release flash face a
+    // camera that is not the one the frame was rendered from. The previous
+    // camera is put back afterwards so the orthographic captures that run
+    // next are bit-for-bit what they were.
+    let saved_cam = app.scene.camera;
+    let mut frames = 0u32;
+    let mut max_shake = 0.0f32;
+    let mut max_flash = 0.0f32;
+    for t in &ticks {
+        mc.update(&t.state, aspect);
+        // The same shake `Scene::draw` applies, on the same camera.
+        let shake = mc.shake(&t.state);
+        let mut shaken = mc;
+        shaken.pos = mc.pos + shake;
+        shaken.target = mc.target + shake;
+        app.scene.camera = shaken;
+        max_shake = max_shake.max(t.state.camera_shake);
+        max_flash = max_flash.max(t.state.hitstop_flash);
+        let cam = crate::render::scene3d::FixedCam::from_match(&shaken);
+        app.scene.draw_fixed(
+            &t.state,
+            &cam,
+            &rt,
+            SceneOpts {
+                hud: false,
+                ..SceneOpts::default()
+            },
+        );
+        // …and the 2D hitstop wash the interactive render lays on top.
+        app.scene.draw_hitstop_flash(&t.state, &rt);
+        next_frame().await;
+        let img = read_rt(&rt);
+        save(out, &format!("{frames_rel}/tick_{frames:04}.png"), &img)?;
+        let frame = image::Frame::from_parts(img, 0, 0, delay);
+        enc.encode_frame(frame).map_err(|e| e.to_string())?;
+        frames += 1;
+    }
+    drop(enc);
+    app.scene.camera = saved_cam;
+    let actual_fps = gif_actual_fps(spec.playback_fps);
+    let closed = crate::render::scene3d::FixedCam::from_match(&mc);
+    let cam_meta = serde_json::json!({
+        "rule": "the game's own MatchCamera, updated once per simulation tick from this case's state",
+        "projection": "perspective",
+        "fovy_degrees": mc.fovy.to_degrees(),
+        "first_tick": {"eye": [opened.eye.x, opened.eye.y, opened.eye.z],
+                       "target": [opened.target.x, opened.target.y, opened.target.z]},
+        "last_tick": {"eye": [closed.eye.x, closed.eye.y, closed.eye.z],
+                      "target": [closed.target.x, closed.target.y, closed.target.z]},
+        "width": gw,
+        "height": gh,
+        "hud": false,
+        "reproduces": "the 3D pass of the interactive render: the same MatchCamera including its shake, the same perspective projection, the same billboard axes, and the same 2D hitstop wash",
+        "omits": "the HUD (port tags, damage, stocks, timer) -- deliberately, so the action is not covered by it. Nothing else from `Scene::draw` is left out.",
+        "max_camera_shake_in_case": max_shake,
+        "max_hitstop_flash_in_case": max_flash,
+        "fighters_in_case": ticks[0].state.fighters.len(),
+    });
+    let sidecar = serde_json::json!({
+        "sha": source_sha,
+        "case": {"action_id": export::action_id(mid), "variant_id": variant},
+        "facing": facing,
+        "ticks": frames,
+        "camera": cam_meta.clone(),
+        "fps": 60,
+        "frames_dir": frames_rel.clone(),
+        "frame_naming": "tick_%04d.png, one per simulation tick, none skipped",
+        "note": "review capture through the real match camera, not a measurement: the declared orthographic art cameras are the ones anything is measured against. Lossless per-tick PNG sequence at the simulation's real 60Hz; encode this rather than the sibling .gif.",
+    });
+    std::fs::write(
+        out.join(&sidecar_rel),
+        serde_json::to_vec_pretty(&sidecar).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(FileEntry {
+        path: rel.to_string(),
+        kind: "game3d",
+        width: gw,
+        height: gh,
+        tick: None,
+        fixture: None,
+        camera: cam_meta,
+        note: Some(format!(
+            "optional review capture through the game's own match camera, not a measurement: {frames} frames, one per simulation tick, none skipped. Reproduces the interactive 3D pass -- same MatchCamera and shake (max {max_shake:.3} in this case), same perspective projection, same billboard axes, same 2D hitstop wash (max {max_flash:.3}) -- and deliberately omits only the HUD. Requested {} fps playback; the GIF encoder actually achieves ~{actual_fps:.1} fps (see `{sidecar_rel}` for the lossless PNG sequence). Not part of contact_expected.",
             spec.playback_fps
         )),
     })
@@ -1119,6 +1302,7 @@ pub(super) async fn run(app: &mut App, opts: &CaptureOpts) -> Result<CaptureInde
                     eye: v3(f.pos.x, f.pos.y + oh * 0.42, 120.0),
                     target: v3(f.pos.x, f.pos.y + oh * 0.42, 0.0),
                     ortho_height: oh,
+                    perspective: false,
                 };
                 app.scene.draw_fixed(
                     &gs,
@@ -1343,6 +1527,32 @@ pub(super) async fn run(app: &mut App, opts: &CaptureOpts) -> Result<CaptureInde
                         Err(e) => index.skipped.push((rel, e)),
                     }
                 }
+                // The same cycle again through the game's own match
+                // camera, so the action is reviewed at the framing a
+                // player actually sees as well as at the fixed
+                // measurement camera. Same trigger, same two facings.
+                for (rel, facing) in [
+                    (format!("{stem}-gamecam.gif"), 1.0f32),
+                    (format!("{stem}-gamecam2.gif"), -1.0f32),
+                ] {
+                    match render_action_gamecam_gif(
+                        app,
+                        &mut rts,
+                        &suite,
+                        &out,
+                        id,
+                        *mid,
+                        variant,
+                        &rel,
+                        facing,
+                        &opts.source_sha,
+                    )
+                    .await
+                    {
+                        Ok(entry) => index.files.push(entry),
+                        Err(e) => index.skipped.push((rel, e)),
+                    }
+                }
             }
         }
 
@@ -1371,6 +1581,7 @@ pub(super) async fn run(app: &mut App, opts: &CaptureOpts) -> Result<CaptureInde
                     eye: v3(f.pos.x, f.pos.y + 22.0, 120.0),
                     target: v3(f.pos.x, f.pos.y + 22.0, 0.0),
                     ortho_height: 44.0,
+                    perspective: false,
                 };
                 let diag = Diagnostics {
                     capsules: true,
@@ -1455,6 +1666,7 @@ pub(super) async fn run(app: &mut App, opts: &CaptureOpts) -> Result<CaptureInde
                     eye: v3(f.pos.x, cy, 120.0),
                     target: v3(f.pos.x, cy, 0.0),
                     ortho_height: OH,
+                    perspective: false,
                 };
                 // Ask for port 0's feet explicitly -- this view is evidence
                 // about the fighter being posed, not whichever fighter's
@@ -1562,6 +1774,7 @@ pub(super) async fn run(app: &mut App, opts: &CaptureOpts) -> Result<CaptureInde
                 eye: v3(0.0, oh * 0.45, 120.0),
                 target: v3(0.0, oh * 0.45, 0.0),
                 ortho_height: oh,
+                perspective: false,
             };
             let mut cfg = crate::sim::MatchConfig {
                 stage: crate::sim::stage::StageId::Lattice,

@@ -72,6 +72,50 @@ pub struct ContactMeasure {
     /// separation from the hitbox centre along X, for reach comparisons.
     pub tip: [f32; 3],
     pub tip_reach_x: f32,
+    /// For an action that releases a projectile: the **same projected
+    /// triangle method** applied to the emission region instead of a
+    /// fighter hitbox.
+    ///
+    /// This is an **addition, never a substitute**. An action that emits a
+    /// projectile and also carries a fighter hitbox — Boulder's and Viper's
+    /// `special_n` — reports both: `mesh_distance`/`signed_separation`
+    /// above against its real hitbox, and this against its emission region.
+    /// Only an action declared `no_melee` has no hitbox to measure, and for
+    /// that one the absence above is not a reason to fall back to the
+    /// piece's centroid and call the result a contact: the centroid is one
+    /// point inside a real mesh, and the emission region is a real circle
+    /// of the projectile's own radius. Measuring the piece's actual
+    /// projected surface against that circle, exactly as `mesh_distance`
+    /// does against a hitbox, answers "does the hand reach the release"
+    /// truthfully in either case.
+    ///
+    /// This is emphatically **not** the projectile object: by the time the
+    /// shot is exported it has already integrated one step downrange. This
+    /// is the origin the simulation releases from.
+    pub emission: Option<EmissionRef>,
+}
+
+/// The emission region of a projectile action, and the contact piece's real
+/// surface measured against it (see [`ContactMeasure::emission`]).
+#[derive(Debug, Clone, Serialize)]
+pub struct EmissionRef {
+    /// World centre of the region the simulation releases from.
+    pub center: [f32; 2],
+    /// Its radius: the projectile's own collision radius.
+    pub radius: f32,
+    /// Minimum distance from the centre to the piece's projected surface.
+    pub mesh_distance: f32,
+    /// The point of that surface which realises it.
+    pub nearest_point: [f32; 3],
+    /// `mesh_distance - radius`. Negative or zero: the real surface reaches
+    /// into the emission region. Positive: it does not, and this is the gap.
+    pub signed_separation: f32,
+    /// Diagnostic only, always >= `mesh_distance`.
+    pub nearest_vertex: [f32; 3],
+    pub vertex_distance: f32,
+    /// What a centroid-only test would have reported, kept beside the real
+    /// measurement so the two can never be confused again.
+    pub centroid_distance: f32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -276,7 +320,36 @@ pub fn measure_posed(
         triangle_count: tris.len(),
         tip: [tip.x, tip.y, tip.z],
         tip_reach_x: (tip.x - f.pos.x) * axis,
+        emission: None,
     };
+    // The emission region, measured with the same triangles.
+    if crate::export::action_spawns_projectile(action) {
+        let c = [
+            f.pos.x + f.facing * crate::model::anim_directed::PROJECTILE_SPAWN_LOCAL_X,
+            f.pos.y + f.character.height * 0.5,
+        ];
+        let r = crate::sim::attacks::PROJECTILE_RADIUS;
+        if let Some((d, p)) = mesh_distance_xy(&tris, c) {
+            let nv = *verts
+                .iter()
+                .min_by(|a, b| {
+                    let da = (a.x - c[0]).hypot(a.y - c[1]);
+                    let db = (b.x - c[0]).hypot(b.y - c[1]);
+                    da.total_cmp(&db)
+                })
+                .unwrap();
+            out.emission = Some(EmissionRef {
+                center: c,
+                radius: r,
+                mesh_distance: d,
+                nearest_point: [p[0], p[1], hi.z],
+                signed_separation: d - r,
+                nearest_vertex: [nv.x, nv.y, nv.z],
+                vertex_distance: (nv.x - c[0]).hypot(nv.y - c[1]),
+                centroid_distance: (centroid.x - c[0]).hypot(centroid.y - c[1]),
+            });
+        }
+    }
     if let Some((id, c, r)) = hitbox {
         out.hitbox = Some(HitboxRef {
             id: id.to_string(),
