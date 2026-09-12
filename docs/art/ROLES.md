@@ -10,6 +10,16 @@ La petición del usuario del 2026-09-11 fija [Alpha 0.7](ALPHA_0_7.md) como obje
 ChatGPT dirige técnica, gameplay y arte; Claude implementa. Ese documento actualiza
 el orden de fases del piloto anterior sin descartar su trabajo ya realizado.
 
+## Actualización del usuario — 2026-09-12
+
+Kestrel mantiene el trabajo y reparto actual de animación. Para Boulder, Viper,
+Trama y los siguientes personajes, Espartaco aportará las animaciones: ChatGPT
+y Claude no dedicarán trabajo a diseñarlas o implementarlas salvo petición
+explícita del usuario. Se conserva el material existente y se continúa con el
+resto del trabajo autorizado. Esta excepción prevalece sobre las atribuciones
+generales de animación de la tabla y las referencias históricas de abajo;
+véase el alcance actualizado en [Alpha 0.7](ALPHA_0_7.md).
+
 ## Inicio de cada entrega
 
 Confirmar repositorio, rama, SHA y cambios existentes siguiendo [WORKFLOW.md](WORKFLOW.md).

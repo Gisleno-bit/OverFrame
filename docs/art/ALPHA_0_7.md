@@ -4,6 +4,12 @@ The product owner's 2026-09-11 request supersedes the previous v1.0.0-pilot deli
 
 ChatGPT directs technical decisions, gameplay and art, diagnoses observed results and supplies concrete acceptance criteria. Claude implements and reports constraints; ChatGPT inspects the source, executes checks/captures and reviews the result. The product owner retains major irreversible decisions. Normal incremental corrections proceed under the user's authorization. Compilation and passing tests are minimum gates, never the artistic acceptance criterion.
 
+## 2026-09-12 — Animation ownership update
+
+The product owner will supply animations for the characters after Kestrel. Do not focus work on, specify new motion for, or author animations for Boulder, Viper, Trama or subsequent characters unless the product owner explicitly requests it. Preserve their existing work. Kestrel keeps the current animation direction, implementation and review plan, including Special N, charged release and throws.
+
+Continue the other authorized technical, gameplay, character-presentation, camera, stage, HUD and verification work. The later fighter phases cover their other needs; their animation work waits for the owner's material or explicit direction. The older requests below for complete Boulder/Viper move direction are superseded by this update. Receiving material does not itself constitute implementation or visual approval.
+
 ## Current verified starting point
 
 At the initial audit, `main` is `ea645ba1cbd0070aa602daa56352b034eb706299`, version 0.6.0. CI and visual evidence pass with 129 Rust tests. The published status still marks `animation_direction_kestrel` as `specified_not_implemented` and `art_review_kestrel` as `not_verified`.
@@ -18,8 +24,8 @@ The existing Claude task contains partial new directed-animation, parsing, conta
 | --- | --- | --- |
 | 1. Kestrel | Fast-faller: technical, aggressive, precise, sharp and energetic. Each move has its own physical intention, line of action, anticipation when runtime allows, impact, follow-through and recovery. | Review every runtime action/variant individually, with both facings, actual contact geometry, first/late active ticks, hitlag/charge, support feet and representative motion. Strong contact and readable silhouettes are necessary; a generic shared aim pose is insufficient. |
 | 2. Camera | Keep both fighters readable, anticipate separation, ease zoom and recentering, retain useful 3D depth without distortion or nervous motion. | Gameplay captures/video for close combat, separation, vertical play, ledges, recovery, KOs and extreme positions. Compare timing and framing while preserving the fixed diagnostic cameras used for art evidence. |
-| 3. Boulder | Stable heavyweight; large preparation, braced support, mass and deliberate commitment. Bulwark/charging armor must read visually. | Its own complete move direction and actual captures; movement must remain distinguishable from Kestrel in silhouette. |
-| 4. Viper | Light, flexible, evasive and aerial; exploit existing two air jumps and air control. | Its own complete move direction and captures, with distinct vertical and aerial body language. |
+| 3. Boulder | Continue non-animation work for its stable heavyweight identity and Bulwark/armor readability. The owner supplies its animations. | Review the changed systems and actual presentation. Defer animation authorship and new move direction until the owner explicitly requests them. |
+| 4. Viper | Continue non-animation work for its light, evasive, aerial identity and existing two air jumps/air control. The owner supplies its animations. | Review the changed systems and actual presentation. Defer animation authorship and new move direction until the owner explicitly requests them. |
 | 5. Stages | Complete priority dressing, especially The Lattice: original composition, lighting, materials, background and depth. | Actual stage/combat images with readable fighters, clear collision surfaces and restrained background detail. |
 | 6. HUD/identity | Clean competitive hierarchy: damage, stocks, fighter/palette identity, timer, damage/KO feedback and relevant online metrics. | Real menus and HUD at common resolutions, with readable type, spacing and contrast. |
 | 7. Game feel | Review movement, jumps, landing/L-cancel, attacks, grabs/throws, ledge/tech/rolls, shields, hitlag/stun/knockback, DI/SDI and KOs as interactions. | Runtime sequences and actionable observations. Sound, rumble, shake, flashes, trails and particles reinforce the action without obscuring it. |
