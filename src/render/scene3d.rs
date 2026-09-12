@@ -713,6 +713,14 @@ impl Scene3D {
                 continue;
             }
             let r = attacks::PROJECTILE_RADIUS;
+            let owner = gs.fighters.get(pr.owner);
+            let kestrel = owner
+                .map(|f| f.character.id == CharacterId::Kestrel)
+                .unwrap_or(false);
+            if kestrel {
+                self.draw_kestrel_discharge(pr, owner, r);
+                continue;
+            }
             draw_sphere_ex(
                 vec3(pr.pos.x, pr.pos.y, 0.0),
                 r,
@@ -738,6 +746,97 @@ impl Scene3D {
                 Color::from_rgba(255, 240, 180, 150),
                 &self.tex_soft,
             );
+        }
+    }
+
+    /// Kestrel's own discharge: a small **angular** cyan-white pulse with a
+    /// short taper, and a restrained flash at the emission origin on the
+    /// tick the shot leaves. Boulder's and Viper's shots keep the warm orb
+    /// above — this is Kestrel-owned presentation, not a new global
+    /// projectile look.
+    ///
+    /// Entirely cosmetic and entirely derived. The collision radius, speed,
+    /// damage and lifetime are the simulation's and are read, never
+    /// written; the flash is gated on the shot's own remaining life rather
+    /// than on any stored timer, so nothing here adds a field to the game
+    /// state or to the rollback checksum.
+    fn draw_kestrel_discharge(
+        &self,
+        pr: &crate::sim::attacks::Projectile,
+        owner: Option<&Fighter>,
+        r: f32,
+    ) {
+        let head = v3(pr.pos.x, pr.pos.y, 0.0);
+        let dir = v3(pr.vel.x, pr.vel.y, 0.0);
+        let f = if dir.len() > 1e-3 {
+            dir.norm()
+        } else {
+            v3(pr.facing, 0.0, 0.0)
+        };
+        // Four slices, two rings: a faceted shard rather than a ball. How
+        // far each piece reaches is stated at its call site below — the
+        // head sits inside the collision radius, the taper deliberately
+        // does not.
+        let shard = |p: V3, rad: f32, c: Color| {
+            draw_sphere_ex(
+                vec3(p.x, p.y, p.z),
+                rad,
+                None,
+                c,
+                DrawSphereParams {
+                    rings: 2,
+                    slices: 4,
+                    draw_mode: DrawMode::Triangles,
+                },
+            )
+        };
+        // Small: the drawn head is a little over half the collision radius.
+        // The two taper facets behind it do reach past that radius — their
+        // far edges sit at about 1.17 and 1.54 radii back along the flight
+        // line — so this is a short cosmetic tail, not the damaging region
+        // and not a claim about one. The region that hits is the
+        // simulation's circle of `PROJECTILE_RADIUS` centred on the head,
+        // and only the head is drawn inside it. White at the core; the body
+        // of the pulse is cyan.
+        shard(head, r * 0.62, Color::from_rgba(226, 250, 255, 255));
+        // Short taper: two shrinking facets close behind the head, not a
+        // streak. The old warm tail reached 3 units back at 5x the radius.
+        shard(
+            head - f * (r * 0.75),
+            r * 0.42,
+            Color::from_rgba(118, 224, 255, 220),
+        );
+        shard(
+            head - f * (r * 1.30),
+            r * 0.24,
+            Color::from_rgba(74, 186, 234, 140),
+        );
+        self.billboard(
+            head,
+            r * 1.6,
+            Color::from_rgba(150, 236, 255, 95),
+            &self.tex_soft,
+        );
+        // Release flash, on the shot's first drawn tick only, drawn at the
+        // **emission origin** the simulation releases from — `root.x +
+        // facing * PROJECTILE_SPAWN_LOCAL_X`, mid-height — not at the
+        // transformed palm. Those are different points: the hand is drawn
+        // where the pose puts it and this flash is where the shot comes
+        // from, which is the whole reason the two are measured separately.
+        // The visual chain a viewer sees is hand, then this flash, then the
+        // taper, then the head; nothing here moves the hand.
+        if pr.life + 1 >= attacks::PROJECTILE_LIFE {
+            if let Some(of) = owner {
+                let ox =
+                    of.pos.x + of.facing * crate::model::anim_directed::PROJECTILE_SPAWN_LOCAL_X;
+                let oy = of.pos.y + of.character.height * 0.5;
+                self.billboard(
+                    v3(ox, oy, 0.0),
+                    r * 2.0,
+                    Color::from_rgba(205, 246, 255, 110),
+                    &self.tex_soft,
+                );
+            }
         }
     }
 
@@ -1314,11 +1413,41 @@ fn mq(v: V3) -> Vec3 {
 pub(crate) struct FixedCam {
     pub eye: V3,
     pub target: V3,
-    /// Vertical extent of the view in world units.
+    /// Vertical extent of the view in world units — or, when `perspective`
+    /// is set, the vertical field of view in radians.
     pub ortho_height: f32,
+    /// Render through the game's own perspective projection instead of the
+    /// diagnostic orthographic one.
+    ///
+    /// Every declared art camera stays orthographic, which is what makes
+    /// its measurements comparable. This exists so an action can also be
+    /// looked at the way a player actually sees it, through the match
+    /// camera, without pretending that view is a measurement.
+    pub perspective: bool,
 }
 
 impl FixedCam {
+    /// The game's own match camera, exactly as it stands this tick.
+    pub fn from_match(cam: &MatchCamera) -> FixedCam {
+        FixedCam {
+            eye: cam.pos,
+            target: cam.target,
+            ortho_height: cam.fovy,
+            perspective: true,
+        }
+    }
+
+    /// World height the view covers at the target's distance — the same
+    /// number for both projections, so densities stay comparable.
+    fn world_height(&self) -> f32 {
+        if self.perspective {
+            let d = (self.eye - self.target).len().max(1.0);
+            2.0 * d * (self.ortho_height * 0.5).tan()
+        } else {
+            self.ortho_height
+        }
+    }
+
     fn camera(&self, rt: &RenderTarget) -> Camera3D {
         Camera3D {
             position: mq(self.eye),
@@ -1326,7 +1455,11 @@ impl FixedCam {
             up: vec3(0.0, 1.0, 0.0),
             fovy: self.ortho_height,
             aspect: Some(rt.texture.width() / rt.texture.height().max(1.0)),
-            projection: Projection::Orthographics,
+            projection: if self.perspective {
+                Projection::Perspective
+            } else {
+                Projection::Orthographics
+            },
             render_target: Some(rt.clone()),
             ..Default::default()
         }
@@ -1335,7 +1468,7 @@ impl FixedCam {
     /// Outline width for this camera: 1.5 px at 1080p-equivalent density,
     /// clamped to FORMAT.md's 0.08–0.28 world units.
     pub fn outline_width(&self, rt_height: f32) -> f32 {
-        let px = self.ortho_height / rt_height.max(1.0);
+        let px = self.world_height() / rt_height.max(1.0);
         (1.5 * px * (rt_height / 1080.0)).clamp(0.08, 0.28)
     }
 }
@@ -1450,6 +1583,24 @@ impl Scene3D {
         let _ = self.draw_fixed_diag(gs, cam, rt, opts, None);
     }
 
+    /// The 2D hitstop flash that [`Scene::draw`] lays over its 3D pass,
+    /// drawn onto a render target instead of the screen.
+    ///
+    /// Same threshold and the same alpha, because a capture that leaves it
+    /// out is not what the interactive render looks like. The fixed
+    /// orthographic art cameras deliberately do **not** use this: they are
+    /// measurement views and a white wash over them would obscure the
+    /// geometry they exist to show.
+    pub(crate) fn draw_hitstop_flash(&self, gs: &GameState, rt: &RenderTarget) {
+        if gs.hitstop_flash <= 0.02 {
+            return;
+        }
+        let (w, h) = (rt.texture.width(), rt.texture.height());
+        set_camera(&rt_camera_2d(rt));
+        let a = ((gs.hitstop_flash * 40.0) as u8).min(60);
+        draw_rectangle(0.0, 0.0, w, h, Color::from_rgba(255, 255, 255, a));
+    }
+
     /// [`draw_fixed`] plus measured overlays. Returns the contact
     /// measurement taken on the drawn pose when `diag.contact` asks for one.
     pub(crate) fn draw_fixed_diag(
@@ -1464,7 +1615,18 @@ impl Scene3D {
         let (w, h) = (rt.texture.width(), rt.texture.height());
         self.viewport = Some((w, h));
         super::set_painter_dims(Some((w, h)));
-        self.outline_width = Some(cam.outline_width(h));
+        // The fixed art cameras pin the outline to a constant pixel density
+        // so silhouettes are comparable between sheets. A capture through
+        // the *match* camera must not: leaving it `None` falls through to
+        // the same distance-based width `Scene::draw` uses interactively,
+        // which is the whole point of that capture. Overriding it there
+        // produced a frame that was neither the art camera's nor the
+        // game's.
+        self.outline_width = if cam.perspective {
+            None
+        } else {
+            Some(cam.outline_width(h))
+        };
 
         set_camera(&rt_camera_2d(rt));
         clear_background(BLACK);
@@ -1862,6 +2024,7 @@ mod tests {
             triangle_count: 0,
             tip: [0.0, 0.0, 0.0],
             tip_reach_x: 0.0,
+            emission: None,
         }
     }
 

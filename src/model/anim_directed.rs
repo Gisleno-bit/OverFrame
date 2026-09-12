@@ -35,8 +35,9 @@ use super::anim_dir::{Directions, PoseFamily, Resolved};
 use super::characters::CharacterModel;
 use super::math3::{ease, ease_in, ease_out, v3, Xf, M3, V3};
 use super::rig::{Pose, Rig};
-use crate::sim::attacks::{self, MoveData};
+use crate::sim::attacks::{self, MoveData, MoveId};
 use crate::sim::fighter::{Fighter, State};
+use crate::sim::roster::CharacterId;
 
 /// Where the simulation holds a grabbed fighter, relative to the holder's
 /// root and facing (`sim::state::GameState::update_grabs`). Read-only
@@ -46,6 +47,55 @@ pub const HOLD_LOCAL_X: f32 = 16.0;
 /// Where `SpecialN` spawns its projectile relative to the root and facing
 /// (`sim::state::GameState::step`, spawn requests).
 pub const PROJECTILE_SPAWN_LOCAL_X: f32 = 14.0;
+
+/// When the recoil of a release-only action reaches its peak, and when the
+/// body has settled back into guard — both as a fraction of the move's real
+/// total length, so they scale with whatever the move table says.
+///
+/// These two are **authored presentation beats**, not runtime data: nothing
+/// in the simulation changes shape, and the action's lockout is exactly the
+/// move table's. They only decide when the drawn hand stops moving, which
+/// the direction explicitly allows to finish before the lockout does.
+const RECOIL_PEAK: f32 = 0.16;
+const SETTLED_BY: f32 = 0.62;
+
+/// Does this action's whole presentation consist of one release? True when
+/// the simulation spawns a projectile for it **and** the move table gives
+/// it no fighter hitbox on any frame — Kestrel's `special_n` after the
+/// gameplay correction. Boulder's and Viper's keep their real hitbox, so
+/// they keep the ordinary contact/follow-through timeline and labels.
+pub fn is_release_only(ch: CharacterId, id: MoveId) -> bool {
+    crate::export::action_spawns_projectile(id) && attacks::data(ch, id).no_melee
+}
+
+/// Which beat of a release-only action a state frame is in.
+///
+/// These are the *same* numbers the pose is built from, so a caption can
+/// never claim a beat the animation is not in. They are presentation, not
+/// simulation: the action's commitment is the move table's, untouched.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Beat {
+    /// The shot leaves the palm.
+    Emission,
+    /// Palm and elbow withdrawing towards the ribs.
+    Recoil,
+    /// Settling back into guard, and holding it out for the lockout.
+    Recovery,
+}
+
+/// The beat of `state_frame`, given the move it belongs to.
+pub fn release_beat(md: &MoveData, state_frame: u32) -> Beat {
+    let total = md.total().max(1) as f32;
+    let peak = (total * RECOIL_PEAK).max(1.0);
+    let t = state_frame.saturating_sub(1) as f32;
+    if state_frame <= 1 {
+        Beat::Emission
+    } else if t <= peak {
+        Beat::Recoil
+    } else {
+        Beat::Recovery
+    }
+}
 
 // ----------------------------------------------------------------- 2D helpers
 
@@ -240,6 +290,12 @@ enum Stage {
     Ext,
     /// Joint folded first, before the body settles.
     Fold,
+    /// The withdrawal right after a release: palm and elbow pulled back
+    /// towards the ribs, with a small opposing shoulder motion. Only a
+    /// release-only action reaches this stage -- an action with a real
+    /// fighter hitbox still goes Contact -> Ext -> Fold, because its
+    /// follow-through is part of the hit.
+    Recoil,
 }
 
 /// Per-family shape: everything the prose fixes that is not the contact
@@ -290,6 +346,36 @@ struct Shape {
     /// so "intersects" always means the true hit region, never the decoy
     /// point actually solved for.
     contact_offset: [f32; 2],
+    /// Treat this family's lean values as the **final** chest line rather
+    /// than an assist added on top of whatever the base pose already has.
+    ///
+    /// `anim::lean` adds to `spine` and `chest`, and the bases do not
+    /// agree: the standing stance breathes around +7 degrees, the rising
+    /// air pose sits at -6, an ordinary fall at -4 and a fastfall at +10.
+    /// Adding the same number to all of them gives four different torsos
+    /// for one action, which is the opposite of "ground and air share the
+    /// upper-body identity". Reading back what the base already put in and
+    /// subtracting it fixes that inside this pose only -- `anim::air`, the
+    /// root, the bones, the legs and every other action are untouched.
+    lean_absolute: bool,
+    /// Solve the contact at a **fixed distance** along the shoulder -> aim
+    /// line instead of at the aim itself (`Stage::Contact`/`Ext`).
+    ///
+    /// `aim_pull` takes a fraction of that line, so the same fraction
+    /// leaves a different elbow bend wherever the base pose puts the
+    /// shoulder -- Kestrel's airborne base sits further back than its
+    /// stance, which straightened the arm again in the air. A fixed
+    /// distance keeps the bend identical on the ground and in the air,
+    /// which is what "ground and air share the upper-body identity" means
+    /// for an arm whose target it cannot reach either way. `achieved` is
+    /// still re-measured against the true aim, exactly as with `aim_pull`.
+    aim_reach: Option<f32>,
+    /// Where the piece withdraws to after a release, relative to the limb's
+    /// root joint (`Stage::Recoil`). `None` reuses the anticipation coil —
+    /// which points *behind* the shoulder, the right place to wind up from
+    /// and the wrong place to recoil to. Only a release-only action ever
+    /// reaches that stage.
+    recoil: Option<[f32; 2]>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -317,6 +403,9 @@ const fn sh(
         aim_pull: 0.0,
         crouch_active: None,
         contact_offset: [0.0, 0.0],
+        lean_absolute: false,
+        aim_reach: None,
+        recoil: None,
     }
 }
 
@@ -403,9 +492,57 @@ fn shape(f: PoseFamily) -> Shape {
         OverheadKick => sh(-18.0, 4.0, 6.0, 0.0, Some(60.0), 0.0, [2.0, -5.0], 0.0),
         // "Tuck the right heel beneath the hips, then drive it down."
         HeelDrop => sh(8.0, -6.0, 8.0, 0.0, Some(-35.0), 0.0, [1.5, -5.0], 0.0),
-        // "Gather the right palm to the sternum, then extend it toward the
-        // runtime projectile emission line."
-        ProjectileRelease => sh(10.0, -6.0, 34.0, 0.0, None, -5.0, [-1.5, -4.0], 0.0),
+        // "Snap from the existing guard to a bent-elbow palm release at the
+        // actual origin", compact torso, small recoil.
+        //
+        // MEASURED, not assumed. Kestrel's arm chain, read off the shipped
+        // skeleton in its rest pose, is upper_arm 5.0 + forearm 4.5 = 9.5,
+        // and the designated contact point on `k_hand_r` reaches 10.17u
+        // from the shoulder with the elbow straight. The emission origin
+        // (14, 15) is 14.29u from the shoulder here, so the piece's
+        // *centroid* cannot sit on that point and does not pretend to:
+        // it ends 4.89u away.
+        //
+        // That is not the contact test, though. The contract measures the
+        // piece's projected triangles against the region, and the region
+        // has the projectile's own radius of 4. Measured that way the real
+        // surface of the hand **does** reach into it: signed_separation
+        // -0.1355 on the ground, -0.1406 out of shield and -0.1152 in the
+        // air, both facings (`tests/special_n_presentation.rs`).
+        //
+        // Two things make that true without touching bones, scale, the
+        // emission point or any table. The palm is solved at a fixed
+        // distance along the shoulder -> origin line (`aim_reach`) rather
+        // than at a fraction of it, so the elbow keeps one bend wherever
+        // the base pose puts the shoulder; and the chest line is stated
+        // absolutely (`lean_absolute`) rather than added on top of four
+        // base poses that disagree by up to 16 degrees. Before that, the
+        // same authored assist produced 21 degrees of chest on the ground
+        // and 10 in the air, and the aerial release fell 1.33u short of the
+        // region no matter how straight the arm was.
+        //
+        // Chest 26 and elbow 45 is the corner of the reviewed range that
+        // keeps the most elbow bend while the surface still reaches, in
+        // every condition. Measured alternatives, all conditions identical:
+        //
+        //   chest    elbow 45.0   elbow 35.1   elbow 21.2
+        //    21        +0.2949      +0.0782      -0.1518
+        //    23        +0.1315      -0.0851      -0.3174
+        //    25        -0.0328      -0.2494      -0.4841
+        //    26        -0.1152      -0.3319      -0.5677
+        //
+        ProjectileRelease => Shape {
+            // "Withdraw the palm and elbow briefly toward the ribs": in
+            // front of the chest, not behind the shoulder.
+            recoil: Some([2.0, -5.5]),
+            // The chest line is stated outright, not added to whatever the
+            // stance or the air pose happens to carry.
+            lean_absolute: true,
+            // 9.4 of the 10.17u the palm can reach: a real elbow bend,
+            // identical on the ground and in the air.
+            aim_reach: Some(9.4),
+            ..sh(26.0, -6.0, 0.0, 0.0, None, -5.0, [-1.5, -4.0], 0.0)
+        },
         // "Gather the right arm at the chest and lead the ascent."
         RisingDrive => sh(-14.0, 8.0, 8.0, 0.0, None, -20.0, [0.5, -4.0], 0.0),
         // "Coil the right elbow back then extend the palm."
@@ -844,6 +981,16 @@ fn base_pose(model: &CharacterModel, f: &Fighter, md: &MoveData, frame: u64) -> 
     }
 }
 
+/// How much lean a base pose already carries, read back from the two bones
+/// `anim::lean` writes into (`spine` at -0.55 deg per degree, `chest` at
+/// -0.45). Averaged, so either bone alone cannot skew it.
+fn base_lean_deg(p: &Pose, rig: &Rig) -> f32 {
+    match (rig.bone("spine"), rig.bone("chest")) {
+        (Some(si), Some(ci)) => (-p.rot[si].z / 0.55 + -p.rot[ci].z / 0.45) * 0.5,
+        _ => 0.0,
+    }
+}
+
 /// Build one key pose of a directed action.
 #[allow(clippy::too_many_arguments)]
 fn staged(
@@ -868,11 +1015,22 @@ fn staged(
         Stage::Contact => s.lean + lean_extra,
         Stage::Ext => s.lean + lean_extra + s.follow_lean,
         Stage::Fold => (s.lean + lean_extra) * 0.4,
+        // The opposing shoulder motion of a recoil: the chest gives back
+        // the forward line it just spent, without becoming an anticipation.
+        Stage::Recoil => s.lean_wind,
     };
-    anim::lean(&mut p, rig, lean);
+    // `lean` is an assist on top of the base pose unless the family asks
+    // for an absolute chest line (see `lean_absolute`).
+    let applied = if s.lean_absolute {
+        lean - base_lean_deg(&p, rig)
+    } else {
+        lean
+    };
+    anim::lean(&mut p, rig, applied);
     let crouch = match stage {
         Stage::Wind => s.crouch * 0.5,
         Stage::Fold => s.crouch * 0.4,
+        Stage::Recoil => s.crouch * 0.4,
         _ => s.crouch_active.unwrap_or(s.crouch),
     };
     if crouch != 0.0 {
@@ -883,6 +1041,8 @@ fn staged(
     let yaw = match stage {
         Stage::Wind => s.head_yaw * 0.6,
         Stage::Fold => s.head_yaw * 0.3,
+        // The head keeps looking along the discharge through the recoil.
+        Stage::Recoil => s.head_yaw,
         _ => s.head_yaw,
     };
     p.rot(rig, "head", 0.0, yaw, -lean * 0.25);
@@ -927,6 +1087,13 @@ fn staged(
         Stage::Wind => aim
             .coil_abs
             .unwrap_or([root.x + s.coil[0], root.y + s.coil[1]]),
+        // Palm and elbow withdrawn to the ribs: the limb's own coil point,
+        // measured from the shoulder, so the forearm folds instead of
+        // sweeping through a second line.
+        Stage::Recoil => {
+            let c = s.recoil.unwrap_or(s.coil);
+            [root.x + c[0], root.y + c[1]]
+        }
         Stage::Fold => {
             // Fold the joint first: pull the piece halfway home along the
             // limb, which bends knee/elbow instead of sweeping again.
@@ -937,7 +1104,12 @@ fn staged(
             ]
         }
         _ => {
-            let base = if s.aim_pull > 0.0 {
+            let base = if let Some(reach) = s.aim_reach {
+                let (dx, dy) = (aim.contact[0] - root.x, aim.contact[1] - root.y);
+                let d = (dx * dx + dy * dy).sqrt().max(1e-3);
+                let k = (reach / d).min(1.0);
+                [root.x + dx * k, root.y + dy * k]
+            } else if s.aim_pull > 0.0 {
                 [
                     root.x + (aim.contact[0] - root.x) * (1.0 - s.aim_pull),
                     root.y + (aim.contact[1] - root.y) * (1.0 - s.aim_pull),
@@ -955,6 +1127,7 @@ fn staged(
     let tip_local = match stage {
         Stage::Ext => s.tip_local + s.follow_tip,
         Stage::Wind => s.tip_local * 0.5,
+        Stage::Recoil => s.tip_local * 0.5,
         _ => s.tip_local,
     };
     let mut reach = solve(
@@ -966,7 +1139,7 @@ fn staged(
     // the lean_assist search's "good enough" check) judges intersection
     // against the true hit region, never the decoy point actually fed to
     // the solver.
-    if (s.aim_pull > 0.0 || s.contact_offset != [0.0, 0.0])
+    if (s.aim_pull > 0.0 || s.aim_reach.is_some() || s.contact_offset != [0.0, 0.0])
         && matches!(stage, Stage::Contact | Stage::Ext)
     {
         let world = rig.world(&p, &Xf::IDENTITY);
@@ -1026,6 +1199,43 @@ fn directed(model: &CharacterModel, d: &Resolved, f: &Fighter, frame: u64) -> Po
     // `state_frame` there, so nothing else in the timeline moves either).
     if charging {
         return wind;
+    }
+    // A release-only action -- the shot leaves on frame 0 and the move
+    // carries no fighter hitbox on any frame -- has one beat, not a strike
+    // arc: emit, withdraw, settle once. It never reaches `Stage::Ext`, so
+    // there is no second pose peak at the old state-frame-9 marker and no
+    // long forward hold. An action that still has a real fighter hitbox
+    // (Boulder's and Viper's special_n) keeps the contact -> follow-through
+    // -> fold timeline below, because its follow-through is part of the hit.
+    if crate::export::action_spawns_projectile(d.id) && md.no_melee {
+        let (release, _, rel_extra) =
+            contact_pose(model, d, f, &md, frame, Stage::Contact, Event::Release);
+        let (recoil, _) = staged(
+            model,
+            d,
+            f,
+            &md,
+            frame,
+            Stage::Recoil,
+            rel_extra,
+            Event::Release,
+        );
+        let total = md.total().max(1) as f32;
+        let peak = (total * RECOIL_PEAK).max(1.0);
+        let settled = (total * SETTLED_BY).max(peak + 1.0);
+        // The shot is requested on the tick the move starts, and the
+        // fighter's own tick has already advanced `state_frame` to 1 by the
+        // time anything is drawn. So state_frame 1 *is* the release frame,
+        // and the withdrawal starts after it -- not one tick early, which
+        // would draw the recoil on the very frame the shot leaves.
+        let t = sf.saturating_sub(1) as f32;
+        if t <= peak {
+            return release.blend(&recoil, ease(t / peak));
+        }
+        if t <= settled {
+            return recoil.blend(&base, ease((t - peak) / (settled - peak)));
+        }
+        return base;
     }
     let last_active = md.startup + md.active + md.late_active;
     if sf < md.startup {
@@ -1341,6 +1551,54 @@ mod tests {
         }
         f.state_frame = sf;
         f
+    }
+
+    /// The release geometry of an arm action, measured on a built pose:
+    /// where the shoulder is, how far the palm can actually get from it,
+    /// how bent the elbow is, how far the chest leans, and how far the palm
+    /// sits off the shoulder->origin line.
+    struct Geom {
+        shoulder: [f32; 2],
+        shoulder_to_origin: f32,
+        palm_reach: f32,
+        elbow: f32,
+        lean: f32,
+        off_line: f32,
+    }
+
+    fn geom(model: &CharacterModel, d: &Resolved, pose: &Pose) -> Geom {
+        let rig = &model.rig;
+        let w = rig.world(pose, &Xf::IDENTITY);
+        let ch = chain(rig, d.bone).expect("the arm is a two-link chain");
+        let sh = w[ch.upper].t;
+        let el = w[ch.fore].t;
+        let palm = w[ch.tip].point(d.effector);
+        let origin = [PROJECTILE_SPAWN_LOCAL_X, 15.0];
+        let v1 = [el.x - sh.x, el.y - sh.y];
+        let v2 = [palm.x - el.x, palm.y - el.y];
+        let n1 = (v1[0] * v1[0] + v1[1] * v1[1]).sqrt().max(1e-6);
+        let n2 = (v2[0] * v2[0] + v2[1] * v2[1]).sqrt().max(1e-6);
+        let elbow = ((v1[0] * v2[0] + v1[1] * v2[1]) / (n1 * n2))
+            .clamp(-1.0, 1.0)
+            .acos()
+            .to_degrees();
+        let chest = w[rig.bone("chest").expect("chest")].t;
+        let head = w[rig.bone("head").expect("head")].t;
+        let lean = (head.x - chest.x)
+            .atan2((head.y - chest.y).max(1e-6))
+            .to_degrees();
+        let dx = [origin[0] - sh.x, origin[1] - sh.y];
+        let dlen = (dx[0] * dx[0] + dx[1] * dx[1]).sqrt().max(1e-6);
+        let pv = [palm.x - sh.x, palm.y - sh.y];
+        let off_line = (pv[0] * dx[1] - pv[1] * dx[0]).abs() / dlen;
+        Geom {
+            shoulder: [sh.x, sh.y],
+            shoulder_to_origin: dlen,
+            palm_reach: (pv[0] * pv[0] + pv[1] * pv[1]).sqrt(),
+            elbow,
+            lean,
+            off_line,
+        }
     }
 
     /// World position of the contact piece's centroid for a fighter.
@@ -1879,17 +2137,58 @@ mod tests {
         assert_eq!(evs, vec![(Event::Release, 0)]);
         assert_eq!(contact_frame(d, &md), 0);
 
-        // The palm leads the emission line on frame 0 -- the real spawn
-        // origin, not the projectile's later flight.
-        let f0 = fighter(MoveId::SpecialN, &md, 0);
+        // The palm leads the emission line on the release frame -- the
+        // real spawn origin, not the projectile's later flight.
+        //
+        // The piece's *centroid* does not sit on that origin and cannot:
+        // the arm chain (upper_arm 5.0 + forearm 4.5, palm point 10.17u
+        // from the shoulder at full extension) is shorter than the 14.29u
+        // to the origin. That is a fact about the centroid, not a contact
+        // test. Whether the piece's real projected surface reaches the
+        // emission *region* is measured with the contract's own triangle
+        // method in `tests/special_n_presentation.rs`, where it does.
+        //
+        // What is asserted here is the pose: the palm sits on the line from
+        // the shoulder to the origin, with a real elbow bend and a compact
+        // chest, and it extends as far as the chain allows rather than
+        // giving up early.
+        let f0 = fighter(MoveId::SpecialN, &md, 1);
         let rel = aim_for_event(&f0, d, &md, Event::Release).unwrap();
         assert_eq!(rel.kind, "projectile_spawn");
         assert_eq!(rel.contact[0], PROJECTILE_SPAWN_LOCAL_X);
-        let c0 = centroid(&m, d, &fighter_pose(&m, &f0, 0));
+        let p0 = fighter_pose(&m, &f0, 0);
+        let c0 = centroid(&m, d, &p0);
         let gap0 = ((c0[0] - rel.contact[0]).powi(2) + (c0[1] - rel.contact[1]).powi(2)).sqrt();
+        let g = geom(&m, d, &p0);
+        println!(
+            "[SPECIAL_N] release: palm=({:+.3},{:+.3}) gap_to_origin={gap0:.3} shoulder=({:+.3},{:+.3}) shoulder_to_origin={:.3} palm_reach={:.3} elbow={:.1}deg lean={:.1}deg",
+            c0[0], c0[1], g.shoulder[0], g.shoulder[1], g.shoulder_to_origin, g.palm_reach, g.elbow, g.lean
+        );
+        // On the line, not merely near the origin: the perpendicular
+        // distance from the palm to the shoulder->origin segment.
         assert!(
-            gap0 < attacks::PROJECTILE_RADIUS,
-            "palm on the emission point at the spawn: {gap0}"
+            g.off_line < 0.5,
+            "the release points at the origin: {:.4}u off the shoulder->origin line",
+            g.off_line
+        );
+        // A real bend, not the straight-arm thrust the old assist forced.
+        assert!(
+            (30.0..=70.0).contains(&g.elbow),
+            "a bent-elbow palm release, not a straight arm: elbow {:.1} deg",
+            g.elbow
+        );
+        // A compact chest. The pose this replaces measured 38.2 degrees.
+        assert!(
+            g.lean <= 26.0 + 1e-3,
+            "a compact torso, not the old forward lunge: chest {:.1} deg",
+            g.lean
+        );
+        // And the residual gap is bounded, so it can never quietly grow:
+        // this is a reported limitation, not a free tolerance.
+        assert!(
+            (gap0 - (g.shoulder_to_origin - g.palm_reach)).abs() < 0.25,
+            "the centroid sits at the arm's own reach limit, not short of it: {gap0:.3}u vs {:.3}u",
+            g.shoulder_to_origin - g.palm_reach
         );
 
         // There is no fighter-hitbox aim left to serve, on any frame: the

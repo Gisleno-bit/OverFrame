@@ -371,7 +371,14 @@ fn aerial(x: f32, y: f32) -> fn(u32) -> PlayerInput {
     }
 }
 
-fn recipes(id: MoveId) -> Vec<Recipe> {
+/// The cases the exporter runs for one character's action.
+///
+/// Character-aware because coverage is per fighter: the compact-discharge
+/// direction asks for Kestrel's aerial and out-of-shield releases as well as
+/// its neutral one, and adding those to every character would silently widen
+/// Boulder's and Viper's evidence set in a batch that is not about them.
+/// Their own variants arrive with their own move review.
+fn recipes(ch: CharacterId, id: MoveId) -> Vec<Recipe> {
     let ground = |variant, script, description| Recipe {
         variant,
         target: None,
@@ -520,17 +527,96 @@ fn recipes(id: MoveId) -> Vec<Recipe> {
             aerial(0.0, -1.0),
             "t0..6: jump held; t8, t10: stick (0,-1) + attack",
         )],
-        MoveId::SpecialN => vec![ground(
-            "ground",
-            |t| {
-                if t == 0 {
-                    press(buttons::SPECIAL)
-                } else {
-                    PlayerInput::default()
-                }
-            },
-            "t0: special",
-        )],
+        MoveId::SpecialN => {
+            let mut v = vec![ground(
+                "ground",
+                |t| {
+                    if t == 0 {
+                        press(buttons::SPECIAL)
+                    } else {
+                        PlayerInput::default()
+                    }
+                },
+                "t0: special",
+            )];
+            if ch == CharacterId::Kestrel {
+                // The aerial release: jump, leave the ground, then fire.
+                // The legs follow the real airborne state; the upper body
+                // is the same discharge.
+                v.push(ground(
+                    "air",
+                    |t| {
+                        if t == 0 {
+                            press(buttons::JUMP)
+                        } else if t == 8 {
+                            press(buttons::SPECIAL)
+                        } else {
+                            PlayerInput::default()
+                        }
+                    },
+                    "t0: jump, t8: special (airborne)",
+                ));
+                // The out-of-shield release the gameplay correction
+                // repaired: a settled shield, then one fresh SPECIAL edge.
+                // There is no aerial shield, so there is no aerial
+                // counterpart to this case and none is invented.
+                // The whole aerial action, start to finish. The case above
+                // is a real and useful one -- a short hop is interrupted by
+                // the ground, which is what actually happens at low
+                // altitude -- but it lands on state frame 12 of 32 and so
+                // never shows the recoil settling or the return to an
+                // actionable aerial state.
+                //
+                // Kestrel has one air jump, and from flat ground the most
+                // air time any legal input buys is 29 of the 32 frames
+                // (measured by sweeping hold/air-jump/press timings). So
+                // this script uses the stage: a full hop from the spawn,
+                // which sits under the left soft platform, lands on it;
+                // then a full hop and an air jump off that platform, and
+                // the shot, with the whole fall to the main floor
+                // underneath. Every input is one a player can press, the
+                // root is never lifted or frozen, and there is no invented
+                // aerial guard.
+                v.push(ground(
+                    "air_full",
+                    |t| {
+                        if t < 10 {
+                            stick(1.0, 0.0, 0)
+                        } else if t < 16 {
+                            stick(1.0, 0.0, buttons::JUMP)
+                        } else if t == 20 {
+                            press(buttons::JUMP)
+                        } else if t < 52 {
+                            stick(0.4, 0.0, 0)
+                        } else if t <= 55 || t == 62 {
+                            // t52-55: the full hop off the platform.
+                            // t62: the air jump, for the height the whole
+                            // action needs before the floor arrives.
+                            press(buttons::JUMP)
+                        } else if t == 65 {
+                            press(buttons::SPECIAL)
+                        } else {
+                            PlayerInput::default()
+                        }
+                    },
+                    "run to the side platform, full hop + air jump onto it (t0-20), full hop off it (t52-55), air jump (t62), special (t65)",
+                ));
+                v.push(ground(
+                    "from_shield",
+                    |t| {
+                        if t < 6 {
+                            press(buttons::SHIELD)
+                        } else if t == 6 {
+                            press(buttons::SHIELD | buttons::SPECIAL)
+                        } else {
+                            PlayerInput::default()
+                        }
+                    },
+                    "t0-5: hold shield, t6: special out of shield",
+                ));
+            }
+            v
+        }
         MoveId::SpecialUp => vec![ground(
             "ground",
             |t| {
@@ -660,7 +746,7 @@ pub fn run_case_facing(
     facing: f32,
 ) -> Result<Vec<CaseTick>, String> {
     let facing = if facing < 0.0 { -1.0 } else { 1.0 };
-    let recipe = recipes(id)
+    let recipe = recipes(ch, id)
         .into_iter()
         .find(|r| r.variant == variant)
         .ok_or_else(|| format!("no recipe `{variant}` for {}", action_id(id)))?;
@@ -723,7 +809,16 @@ pub fn run_case_facing(
                         "after_step",
                         t as i64 - 1,
                         0,
-                        "windup",
+                        // The context row is the tick before the action.
+                        // For an action that has a windup that is what it
+                        // is; for one whose shot leaves on its first tick
+                        // there is no windup to name, so it says what it
+                        // really is instead.
+                        if crate::model::anim_directed::is_release_only(ch, id) {
+                            "before_release"
+                        } else {
+                            "windup"
+                        },
                     )),
                     None => out.push(snapshot(
                         &before,
@@ -764,14 +859,40 @@ pub fn run_case_facing(
         let grabbed = matches!(victim.state, State::Grabbed);
         let released = prev_target_grabbed && !grabbed;
         let contact = (victim_hitlag > 0 && prev_target_hitlag == 0) || released;
+        // Honest presentation labels, from the events that really happen.
+        //
+        // `spawned` is measured on this very tick -- the projectile list
+        // actually grew -- not inferred from a frame number. It used to be
+        // labelled `windup`, which claimed the action was still preparing
+        // an event that had already happened.
+        //
+        // `active` now means a real fighter hitbox on this tick rather than
+        // merely the move table's active window. `hitbox_at` only returns
+        // `None` inside that window for a `no_melee` action, so the only
+        // label this moves is Kestrel's old state-frame-9 marker, which
+        // pointed at a hitbox the simulation no longer makes. Every other
+        // action's `active` ticks, and every state frame everywhere, are
+        // exactly as before.
+        let spawned = gs.projectiles.len() > before.projectiles.len();
         let label = if released {
             "release"
         } else if matches!(f.state, State::Throw { .. }) {
             "throw"
+        } else if spawned {
+            "emission"
         } else {
             let md = attacks::data(ch, id);
-            if md.is_active(f.state_frame) {
+            if md.hitbox_at(f.state_frame).is_some() {
                 "active"
+            } else if crate::model::anim_directed::is_release_only(ch, id) {
+                // The beats come from the same constants the pose is built
+                // from, so a caption cannot claim a beat the animation is
+                // not in.
+                match crate::model::anim_directed::release_beat(&md, f.state_frame) {
+                    crate::model::anim_directed::Beat::Recoil => "recoil",
+                    crate::model::anim_directed::Beat::Emission => "emission",
+                    crate::model::anim_directed::Beat::Recovery => "recovery",
+                }
             } else if f.state_frame < md.startup {
                 "windup"
             } else {
@@ -895,7 +1016,7 @@ pub fn all_cases() -> Vec<(CharacterId, MoveId, &'static str)> {
 pub fn cases_for(ch: CharacterId) -> Vec<(CharacterId, MoveId, &'static str)> {
     let mut v = Vec::new();
     for id in attacks::ALL_MOVES {
-        for r in recipes(id) {
+        for r in recipes(ch, id) {
             v.push((ch, id, r.variant));
         }
     }
@@ -922,7 +1043,7 @@ pub fn frame_data_csv(source_sha: &str) -> (String, Vec<CaseReport>) {
     csv.push('\n');
     let mut reports = Vec::new();
     for (ch, id, variant) in all_cases() {
-        let recipe = recipes(id)
+        let recipe = recipes(ch, id)
             .into_iter()
             .find(|r| r.variant == variant)
             .unwrap();
@@ -1132,7 +1253,40 @@ pub fn contact_json(
             } else {
                 "root_relative_airborne_no_floor"
             };
+            // The origin the simulation actually releases from, in the same
+            // world frame as `projectile` -- which is already one
+            // integration step downrange. Reported on every tick of a
+            // projectile action so the evidence can show the two apart
+            // instead of conflating the emission with the first integrated
+            // position, and so the palm's real distance to the *emission*
+            // is readable without re-deriving it.
+            let emission = if action_spawns_projectile(id) {
+                let ex = f.pos.x + f.facing * crate::model::anim_directed::PROJECTILE_SPAWN_LOCAL_X;
+                let ey = f.pos.y + f.character.height * 0.5;
+                // The real measurement is the contract's projected-triangle
+                // one, carried on the contact measure itself; the centroid
+                // distance is reported beside it only so the two can never
+                // be mistaken for each other again. A centroid inside a
+                // mesh is not a contact, and `gap < radius` on a centroid
+                // proves nothing about the surface.
+                let em = m.as_ref().and_then(|mm| mm.emission.as_ref());
+                Some(serde_json::json!({
+                    "center": [ex, ey],
+                    "local": [crate::model::anim_directed::PROJECTILE_SPAWN_LOCAL_X,
+                              f.character.height * 0.5],
+                    "radius": attacks::PROJECTILE_RADIUS,
+                    "method": "projected triangles of the contact piece against the emission circle, the same method `contact_piece.mesh_distance` uses against a fighter hitbox",
+                    "mesh_distance": em.map(|e| e.mesh_distance),
+                    "signed_separation": em.map(|e| e.signed_separation),
+                    "nearest_point": em.map(|e| e.nearest_point),
+                    "vertex_distance": em.map(|e| e.vertex_distance),
+                    "contact_piece_centroid_gap": em.map(|e| e.centroid_distance),
+                }))
+            } else {
+                None
+            };
             samples.push(serde_json::json!({
+                "emission_origin": emission,
                 "eased_facing": ev.eased_facing,
                 "render_history": if ev.fresh { "fresh" } else { "continued" },
                 "sample_phase": t.row.sample_phase,
@@ -1533,9 +1687,19 @@ mod tests {
     }
 
     #[test]
-    fn kestrel_has_twenty_three_cases_covering_all_twenty_two_actions() {
+    fn kestrel_covers_all_twenty_two_actions_plus_the_discharge_variants() {
+        // The Alpha baseline is 22 actions in 23 runtime variants. The
+        // compact-discharge direction requires Kestrel's **aerial** and
+        // **out-of-shield** releases as well as its neutral one, plus a
+        // second aerial case long enough to run the action to its end, so
+        // this character now runs 26. That is a coverage increase declared here,
+        // not an accident: the two extra cases are named, and the other
+        // two characters are still at exactly the baseline 23, so nothing
+        // widened their evidence set in a batch that is not about them.
+        // (There is deliberately no aerial shield case: no such entry
+        // exists in the simulation, and inventing one would be a fiction.)
         let cases = cases_for(CharacterId::Kestrel);
-        assert_eq!(cases.len(), 23);
+        assert_eq!(cases.len(), 26, "{cases:?}");
         for id in attacks::ALL_MOVES {
             assert!(cases.iter().any(|c| c.1 == id), "{:?} has no recipe", id);
         }
@@ -1545,6 +1709,25 @@ mod tests {
         assert!(cases
             .iter()
             .any(|c| c.1 == MoveId::Jab2 && c.2 == "after_jab1_hit"));
+        for v in ["ground", "air", "air_full", "from_shield"] {
+            assert!(
+                cases.iter().any(|c| c.1 == MoveId::SpecialN && c.2 == v),
+                "kestrel's discharge is captured {v}"
+            );
+        }
+        for ch in [CharacterId::Boulder, CharacterId::Viper] {
+            let other = cases_for(ch);
+            assert_eq!(other.len(), 23, "{ch:?} stays at the baseline: {other:?}");
+            assert_eq!(
+                other
+                    .iter()
+                    .filter(|c| c.1 == MoveId::SpecialN)
+                    .map(|c| c.2)
+                    .collect::<Vec<_>>(),
+                vec!["ground"],
+                "{ch:?} keeps only its own neutral special case"
+            );
+        }
     }
 
     #[test]
@@ -1774,40 +1957,59 @@ mod tests {
         let s = &j["facings"][0]["samples"][0];
         assert!(s["foot_support"].as_array().unwrap().len() == 2);
         assert!(s["foot_support"][0]["support_distance"].is_number());
-        // The projectile action leads the *emission line* — the palm is on
-        // the runtime spawn point when the shot appears — and then stays
-        // there while the projectile travels (it is never chased). The
-        // exported projectile row is already one integration step
-        // downrange, which is exactly why the pose is judged against the
-        // spawn event and not against that row.
+        // The projectile action is judged against the **emission origin**,
+        // which the export now reports on its own next to the projectile
+        // row: the row is already one integration step downrange (local x
+        // 21 against the origin's 14), so conflating the two would ask the
+        // palm to chase a shot that has already left.
         let j = contact_json(CharacterId::Kestrel, MoveId::SpecialN, "ground").unwrap();
-        let samples = j["facings"][0]["samples"].as_array().unwrap();
-        let spawn = samples
-            .iter()
-            .position(|s| !s["projectile"].is_null())
-            .expect("the case shows its projectile");
-        let emission = |s: &serde_json::Value| {
-            let c = s["contact_piece"]["centroid"].as_array().unwrap();
-            let root = s["root"].as_array().unwrap();
-            let f = s["facing"].as_f64().unwrap();
-            let ex = root[0].as_f64().unwrap()
-                + f * crate::model::anim_directed::PROJECTILE_SPAWN_LOCAL_X as f64;
-            let ey = root[1].as_f64().unwrap() + 15.0;
-            ((c[0].as_f64().unwrap() - ex).powi(2) + (c[1].as_f64().unwrap() - ey).powi(2)).sqrt()
-        };
-        let at_spawn = emission(&samples[spawn]);
-        assert!(
-            at_spawn < attacks::PROJECTILE_RADIUS as f64,
-            "the palm leads the emission point: {at_spawn}u"
-        );
-        assert!(samples[spawn]["projectile_separation"].is_number());
-        // Two ticks later the projectile is 14 units further on and the
-        // hand has not followed it.
-        if let Some(later) = samples.get(spawn + 2) {
+        for fc in j["facings"].as_array().unwrap() {
+            let facing = fc["facing"].as_f64().unwrap();
+            let samples = fc["samples"].as_array().unwrap();
+            let spawn = samples
+                .iter()
+                .position(|s| !s["projectile"].is_null())
+                .expect("the case shows its projectile");
+            // Origin and first integrated position are apart, and by the
+            // one integration step the simulation really takes.
+            let eo = samples[spawn]["emission_origin"]["center"][0]
+                .as_f64()
+                .expect("the emission origin is reported");
+            let pr = samples[spawn]["projectile"]["center"][0].as_f64().unwrap();
             assert!(
-                (emission(later) - at_spawn).abs() < 3.0,
-                "the palm stays on the emission line: {} vs {at_spawn}",
-                emission(later)
+                ((pr - eo).abs() - attacks::PROJECTILE_SPEED as f64).abs() < 1e-3,
+                "facing {facing}: the first integrated projectile position is one step past the origin: origin {eo}, projectile {pr}"
+            );
+            assert!(samples[spawn]["projectile_separation"].is_number());
+
+            // The contract's own measurement of the piece's projected
+            // surface against the emission region -- never the centroid.
+            let gap =
+                |s: &serde_json::Value| s["emission_origin"]["mesh_distance"].as_f64().unwrap();
+            // The release is the closest the palm ever gets to the origin,
+            // on every tick of the whole cycle. That is what "one release"
+            // means geometrically: nothing later reaches further forward,
+            // so there is no second extension anywhere in the action.
+            let at_spawn = gap(&samples[spawn]);
+            for (i, s) in samples.iter().enumerate() {
+                if i <= spawn {
+                    continue;
+                }
+                assert!(
+                    gap(s) >= at_spawn - 1e-3,
+                    "facing {facing}: tick {i} brings the palm back towards the emission ({} vs {at_spawn} at the release) -- a second extension",
+                    gap(s)
+                );
+            }
+            // And it recoils: shortly after the release the palm is
+            // measurably further from the origin than it was at it.
+            let recoiled = samples
+                .get(spawn + 3)
+                .map(|s| gap(s) > at_spawn + 1.0)
+                .unwrap_or(false);
+            assert!(
+                recoiled,
+                "facing {facing}: the palm withdraws after the release instead of holding the reach"
             );
         }
     }
