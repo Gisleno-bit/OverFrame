@@ -1,0 +1,184 @@
+[
+  {
+    "action_id": "jab",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/jab-ground.json",
+    "status": "written",
+    "variant_id": "ground"
+  },
+  {
+    "action_id": "jab2",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/jab2-after_jab1_hit.json",
+    "status": "written",
+    "variant_id": "after_jab1_hit"
+  },
+  {
+    "action_id": "ftilt",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/ftilt-ground.json",
+    "status": "written",
+    "variant_id": "ground"
+  },
+  {
+    "action_id": "utilt",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/utilt-ground.json",
+    "status": "written",
+    "variant_id": "ground"
+  },
+  {
+    "action_id": "dtilt",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/dtilt-ground.json",
+    "status": "written",
+    "variant_id": "ground"
+  },
+  {
+    "action_id": "fsmash",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/fsmash-cstick.json",
+    "status": "written",
+    "variant_id": "cstick"
+  },
+  {
+    "action_id": "fsmash",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/fsmash-charged_max.json",
+    "status": "written",
+    "variant_id": "charged_max"
+  },
+  {
+    "action_id": "usmash",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/usmash-cstick.json",
+    "status": "written",
+    "variant_id": "cstick"
+  },
+  {
+    "action_id": "dsmash",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/dsmash-cstick.json",
+    "status": "written",
+    "variant_id": "cstick"
+  },
+  {
+    "action_id": "dash_attack",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/dash_attack-from_dash.json",
+    "status": "written",
+    "variant_id": "from_dash"
+  },
+  {
+    "action_id": "nair",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/nair-fullhop.json",
+    "status": "written",
+    "variant_id": "fullhop"
+  },
+  {
+    "action_id": "fair",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/fair-fullhop.json",
+    "status": "written",
+    "variant_id": "fullhop"
+  },
+  {
+    "action_id": "bair",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/bair-fullhop.json",
+    "status": "written",
+    "variant_id": "fullhop"
+  },
+  {
+    "action_id": "uair",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/uair-fullhop.json",
+    "status": "written",
+    "variant_id": "fullhop"
+  },
+  {
+    "action_id": "dair",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/dair-fullhop.json",
+    "status": "written",
+    "variant_id": "fullhop"
+  },
+  {
+    "action_id": "special_n",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/special_n-ground.json",
+    "status": "written",
+    "variant_id": "ground"
+  },
+  {
+    "action_id": "special_n",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/special_n-air.json",
+    "status": "written",
+    "variant_id": "air"
+  },
+  {
+    "action_id": "special_n",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/special_n-air_full.json",
+    "status": "written",
+    "variant_id": "air_full"
+  },
+  {
+    "action_id": "special_n",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/special_n-from_shield.json",
+    "status": "written",
+    "variant_id": "from_shield"
+  },
+  {
+    "action_id": "special_up",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/special_up-ground.json",
+    "status": "written",
+    "variant_id": "ground"
+  },
+  {
+    "action_id": "special_side",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/special_side-ground.json",
+    "status": "written",
+    "variant_id": "ground"
+  },
+  {
+    "action_id": "special_down",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/special_down-ground.json",
+    "status": "written",
+    "variant_id": "ground"
+  },
+  {
+    "action_id": "throw_f",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/throw_f-from_grab.json",
+    "status": "written",
+    "variant_id": "from_grab"
+  },
+  {
+    "action_id": "throw_b",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/throw_b-from_grab.json",
+    "status": "written",
+    "variant_id": "from_grab"
+  },
+  {
+    "action_id": "throw_u",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/throw_u-from_grab.json",
+    "status": "written",
+    "variant_id": "from_grab"
+  },
+  {
+    "action_id": "throw_d",
+    "character_id": "kestrel",
+    "path": "runtime/contact/kestrel/throw_d-from_grab.json",
+    "status": "written",
+    "variant_id": "from_grab"
+  }
+]
